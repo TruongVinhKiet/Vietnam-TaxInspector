@@ -1,68 +1,81 @@
-# Hệ Thống Giám Sát Thuế - TaxInspector
+# 🇻🇳 Vietnam TaxInspector
+### AI-Powered Sovereign Tax Surveillance & Risk Analytics Suite
 
-TaxInspector là một dự án ứng dụng trí tuệ nhân tạo (Machine Learning) và trực quan hóa dữ liệu (Data Visualization) để hỗ trợ Cơ quan Thuế phát hiện hành vi gian lận (Fraud Detection), truy xuất chuỗi hóa đơn rủi ro (VAT Network) và cảnh báo nợ đọng (Delinquency Prediction).
+[![FastAPI](https://img.shields.io/badge/API-FastAPI-009688?style=flat&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
+[![PostgreSQL](https://img.shields.io/badge/DB-PostgreSQL-336791?style=flat&logo=postgresql&logoColor=white)](https://www.postgresql.org/)
+[![TailwindCSS](https://img.shields.io/badge/UI-TailwindCSS-06B6D4?style=flat&logo=tailwindcss&logoColor=white)](https://tailwindcss.com/)
 
-## Yêu cầu Hệ thống (Prerequisites)
-- **Python 3.9+** (Dành cho Backend)
-- **PostgreSQL 14+** (Dành cho Database)
-- **Trình duyệt Web hiện đại** (Chrome/Edge/Firefox)
-
----
-
-## 1. Khởi động Cơ sở Dữ liệu (Database)
-Nếu bạn đã khởi chạy file `.sql` ban đầu, bạn chỉ cần đảm bảo **Dịch vụ PostgreSQL đang chạy** (có thể check qua _pgAdmin_ hoặc ứng dụng _Services_ trên Windows).
-
-*Thông số mặc định trong dự án:*
-- Host/Port: `localhost:5432`
-- User/Pass: `postgres` / `Kiet2004`
-- Database: `TaxInspector`
+**Vietnam TaxInspector** là hệ thống phân tích dữ liệu thuế tiên tiến, kết hợp giữa Trí tuệ nhân tạo (Machine Learning) và Phân tích Đồ thị (Graph Analytics) nhằm hỗ trợ cơ quan Nhà nước trong việc phát hiện gian lận và tối ưu hóa quản lý nợ đọng thuế.
 
 ---
 
-## 2. Khởi động Backend (FastAPI Server)
+## 🌟 Tính Năng Cốt Lõi (Core Features)
 
-Backend chịu trách nhiệm cung cấp API Machine Learning, truy xuất Cơ sở dữ liệu và xử lý bảo mật JWT Auth.
+### 📊 1. Trung Tâm Giám Sát (Unified Dashboard)
+Giao diện quản lý tập trung hiển thị biến động doanh thu, chỉ số rủi ro hệ thống và các cảnh báo khẩn cấp theo thời gian thực từ 63 tỉnh thành.
 
-**Mở Terminal (khuyên dùng PowerShell hoặc CMD), di chuyển vào đúng thư mục Backend và chạy lệnh sau:**
+### 🛡️ 2. Chấm Điểm Rủi Ro (Fraud Scoring)
+Hệ thống **Security Analytical Suite** phân tích hành vi doanh nghiệp dựa trên hóa đơn điện tử và dòng tiền. Sử dụng các mô hình AI để gán nhãn mức độ nghi vấn rủi ro thuế (Thấp - Trung bình - Cao).
 
-```powershell
-# 1. Di chuyển vào thư mục Backend
-cd e:\TaxInspector\Backend
+### 🕸️ 3. Mạng Lưới Điều Tra (Forensic Network Mapping)
+Truy vết các chuỗi hóa đơn xoay vòng, công ty "ma" thông qua thuật toán đồ thị (Graph Algorithms). Phát hiện các cụm giao dịch bất thường trong mạng lưới hàng triệu mã số thuế.
 
-# 2. Kích hoạt môi trường ảo (Virtual Environment)
-.\venv\Scripts\activate
+### 📉 4. Dự Báo Nợ Đọng (Delinquency Prediction)
+Dự báo khả năng trễ hạn nộp thuế trong quý tới của doanh nghiệp bằng mô hình AI Sovereign v2.4, giúp cán bộ thuế chủ động trong việc đốc thúc và quản lý dòng tiền ngân sách.
 
-# 3. Chạy Server FastAPI với cổng 8000
+---
+
+## 📸 Hình Ảnh Giao Diện (Preview)
+
+| Dashboard | Mạng Lưới VAT |
+| :---: | :---: |
+| ![Dashboard](Frontend/Frontend_Example/dashboard.png) | ![VAT Graph](Frontend/Frontend_Example/Invoice_Graph.png) |
+
+| Chấm Điểm Rủi Ro | Dự Báo Nợ Đọng |
+| :---: | :---: |
+| ![Fraud Scoring](Frontend/Frontend_Example/Fraud_Scoring.png) | ![Delinquency](Frontend/Frontend_Example/Delinquency_Prediction.png) |
+
+---
+
+## 🛠️ Kiến Trúc Công Nghệ (Tech Stack)
+
+*   **Backend:** Python 3.9+, FastAPI, SQLAlchemy (ORM).
+*   **Database:** PostgreSQL (Lưu trữ quan hệ và dữ liệu hóa đơn).
+*   **Frontend:** HTML5, Vanilla JavaScript, TailwindCSS (Modern "Office White" Design System).
+*   **Analytics:** NetworkX (Xử lý đồ thị), Scikit-learn/XGBoost (Mô hình dự báo).
+
+---
+
+## 🚀 Hướng Dẫn Cài Đặt (Quick Start)
+
+### 1. Chuẩn bị Cơ sở dữ liệu
+Đảm bảo bạn đã cài đặt **PostgreSQL** và tạo một database tên là `TaxInspector`. Sử dụng file schema tại `Database/init_db.sql` (nếu có) để khởi tạo cấu trúc.
+
+### 2. Thiết lập Backend
+```bash
+cd Backend
+python -m venv venv
+source venv/bin/activate  # Trên Windows: .\venv\Scripts\activate
+pip install -r requirements.txt
 uvicorn app.main:app --reload --port 8000
 ```
-> **Trạng thái thành công:** Bạn sẽ thấy dòng chữ xanh lá hiển thị `Application startup complete.` Hãy thu nhỏ cửa sổ này lại (đừng tắt) để server tiếp tục chạy ngầm.
 
----
-
-## 3. Khởi động Frontend (Web Interface)
-
-Giao diện Web được build nguyên bản bằng CSS/JS thuần tốc độ cao. Bạn cần chạy một HTTP Server đơn giản để tránh các lỗi dính dáng tới tính năng "CORS - Bảo mật tên miền chép file".
-
-**Mở thêm 1 cửa sổ Terminal MỚI, di chuyển vào thư mục Frontend và chạy lệnh sau:**
-
-```powershell
-# 1. Di chuyển vào thư mục Frontend
-cd e:\TaxInspector\Frontend
-
-# 2. Khởi tạo một Web-Server nhẹ tại cổng 3000
+### 3. Khởi tạo Frontend
+Vì lý do bảo mật trình duyệt, hãy chạy một local server nhẹ:
+```bash
+cd Frontend
 python -m http.server 3000
 ```
-> **Trạng thái thành công:** Giao diện Command prompt sẽ báo đang Serving ở cổng 3000. Bạn cũng thu nhỏ (đừng tắt) cửa sổ này lại.
+Truy cập: **http://localhost:3000** để bắt đầu.
 
 ---
 
-## 4. Truy cập và Trải Nghiệm hệ thống
+## 🔒 Bảo Mật (Security)
+Dự án được thiết kế với các quy tắc bảo mật nghiêm ngặt:
+- Mã hóa mật khẩu PBKDF2.
+- Xác thực phiên làm việc bằng JWT (JSON Web Token).
+- Hệ thống `.gitignore` chặn các file cấu hình nhạy cảm `.env` chứa thông tin kết nối database.
 
-Sau khi cả 2 Terminal (Backend và Frontend) đều đang báo trạng thái chạy (Running):
-1. Mở trình duyệt bất kỳ.
-2. Truy cập vào địa chỉ: **[http://localhost:3000](http://localhost:3000)**
-3. Giao diện Đăng nhập cán bộ sẽ xuất hiện.
-
-### Gợi ý Account Test:
-- Bấm vào Tab **Đăng ký**, tạo một tài khoản (Ví dụ: Mã số `VTI-8888`, Mật khẩu `tax12345`).
-- Sử dụng tài khoản vừa tạo để **Đăng nhập** và truy cập vào Dashboard hệ thống!
+---
+**Phát triển bởi:** [TruongVinhKiet](https://github.com/TruongVinhKiet)
+*Dự án phục vụ mục đích nghiên cứu và demo giải pháp công nghệ số trong quản lý công.*
