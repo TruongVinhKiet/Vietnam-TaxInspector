@@ -1,0 +1,442 @@
+<!DOCTYPE html>
+
+<html class="light" lang="vi"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Vietnam Vietnam TaxInspector - Xác thực Hệ thống</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+          darkMode: "class",
+          theme: {
+            extend: {
+              "colors": {
+                      "on-tertiary-fixed-variant": "#6c391d",
+                      "on-tertiary-container": "#b97958",
+                      "on-surface": "#191c1d",
+                      "secondary": "#565f70",
+                      "on-error": "#ffffff",
+                      "surface-container-highest": "#e1e3e4",
+                      "inverse-surface": "#2e3132",
+                      "tertiary-fixed-dim": "#ffb691",
+                      "surface-container-high": "#e7e8e9",
+                      "secondary-container": "#d7e0f5",
+                      "tertiary": "#180500",
+                      "error-container": "#ffdad6",
+                      "surface-bright": "#f8f9fa",
+                      "secondary-fixed": "#dae3f8",
+                      "on-surface-variant": "#44474e",
+                      "primary": "#000a1e",
+                      "primary-container": "#002147",
+                      "error": "#ba1a1a",
+                      "surface-variant": "#e1e3e4",
+                      "on-error-container": "#93000a",
+                      "surface-tint": "#465f88",
+                      "tertiary-fixed": "#ffdbcb",
+                      "on-primary-fixed-variant": "#2d476f",
+                      "outline-variant": "#c4c6cf",
+                      "surface-dim": "#d9dadb",
+                      "surface": "#f8f9fa",
+                      "primary-fixed-dim": "#aec7f6",
+                      "on-tertiary": "#ffffff",
+                      "on-primary-container": "#708ab5",
+                      "secondary-fixed-dim": "#bec7db",
+                      "on-secondary": "#ffffff",
+                      "outline": "#74777f",
+                      "tertiary-container": "#3d1500",
+                      "on-secondary-container": "#5a6375",
+                      "inverse-on-surface": "#f0f1f2",
+                      "on-secondary-fixed": "#131c2b",
+                      "primary-fixed": "#d6e3ff",
+                      "background": "#f8f9fa",
+                      "surface-container-low": "#f3f4f5",
+                      "surface-container": "#edeeef",
+                      "surface-container-lowest": "#ffffff",
+                      "on-secondary-fixed-variant": "#3e4758",
+                      "on-background": "#191c1d",
+                      "inverse-primary": "#aec7f6",
+                      "on-primary": "#ffffff",
+                      "on-tertiary-fixed": "#341100",
+                      "on-primary-fixed": "#001b3d"
+              },
+              "borderRadius": {
+                      "DEFAULT": "0.125rem",
+                      "lg": "0.25rem",
+                      "xl": "0.5rem",
+                      "full": "0.75rem"
+              },
+              "fontFamily": {
+                      "headline": ["Inter", "sans-serif"],
+                      "body": ["Inter", "sans-serif"],
+                      "label": ["Inter", "sans-serif"]
+              }
+            },
+          },
+        }
+      </script>
+<style>
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        }
+        body { font-family: 'Inter', sans-serif; }
+        [x-cloak] { display: none !important; }
+
+        .auth-surface {
+            background: #f4f6f8;
+        }
+
+        .auth-card {
+            border: 1px solid rgba(116, 119, 127, 0.12);
+            backdrop-filter: blur(8px);
+        }
+
+        #forms-wrapper {
+            position: relative;
+            transition: height 280ms cubic-bezier(0.16, 1, 0.3, 1);
+        }
+
+        .auth-form {
+            width: 100%;
+            transition: opacity 220ms ease, transform 220ms ease;
+        }
+
+        .auth-control {
+            transition: border-color 200ms ease, box-shadow 200ms ease, transform 180ms ease, background-color 220ms ease;
+        }
+
+        .auth-control:focus {
+            transform: translateY(-1px);
+            box-shadow: 0 0 0 3px rgba(0, 33, 71, 0.15);
+        }
+
+        .auth-control.has-value {
+            background-color: #f8fbff;
+            border-color: rgba(70, 95, 136, 0.35);
+        }
+
+        .auth-control.is-typing {
+            box-shadow: 0 0 0 3px rgba(174, 199, 246, 0.4);
+        }
+
+        .auth-toast {
+            position: fixed;
+            top: 18px;
+            left: 50%;
+            transform: translate(-50%, -14px);
+            min-width: 290px;
+            max-width: 540px;
+            padding: 12px 16px;
+            border-radius: 12px;
+            font-size: 13px;
+            font-weight: 700;
+            letter-spacing: 0.01em;
+            box-shadow: 0 12px 30px rgba(2, 16, 43, 0.18);
+            opacity: 0;
+            pointer-events: none;
+            z-index: 90;
+            transition: opacity 220ms ease, transform 220ms ease;
+        }
+
+        .auth-toast.show {
+            opacity: 1;
+            transform: translate(-50%, 0);
+        }
+
+        .auth-toast-success {
+            background: #0e7a3c;
+            color: #ffffff;
+        }
+
+        .auth-toast-error {
+            background: #ba1a1a;
+            color: #ffffff;
+        }
+
+        .auth-success-panel {
+            border: 1px solid rgba(14, 122, 60, 0.28);
+            background: linear-gradient(135deg, rgba(14, 122, 60, 0.14), rgba(14, 122, 60, 0.06));
+            border-radius: 12px;
+            padding: 12px 14px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            opacity: 0;
+            transform: translateY(-6px);
+            pointer-events: none;
+            transition: opacity 240ms ease, transform 240ms ease;
+        }
+
+        .auth-success-panel.show {
+            opacity: 1;
+            transform: translateY(0);
+            pointer-events: auto;
+        }
+
+        .auth-success-chip {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 4px 8px;
+            border-radius: 9999px;
+            font-size: 10px;
+            font-weight: 800;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            color: #0f5a31;
+            background: rgba(222, 247, 233, 0.9);
+            border: 1px solid rgba(15, 90, 49, 0.12);
+        }
+
+
+    </style>
+<link rel="stylesheet" href="../css/global.css">
+
+<link rel="icon" type="image/png" href="../assets/logo.png">
+</head>
+<body class="auth-surface bg-surface text-on-surface min-h-screen flex items-center justify-center p-6 selection:bg-primary-container selection:text-white page-transition">
+<div id="auth-toast" class="auth-toast" aria-live="polite"></div>
+<!-- Auth Container -->
+<main class="w-full max-w-xl z-10 relative">
+<!-- Header Section -->
+<header class="text-center mb-10 flex flex-col items-center">
+<div class="mb-4">
+    <img src="../assets/logo.png" alt="TaxInspector Logo" class="w-16 h-16 object-contain" />
+</div>
+<h1 class="text-2xl font-black tracking-tighter text-primary-container font-headline uppercase mb-1">
+                Vietnam TaxInspector
+            </h1>
+<p class="text-sm font-medium text-on-surface-variant tracking-wide label-sm opacity-90">
+                Hệ thống Phân tích Rủi ro &amp; Giám sát Thuế
+            </p>
+</header>
+<!-- Authentication Card -->
+<div class="auth-card bg-surface-container-lowest shadow-[0_20px_40px_rgba(0,33,71,0.06)] rounded-xl p-8 transition-all duration-300">
+<!-- Tab Switcher (Segmented Control) -->
+<div class="flex p-1 bg-surface-container-low rounded-lg mb-8" id="tab-switcher">
+<button class="flex-1 py-2 text-sm font-bold rounded-md transition-all duration-200 bg-surface-container-lowest text-primary-container shadow-sm" id="tab-btn-login" onclick="switchTab('login')">
+                    Đăng nhập
+                </button>
+<button class="flex-1 py-2 text-sm font-medium rounded-md transition-all duration-200 text-on-surface-variant hover:text-on-surface" id="tab-btn-register" onclick="switchTab('register')">
+                    Đăng ký
+                </button>
+</div>
+<div id="register-success-panel" class="auth-success-panel mb-5 hidden" aria-live="polite">
+<div>
+<p class="text-[11px] font-extrabold tracking-[0.08em] uppercase text-[#0f5a31]">Đăng ký thành công</p>
+<p class="text-xs font-semibold text-[#0c3f24]" id="register-success-text">Tài khoản đã được tạo, đang chuyển sang đăng nhập.</p>
+</div>
+<span class="auth-success-chip">
+<span class="material-symbols-outlined text-[14px]" style="font-variation-settings: 'FILL' 1">verified</span>
+<span id="register-success-role">viewer</span>
+</span>
+</div>
+<!-- Forms Container -->
+<div id="forms-wrapper" class="relative">
+<!-- Login Form -->
+<form class="auth-form space-y-5 block" id="form-login">
+<div class="space-y-1">
+<label class="block text-[10px] font-extrabold text-on-surface-variant uppercase tracking-widest px-1">Mã số cán bộ</label>
+<div class="relative">
+<input id="login-badge" class="w-full bg-surface-container-lowest border border-outline-variant/30 rounded-lg py-3 px-4 text-sm focus:outline-none focus:ring-2 focus:ring-primary-container focus:border-transparent transition-all placeholder:text-outline/50" placeholder="VTI-XXXXXX" type="text"/>
+</div>
+</div>
+<div class="space-y-1">
+<div class="flex justify-between items-center px-1">
+<label class="block text-[10px] font-extrabold text-on-surface-variant uppercase tracking-widest">Mật khẩu</label>
+<a class="text-[10px] font-bold text-on-primary-container hover:text-primary-container transition-colors uppercase tracking-widest" href="#">Quên mật khẩu?</a>
+</div>
+<div class="relative">
+<input id="login-pwd" class="w-full bg-surface-container-lowest border border-outline-variant/30 rounded-lg py-3 px-4 text-sm focus:outline-none focus:ring-2 focus:ring-primary-container focus:border-transparent transition-all placeholder:text-outline/50" placeholder="••••••••" type="password"/>
+</div>
+</div>
+<button id="login-btn" class="w-full mt-6 bg-primary-container text-white font-bold py-4 rounded-lg flex items-center justify-center gap-2 hover:bg-primary transition-all active:scale-[0.98] shadow-lg shadow-primary-container/10" type="submit">
+<span>Đăng nhập hệ thống</span>
+<span class="material-symbols-outlined text-[18px]">login</span>
+</button>
+</form>
+<!-- Register Form (Hidden by default) -->
+<form class="auth-form space-y-4 hidden" id="form-register">
+<div class="space-y-1">
+<label class="block text-[10px] font-extrabold text-on-surface-variant uppercase tracking-widest px-1">Họ và tên</label>
+<input id="reg-fullname" class="w-full bg-surface-container-lowest border border-outline-variant/30 rounded-lg py-3 px-4 text-sm focus:ring-2 focus:ring-primary-container focus:outline-none" placeholder="Nhập họ và tên" type="text"/>
+</div>
+<div class="grid grid-cols-2 gap-4">
+<div class="space-y-1">
+<label class="block text-[10px] font-extrabold text-on-surface-variant uppercase tracking-widest px-1">Mã số cán bộ</label>
+<input id="reg-badge" class="w-full bg-surface-container-lowest border border-outline-variant/30 rounded-lg py-3 px-4 text-sm focus:ring-2 focus:ring-primary-container focus:outline-none" placeholder="VTI-XXXX" type="text"/>
+</div>
+<div class="space-y-1">
+<label class="block text-[10px] font-extrabold text-on-surface-variant uppercase tracking-widest px-1">Email công vụ</label>
+<input id="reg-email" class="w-full bg-surface-container-lowest border border-outline-variant/30 rounded-lg py-3 px-4 text-sm focus:ring-2 focus:ring-primary-container focus:outline-none" placeholder="@gdt.gov.vn" type="email"/>
+</div>
+</div>
+<div class="grid grid-cols-2 gap-4">
+<div class="space-y-1">
+<label class="block text-[10px] font-extrabold text-on-surface-variant uppercase tracking-widest px-1">Đơn vị công tác</label>
+<select id="reg-dept" class="w-full bg-surface-container-lowest border border-outline-variant/30 rounded-lg py-3 px-4 text-sm focus:ring-2 focus:ring-primary-container focus:outline-none text-slate-600">
+    <option value="">Chọn đơn vị...</option>
+    <option value="Tổng cục Thuế">Tổng cục Thuế</option>
+    <option value="Cục Thuế TP. Hà Nội">Cục Thuế TP. Hà Nội</option>
+    <option value="Cục Thuế TP. HCM">Cục Thuế TP. HCM</option>
+    <option value="Chi cục Thuế Quận 1">Chi cục Thuế Quận 1</option>
+</select>
+</div>
+<div class="space-y-1">
+<label class="block text-[10px] font-extrabold text-on-surface-variant uppercase tracking-widest px-1">Chức vụ / Vai trò</label>
+<select id="reg-role" class="w-full bg-surface-container-lowest border border-outline-variant/30 rounded-lg py-3 px-4 text-sm focus:ring-2 focus:ring-primary-container focus:outline-none text-slate-600">
+    <option value="viewer">Chuyên viên (Chỉ xem)</option>
+    <option value="analyst">C.V Phân tích dữ liệu</option>
+    <option value="inspector">Thanh tra viên</option>
+    <option value="admin">Quản trị cấp cao</option>
+</select>
+</div>
+</div>
+<div class="grid grid-cols-2 gap-4">
+    <div class="space-y-1">
+    <label class="block text-[10px] font-extrabold text-on-surface-variant uppercase tracking-widest px-1">Nhập mật khẩu</label>
+    <input id="reg-pwd" class="w-full bg-surface-container-lowest border border-outline-variant/30 rounded-lg py-3 px-4 text-sm focus:ring-2 focus:ring-primary-container focus:outline-none" placeholder="Nhập mật khẩu" type="password"/>
+    </div>
+    <div class="space-y-1">
+    <label class="block text-[10px] font-extrabold text-on-surface-variant uppercase tracking-widest px-1">Xác nhận mật khẩu</label>
+    <input id="reg-pwd2" class="w-full bg-surface-container-lowest border border-outline-variant/30 rounded-lg py-3 px-4 text-sm focus:ring-2 focus:ring-primary-container focus:outline-none" placeholder="Xác nhận mật khẩu" type="password"/>
+    </div>
+</div>
+<button id="register-btn" class="w-full mt-4 bg-primary-container text-white font-bold py-4 rounded-lg flex items-center justify-center gap-2 hover:bg-primary transition-all active:scale-[0.98]" type="submit">
+<span>Tạo tài khoản cán bộ</span>
+<span class="material-symbols-outlined text-[18px]">verified_user</span>
+</button>
+</form>
+</div>
+</div>
+<!-- Footer Information -->
+<footer class="mt-8 flex flex-col items-center gap-3">
+<div class="flex items-center gap-2 px-3 py-1.5 bg-surface-container-high rounded-full">
+<span class="material-symbols-outlined text-sm text-on-surface-variant" style="font-variation-settings: 'FILL' 1;">lock</span>
+<span class="text-[10px] font-black text-on-surface-variant uppercase tracking-[0.1em]">Mạng nội bộ - Bảo mật Cấp 3</span>
+</div>
+<div class="flex gap-4">
+<span class="text-[10px] font-bold text-outline uppercase tracking-wider">Phiên bản 2.4.0-STABLE</span>
+<span class="text-[10px] font-bold text-outline uppercase tracking-wider">© 2024 Bộ Tài Chính</span>
+</div>
+</footer>
+</main>
+<script>
+        const AUTH_TAB_ANIMATION_MS = 240;
+
+        function setTabState(activeTab) {
+            const loginBtn = document.getElementById('tab-btn-login');
+            const registerBtn = document.getElementById('tab-btn-register');
+
+            if (activeTab === 'login') {
+                loginBtn.classList.add('bg-surface-container-lowest', 'text-primary-container', 'shadow-sm', 'font-bold');
+                loginBtn.classList.remove('text-on-surface-variant', 'font-medium');
+
+                registerBtn.classList.remove('bg-surface-container-lowest', 'text-primary-container', 'shadow-sm', 'font-bold');
+                registerBtn.classList.add('text-on-surface-variant', 'font-medium');
+            } else {
+                registerBtn.classList.add('bg-surface-container-lowest', 'text-primary-container', 'shadow-sm', 'font-bold');
+                registerBtn.classList.remove('text-on-surface-variant', 'font-medium');
+
+                loginBtn.classList.remove('bg-surface-container-lowest', 'text-primary-container', 'shadow-sm', 'font-bold');
+                loginBtn.classList.add('text-on-surface-variant', 'font-medium');
+            }
+        }
+
+        function switchTab(target) {
+            const loginForm = document.getElementById('form-login');
+            const registerForm = document.getElementById('form-register');
+            const formsWrapper = document.getElementById('forms-wrapper');
+
+            const currentTab = loginForm.classList.contains('hidden') ? 'register' : 'login';
+            if (target === currentTab) return;
+
+            const showForm = target === 'login' ? loginForm : registerForm;
+            const hideForm = target === 'login' ? registerForm : loginForm;
+
+            let startHeight = 0;
+            if (formsWrapper) {
+                startHeight = formsWrapper.offsetHeight;
+                // Lock height BEFORE making changes
+                formsWrapper.style.height = `${startHeight}px`;
+            }
+
+            // Make hideForm absolute so it doesn't take up document flow space while animating
+            hideForm.style.position = 'absolute';
+            hideForm.style.top = '0';
+            hideForm.style.left = '0';
+            hideForm.style.width = '100%';
+
+            // Remove hidden to calculate accurate height for showForm
+            showForm.classList.remove('hidden');
+            showForm.classList.add('block');
+
+            if (formsWrapper) {
+                const nextHeight = showForm.offsetHeight;
+                
+                // Allow reflow
+                void formsWrapper.offsetWidth;
+
+                requestAnimationFrame(() => {
+                    formsWrapper.style.height = `${nextHeight}px`;
+                });
+            }
+
+            setTabState(target);
+            
+            // Animation logic extracted from animateForms to avoid duplicate display toggles
+            hideForm.animate(
+                [
+                    { opacity: 1, transform: 'translateY(0px)' },
+                    { opacity: 0, transform: 'translateY(-8px)' }
+                ],
+                {
+                    duration: AUTH_TAB_ANIMATION_MS,
+                    easing: 'cubic-bezier(0.16, 1, 0.3, 1)',
+                    fill: 'forwards'
+                }
+            );
+
+            showForm.animate(
+                [
+                    { opacity: 0, transform: 'translateY(10px) scale(0.99)' },
+                    { opacity: 1, transform: 'translateY(0px) scale(1)' }
+                ],
+                {
+                    duration: AUTH_TAB_ANIMATION_MS,
+                    easing: 'cubic-bezier(0.16, 1, 0.3, 1)',
+                    fill: 'forwards'
+                }
+            );
+
+            window.setTimeout(() => {
+                hideForm.classList.remove('block');
+                hideForm.classList.add('hidden');
+                hideForm.style.position = '';
+                hideForm.style.top = '';
+                hideForm.style.left = '';
+                hideForm.style.width = '';
+                // Clean up fixed height so it adapts naturally to screen size changes
+                formsWrapper.style.height = 'auto';
+            }, AUTH_TAB_ANIMATION_MS);
+        }
+
+        window.switchTab = switchTab;
+
+        document.addEventListener('DOMContentLoaded', () => {
+            const formsWrapper = document.getElementById('forms-wrapper');
+            const loginForm = document.getElementById('form-login');
+
+            if (formsWrapper) {
+                formsWrapper.style.height = 'auto';
+            }
+
+            setTabState('login');
+        });
+    </script>
+<script src="../js/api.js"></script>
+<script src="../js/login.js"></script>
+</body></html>

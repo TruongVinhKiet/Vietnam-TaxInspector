@@ -1,0 +1,344 @@
+<!DOCTYPE html>
+
+<html class="light" lang="vi"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Vietnam TaxInspector - Bản đồ Mạng lưới Điều tra</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "tertiary-fixed": "#ffdbcb",
+                        "secondary-container": "#d7e0f5",
+                        "surface-tint": "#465f88",
+                        "secondary-fixed": "#dae3f8",
+                        "tertiary-container": "#3d1500",
+                        "error": "#ba1a1a",
+                        "tertiary": "#180500",
+                        "surface-container-highest": "#e1e3e4",
+                        "inverse-surface": "#2e3132",
+                        "surface-container-lowest": "#ffffff",
+                        "surface-bright": "#f8f9fa",
+                        "surface-container-high": "#e7e8e9",
+                        "surface-container-low": "#f3f4f5",
+                        "outline-variant": "#c4c6cf",
+                        "on-primary-container": "#708ab5",
+                        "on-secondary-fixed": "#131c2b",
+                        "error-container": "#ffdad6",
+                        "background": "#f8f9fa",
+                        "primary-fixed": "#d6e3ff",
+                        "on-tertiary": "#ffffff",
+                        "surface-variant": "#e1e3e4",
+                        "outline": "#74777f",
+                        "surface-container": "#edeeef",
+                        "on-surface-variant": "#44474e",
+                        "inverse-on-surface": "#f0f1f2",
+                        "primary-container": "#002147",
+                        "on-secondary-fixed-variant": "#3e4758",
+                        "on-error-container": "#93000a",
+                        "on-background": "#191c1d",
+                        "tertiary-fixed-dim": "#ffb691",
+                        "surface": "#f8f9fa",
+                        "primary-fixed-dim": "#aec7f6",
+                        "inverse-primary": "#aec7f6",
+                        "secondary": "#565f70",
+                        "on-tertiary-fixed": "#341100",
+                        "on-tertiary-fixed-variant": "#6c391d",
+                        "on-secondary": "#ffffff",
+                        "on-primary": "#ffffff",
+                        "primary": "#000a1e",
+                        "on-error": "#ffffff",
+                        "surface-dim": "#d9dadb",
+                        "secondary-fixed-dim": "#bec7db",
+                        "on-primary-fixed": "#001b3d",
+                        "on-surface": "#191c1d",
+                        "on-tertiary-container": "#b97958",
+                        "on-primary-fixed-variant": "#2d476f",
+                        "on-secondary-container": "#5a6375"
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "0.125rem",
+                        "lg": "0.25rem",
+                        "xl": "0.5rem",
+                        "full": "0.75rem"
+                    },
+                    "fontFamily": {
+                        "headline": ["Inter"],
+                        "body": ["Inter"],
+                        "label": ["Inter"]
+                    }
+                },
+            },
+        }
+    </script>
+<style>
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        }
+        body { font-family: 'Inter', sans-serif; }
+        .node-pulse { animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .7; } }
+        .circular-path { stroke-dasharray: 8; animation: dash 20s linear infinite; }
+        @keyframes dash { to { stroke-dashoffset: -1000; } }
+    </style>
+<link rel="stylesheet" href="../css/global.css">
+
+<link rel="icon" type="image/png" href="../assets/logo.png">
+</head>
+<body class="bg-surface-container-low text-on-surface overflow-hidden">
+<!-- SideNavBar (Shared Component JSON Mapping) -->
+<aside class="fixed left-0 top-0 bottom-0 w-64 bg-slate-900 dark:bg-[#000a1e] text-white font-inter tracking-tight shadow-2xl flex flex-col py-6 z-50">
+<div class="px-6 mb-10 flex items-center gap-3">
+<div class="w-10 h-10 bg-white/10 rounded flex items-center justify-center p-1.5 shadow-inner">
+<img src="../assets/logo.png" alt="TaxInspector Logo" class="w-full h-full object-contain rounded" />
+</div>
+<div>
+<h1 class="text-xl font-bold tracking-tighter text-white">TaxInspector</h1>
+<p class="text-[10px] uppercase tracking-widest text-slate-400 font-semibold" id="sidebar-subtitle">Hệ thống Giám sát</p>
+</div>
+</div>
+<nav class="flex-1 space-y-1 px-2" id="sidebar-nav">
+<!-- Items will be styled dynamically via JS -->
+<a class="nav-item text-slate-400 hover:text-white transition-colors hover:bg-white/5 flex items-center gap-3 px-4 py-3 scale-95 active:scale-90 transition-transform rounded-lg" href="dashboard.html" data-page="dashboard.html" data-title="Tổng quan hệ thống">
+<span class="material-symbols-outlined">dashboard</span>
+<span class="text-sm">Tổng quan</span>
+</a>
+<a class="nav-item text-slate-400 hover:text-white transition-colors hover:bg-white/5 flex items-center gap-3 px-4 py-3 scale-95 active:scale-90 transition-transform rounded-lg" href="fraud.html" data-page="fraud.html" data-title="Chấm điểm Rủi ro Thuế">
+<span class="material-symbols-outlined">security</span>
+<span class="text-sm">Chấm điểm Rủi ro</span>
+</a>
+<a class="nav-item text-slate-400 hover:text-white transition-colors hover:bg-white/5 flex items-center gap-3 px-4 py-3 scale-95 active:scale-90 transition-transform rounded-lg" href="graph.html" data-page="graph.html" data-title="Phân tích Mạng lưới VAT">
+<span class="material-symbols-outlined">hub</span>
+<span class="text-sm">Mạng lưới VAT</span>
+</a>
+<a class="nav-item text-slate-400 hover:text-white transition-colors hover:bg-white/5 flex items-center gap-3 px-4 py-3 scale-95 active:scale-90 transition-transform rounded-lg" href="delinquency.html" data-page="delinquency.html" data-title="Dự báo Nợ đọng">
+<span class="material-symbols-outlined">trending_down</span>
+<span class="text-sm">Dự báo Nợ đọng</span>
+</a>
+</nav>
+<div class="mt-auto px-6 pt-6 border-t border-white/5">
+<div class="flex items-center gap-3 p-2 rounded-lg bg-white/5">
+<div class="w-8 h-8 rounded bg-primary-fixed-dim/20 flex items-center justify-center">
+<span class="material-symbols-outlined text-primary-fixed-dim text-sm" style="font-variation-settings: 'FILL' 1;">admin_panel_settings</span>
+</div>
+<div id="user-profile-badge">
+<p class="text-xs font-bold" id="user-full-name">Admin Profile</p>
+<p class="text-[10px] text-slate-500" id="user-current-role">Quản trị viên</p>
+</div>
+</div>
+</div>
+</aside>
+<!-- Main Content Area -->
+<main class="ml-64 flex flex-col h-screen">
+<!-- TopAppBar (Shared Component JSON Mapping) -->
+<header class="sticky top-0 z-40 bg-white/85 dark:bg-[#002147]/85 backdrop-blur-md shadow-sm flex items-center justify-between px-8 h-16 font-inter text-sm border-b border-surface-container-high/50">
+<div class="flex items-center gap-6">
+<!-- Breadcrumbs -->
+<nav class="flex items-center space-x-2 text-xs font-medium" id="header-breadcrumb">
+<span class="text-slate-400">Ứng dụng</span>
+<span class="material-symbols-outlined text-[14px] text-slate-300">chevron_right</span>
+<span class="text-primary-container font-bold" id="breadcrumb-current">Tổng quan hệ thống</span>
+</nav>
+</div>
+<div class="flex items-center gap-8">
+<div class="flex items-center gap-3 bg-surface-container-low px-4 py-1.5 rounded-full border border-outline-variant/10">
+<span class="material-symbols-outlined text-slate-400 text-lg">search</span>
+<input class="bg-transparent border-none focus:ring-0 text-xs w-48 text-on-surface" placeholder="Tra cứu nhanh..." type="text"/>
+</div>
+<div class="flex items-center gap-4 border-l border-slate-200 pl-4">
+<button class="relative p-1 text-slate-500 hover:text-primary-container transition-colors">
+<span class="material-symbols-outlined">notifications</span>
+<span class="absolute top-0 right-0 w-2 h-2 bg-error rounded-full"></span>
+</button>
+<button class="p-1 text-slate-500 hover:text-primary-container transition-colors">
+<span class="material-symbols-outlined">settings</span>
+</button>
+</div>
+</div>
+</header>
+<!-- Breadcrumbs & Tổng quan Header -->
+<div class="px-10 py-6 bg-white border-b border-surface-container">
+<div class="flex items-center gap-2 text-[10px] font-bold tracking-widest text-slate-400 uppercase mb-2">
+<span>Tổng quan</span>
+<span class="material-symbols-outlined text-[10px]" data-icon="chevron_right">chevron_right</span>
+<span>Chấm điểm Rủi ro</span>
+<span class="material-symbols-outlined text-[10px]" data-icon="chevron_right">chevron_right</span>
+<span class="text-primary-container">Mạng lưới VAT</span>
+</div>
+<div class="flex justify-between items-end">
+<div>
+<h2 class="text-3xl font-black text-primary tracking-tighter -ml-0.5">Bản đồ Mạng lưới Điều tra</h2>
+<p class="text-on-surface-variant text-sm mt-1">Phân tích chuyên sâu cụm hóa đơn xoay vòng cho Hồ sơ #VN-7729-FO</p>
+</div>
+<div class="flex gap-2">
+<button class="px-4 py-2 bg-surface-container-high text-on-surface text-xs font-bold rounded-lg uppercase tracking-wider flex items-center gap-2">
+<span class="material-symbols-outlined text-sm" data-icon="download">download</span> Xuất Báo Cáo
+                    </button>
+<button class="px-4 py-2 bg-primary-container text-white text-xs font-bold rounded-lg uppercase tracking-wider flex items-center gap-2 shadow-lg shadow-primary-container/20">
+<span class="material-symbols-outlined text-sm" data-icon="flag">flag</span> Đánh dấu rủi ro
+                    </button>
+</div>
+</div>
+</div>
+<!-- Investigation Canvas Section -->
+<div class="flex-1 flex overflow-hidden">
+<!-- Graph Canvas -->
+<div id="mynetwork" class="flex-1 relative bg-slate-950 flex flex-col">
+<div class="absolute inset-0 opacity-20 pointer-events-none" style="background-image: radial-gradient(#334155 1px, transparent 1px); background-size: 40px 40px;"></div>
+<!-- Graph Content (SVG simulation) -->
+<div class="flex-1 relative overflow-hidden flex items-center justify-center">
+<div class="w-full h-full relative">
+<!-- Connecting Lines -->
+<svg class="absolute inset-0 w-full h-full">
+<!-- Circular Paths (Red-dashed) -->
+<path class="circular-path" d="M400 300 Q 500 150 600 300" fill="none" stroke="#ba1a1a" stroke-dasharray="8" stroke-width="2"></path>
+<path class="circular-path" d="M600 300 Q 500 450 400 300" fill="none" stroke="#ba1a1a" stroke-dasharray="8" stroke-width="2"></path>
+<!-- Normal Paths -->
+<line stroke="#334155" stroke-width="1.5" x1="400" x2="200" y1="300" y2="450"></line>
+<line stroke="#334155" stroke-width="1.5" x1="600" x2="800" y1="300" y2="200"></line>
+</svg>
+<!-- Central Cluster Node 1 -->
+<div class="absolute top-[260px] left-[350px] group cursor-pointer">
+<div class="w-24 h-24 bg-primary-container border-2 border-white/20 rounded-full flex flex-col items-center justify-center shadow-2xl relative">
+<div class="absolute -inset-2 border border-white/5 rounded-full node-pulse"></div>
+<span class="material-symbols-outlined text-white text-3xl mb-1" data-icon="factory">factory</span>
+<span class="text-[8px] text-white/70 font-bold uppercase tracking-tighter">CTY SX HÀ NỘI</span>
+</div>
+</div>
+<!-- Central Cluster Node 2 -->
+<div class="absolute top-[260px] left-[550px] group cursor-pointer scale-110">
+<div class="w-24 h-24 bg-[#ba1a1a] border-4 border-white/30 rounded-full flex flex-col items-center justify-center shadow-2xl relative">
+<div class="absolute -inset-4 border-2 border-[#ba1a1a]/30 rounded-full node-pulse"></div>
+<span class="material-symbols-outlined text-white text-3xl mb-1" data-icon="corporate_fare" style="font-variation-settings: 'FILL' 1;">corporate_fare</span>
+<span class="text-[8px] text-white font-black uppercase tracking-tighter">CHỦ THỂ VỎ BỌC</span>
+</div>
+</div>
+<!-- Supporting Node 1 -->
+<div class="absolute top-[420px] left-[150px] group cursor-pointer opacity-60">
+<div class="w-16 h-16 bg-slate-800 border border-white/10 rounded-full flex flex-col items-center justify-center">
+<span class="material-symbols-outlined text-slate-300 text-xl" data-icon="store">store</span>
+<span class="text-[6px] text-slate-400 font-medium uppercase mt-1">ĐẠI LÝ BÁN LẺ</span>
+</div>
+</div>
+<!-- Supporting Node 2 -->
+<div class="absolute top-[150px] left-[780px] group cursor-pointer opacity-60">
+<div class="w-16 h-16 bg-slate-800 border border-white/10 rounded-full flex flex-col items-center justify-center">
+<span class="material-symbols-outlined text-slate-300 text-xl" data-icon="local_shipping">local_shipping</span>
+<span class="text-[6px] text-slate-400 font-medium uppercase mt-1">VẬN TẢI LOGISTICS</span>
+</div>
+</div>
+</div>
+<!-- Magnification Badge -->
+<div class="absolute top-6 left-6 px-3 py-1.5 bg-white/10 backdrop-blur-md rounded-lg border border-white/10 flex items-center gap-3">
+<div class="flex items-center gap-1.5">
+<div class="w-2 h-2 rounded-full bg-[#ba1a1a] animate-ping"></div>
+<span class="text-[10px] text-white font-bold uppercase tracking-widest">Live Investigation</span>
+</div>
+<div class="w-px h-3 bg-white/20"></div>
+<span class="text-[10px] text-slate-300 font-mono tracking-tighter">FOV: 400% Zoom Cluster-A</span>
+</div>
+<!-- Legend Overlay -->
+<div class="absolute bottom-32 left-6 space-y-2">
+<div class="flex items-center gap-2 text-[10px] text-slate-400 font-bold uppercase">
+<div class="w-3 h-0.5 bg-slate-500"></div> Luồng bình thường
+                        </div>
+<div class="flex items-center gap-2 text-[10px] text-[#ba1a1a] font-bold uppercase">
+<div class="w-3 h-0.5 bg-[#ba1a1a] border-t border-dashed"></div> Luồng xoay vòng (Circular)
+                        </div>
+</div>
+</div>
+<!-- Time-Slider Filter -->
+<div class="h-24 bg-slate-900 border-t border-white/5 px-8 flex items-center gap-8">
+<div class="flex flex-col">
+<span class="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-1">Timeline Axis</span>
+<div class="flex items-center gap-4">
+<button class="p-1 hover:bg-white/5 rounded"><span class="material-symbols-outlined text-white text-lg" data-icon="play_arrow">play_arrow</span></button>
+<span class="text-xs text-white font-mono">2023 Q3 - 2024 Q1</span>
+</div>
+</div>
+<div class="flex-1 relative pt-4">
+<div class="h-1 bg-slate-800 w-full rounded-full overflow-hidden">
+<div class="absolute h-full bg-primary-fixed-dim w-1/3 left-1/4 rounded-full"></div>
+</div>
+<div class="absolute top-2 left-1/4 -translate-x-1/2 w-4 h-4 bg-white rounded-full border-4 border-primary-container shadow-lg shadow-white/10 cursor-pointer"></div>
+<div class="absolute top-2 left-7/12 -translate-x-1/2 w-4 h-4 bg-white rounded-full border-4 border-primary-container shadow-lg shadow-white/10 cursor-pointer"></div>
+<div class="flex justify-between mt-3 px-2">
+<span class="text-[8px] text-slate-600 font-bold">JAN</span>
+<span class="text-[8px] text-slate-600 font-bold">FEB</span>
+<span class="text-[8px] text-slate-600 font-bold">MAR</span>
+<span class="text-[8px] text-slate-500 font-bold">APR</span>
+<span class="text-[8px] text-slate-500 font-bold">MAY</span>
+<span class="text-[8px] text-slate-300 font-black">JUN</span>
+<span class="text-[8px] text-slate-300 font-black">JUL</span>
+<span class="text-[8px] text-slate-500 font-bold">AUG</span>
+<span class="text-[8px] text-slate-500 font-bold">SEP</span>
+</div>
+</div>
+</div>
+</div>
+<!-- Right Forensic Panel -->
+<aside class="fixed right-0 top-16 h-[calc(100vh-4rem)] w-96 bg-white border-l border-surface-container flex flex-col shadow-xl z-30">
+<div class="px-6 py-4 border-b border-surface-container">
+<p class="text-[10px] font-black uppercase text-slate-400 tracking-widest mb-1">PHÂN TÍCH GIAO DỊCH</p>
+</div>
+<div class="p-6 text-center border-b border-surface-container bg-surface-container-low">
+<div class="flex justify-between items-center mb-2">
+<span class="text-[10px] font-black uppercase text-error tracking-widest">TỔNG GIÁ TRỊ NGHI VẤN</span>
+<span class="bg-error text-white text-[10px] font-black px-2 py-0.5 rounded uppercase">HIGH ALERT</span>
+</div>
+<h3 class="text-2xl font-black tracking-tighter text-error">15.000.000.000 VNĐ</h3>
+<p class="text-xs text-error font-medium italic mt-2">Bao gồm 42 hóa đơn không phát sinh hàng hóa thật được luân chuyển.</p>
+</div>
+<div class="px-6 py-4 border-b border-surface-container flex justify-between items-center bg-white">
+<p class="text-[10px] font-black uppercase text-slate-700 tracking-widest">NHẬT KÝ TRUY VẾT</p>
+<span class="text-[10px] text-slate-400 font-bold cursor-pointer hover:text-primary">Lọc theo rủi ro ▼</span>
+</div>
+<div class="flex-1 overflow-y-auto px-6 py-4 space-y-4 bg-white">
+<div class="relative pl-4 border-l-2 border-error">
+<div class="absolute -left-[5px] top-1 w-2 h-2 rounded-full bg-error"></div>
+<div class="flex justify-between items-start mb-1">
+<p class="text-[10px] font-mono text-slate-500 font-bold">2024-06-12 14:22:00</p>
+<p class="text-[10px] font-bold text-error uppercase">CRITICAL</p>
+</div>
+<p class="text-sm font-bold text-primary-container leading-tight">Hóa đơn số #INV-00982-A</p>
+<p class="text-xs text-on-surface-variant mt-1">Phát hiện dòng tiền quay vòng từ <span class="font-bold">Shell Corp X</span> về lại <span class="font-bold">Cty SX Hà Nội</span> trong vòng 48h.</p>
+<p class="text-xs text-slate-500 italic bg-slate-50 border border-slate-100 p-2 rounded mt-2">"Forensic Note: Không có dữ liệu định vị phương tiện vận tải tương ứng với thời điểm xuất kho."</p>
+</div>
+</div>
+<div class="p-4 bg-white border-t border-surface-container flex gap-2">
+<button class="flex-1 py-3 bg-surface-container border border-outline-variant/30 rounded-lg text-xs font-black uppercase tracking-widest text-[#002147] transition-all hover:bg-surface-container-high">YÊU CẦU GIẢI TRÌNH</button>
+<button class="flex-1 py-3 bg-[#000a1e] text-white rounded-lg text-xs font-black uppercase tracking-widest transition-all hover:bg-primary-container shadow-lg">NIÊM PHONG HỒ SƠ</button>
+</div>
+</aside>
+</div>
+</main>
+<script type="text/javascript" src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
+<script src="../js/api.js"></script>
+<script src="../js/graph.js"></script>
+<script>
+document.addEventListener("DOMContentLoaded", function() {
+    const currentPage = window.location.pathname.split("/").pop() || 'dashboard.html';
+    const navItems = document.querySelectorAll('#sidebar-nav .nav-item');
+    let pageTitle = "Hệ thống Giám sát";
+
+    navItems.forEach(item => {
+        if (item.getAttribute('data-page') === currentPage) {
+            item.classList.remove('text-slate-400', 'hover:bg-white/5');
+            item.classList.add('bg-white/10', 'text-white', 'font-semibold');
+            pageTitle = item.getAttribute('data-title');
+        }
+    });
+
+    const breadcrumbCurrent = document.getElementById('breadcrumb-current');
+    if (breadcrumbCurrent) breadcrumbCurrent.textContent = pageTitle;
+    const sidebarSubtitle = document.getElementById('sidebar-subtitle');
+    if (sidebarSubtitle) sidebarSubtitle.textContent = pageTitle;
+});
+</script>
+</body></html>

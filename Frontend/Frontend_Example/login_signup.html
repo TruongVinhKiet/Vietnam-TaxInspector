@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+
+<html class="light" lang="vi"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Vietnam TaxInspector - Xác thực Hệ thống</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+          darkMode: "class",
+          theme: {
+            extend: {
+              "colors": {
+                      "on-tertiary-fixed-variant": "#6c391d",
+                      "on-tertiary-container": "#b97958",
+                      "on-surface": "#191c1d",
+                      "secondary": "#565f70",
+                      "on-error": "#ffffff",
+                      "surface-container-highest": "#e1e3e4",
+                      "inverse-surface": "#2e3132",
+                      "tertiary-fixed-dim": "#ffb691",
+                      "surface-container-high": "#e7e8e9",
+                      "secondary-container": "#d7e0f5",
+                      "tertiary": "#180500",
+                      "error-container": "#ffdad6",
+                      "surface-bright": "#f8f9fa",
+                      "secondary-fixed": "#dae3f8",
+                      "on-surface-variant": "#44474e",
+                      "primary": "#000a1e",
+                      "primary-container": "#002147",
+                      "error": "#ba1a1a",
+                      "surface-variant": "#e1e3e4",
+                      "on-error-container": "#93000a",
+                      "surface-tint": "#465f88",
+                      "tertiary-fixed": "#ffdbcb",
+                      "on-primary-fixed-variant": "#2d476f",
+                      "outline-variant": "#c4c6cf",
+                      "surface-dim": "#d9dadb",
+                      "surface": "#f8f9fa",
+                      "primary-fixed-dim": "#aec7f6",
+                      "on-tertiary": "#ffffff",
+                      "on-primary-container": "#708ab5",
+                      "secondary-fixed-dim": "#bec7db",
+                      "on-secondary": "#ffffff",
+                      "outline": "#74777f",
+                      "tertiary-container": "#3d1500",
+                      "on-secondary-container": "#5a6375",
+                      "inverse-on-surface": "#f0f1f2",
+                      "on-secondary-fixed": "#131c2b",
+                      "primary-fixed": "#d6e3ff",
+                      "background": "#f8f9fa",
+                      "surface-container-low": "#f3f4f5",
+                      "surface-container": "#edeeef",
+                      "surface-container-lowest": "#ffffff",
+                      "on-secondary-fixed-variant": "#3e4758",
+                      "on-background": "#191c1d",
+                      "inverse-primary": "#aec7f6",
+                      "on-primary": "#ffffff",
+                      "on-tertiary-fixed": "#341100",
+                      "on-primary-fixed": "#001b3d"
+              },
+              "borderRadius": {
+                      "DEFAULT": "0.125rem",
+                      "lg": "0.25rem",
+                      "xl": "0.5rem",
+                      "full": "0.75rem"
+              },
+              "fontFamily": {
+                      "headline": ["Inter", "sans-serif"],
+                      "body": ["Inter", "sans-serif"],
+                      "label": ["Inter", "sans-serif"]
+              }
+            },
+          },
+        }
+      </script>
+<style>
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        }
+        body { font-family: 'Inter', sans-serif; }
+        [x-cloak] { display: none !important; }
+    </style>
+</head>
+<body class="bg-surface text-on-surface min-h-screen flex items-center justify-center p-6 selection:bg-primary-container selection:text-white">
+<!-- Auth Container -->
+<main class="w-full max-w-md">
+<!-- Header Section -->
+<header class="text-center mb-10">
+<h1 class="text-2xl font-black tracking-tighter text-primary-container font-headline uppercase mb-1">
+                Vietnam TaxInspector
+            </h1>
+<p class="text-sm font-medium text-on-surface-variant tracking-wide label-sm">
+                Hệ thống Phân tích Rủi ro &amp; Giám sát Thuế
+            </p>
+</header>
+<!-- Authentication Card -->
+<div class="bg-surface-container-lowest shadow-[0_20px_40px_rgba(0,33,71,0.06)] rounded-xl p-8 transition-all duration-300">
+<!-- Tab Switcher (Segmented Control) -->
+<div class="flex p-1 bg-surface-container-low rounded-lg mb-8" id="tab-switcher">
+<button class="flex-1 py-2 text-sm font-bold rounded-md transition-all duration-200 bg-surface-container-lowest text-primary-container shadow-sm" id="tab-btn-login" onclick="switchTab('login')">
+                    Đăng nhập
+                </button>
+<button class="flex-1 py-2 text-sm font-medium rounded-md transition-all duration-200 text-on-surface-variant hover:text-on-surface" id="tab-btn-register" onclick="switchTab('register')">
+                    Đăng ký
+                </button>
+</div>
+<!-- Forms Container -->
+<div id="forms-wrapper">
+<!-- Login Form -->
+<form class="space-y-5 block" id="form-login">
+<div class="space-y-1">
+<label class="block text-[10px] font-extrabold text-on-surface-variant uppercase tracking-widest px-1">Mã số cán bộ</label>
+<div class="relative">
+<input class="w-full bg-surface-container-lowest border border-outline-variant/30 rounded-lg py-3 px-4 text-sm focus:outline-none focus:ring-2 focus:ring-primary-container focus:border-transparent transition-all placeholder:text-outline/50" placeholder="VTI-XXXXXX" type="text"/>
+</div>
+</div>
+<div class="space-y-1">
+<div class="flex justify-between items-center px-1">
+<label class="block text-[10px] font-extrabold text-on-surface-variant uppercase tracking-widest">Mật khẩu</label>
+<a class="text-[10px] font-bold text-on-primary-container hover:text-primary-container transition-colors uppercase tracking-widest" href="#">Quên mật khẩu?</a>
+</div>
+<div class="relative">
+<input class="w-full bg-surface-container-lowest border border-outline-variant/30 rounded-lg py-3 px-4 text-sm focus:outline-none focus:ring-2 focus:ring-primary-container focus:border-transparent transition-all placeholder:text-outline/50" placeholder="••••••••" type="password"/>
+</div>
+</div>
+<button class="w-full mt-6 bg-primary-container text-white font-bold py-4 rounded-lg flex items-center justify-center gap-2 hover:bg-primary transition-all active:scale-[0.98] shadow-lg shadow-primary-container/10" type="submit">
+<span>Đăng nhập hệ thống</span>
+<span class="material-symbols-outlined text-[18px]">login</span>
+</button>
+</form>
+<!-- Register Form (Hidden by default) -->
+<form class="space-y-4 hidden" id="form-register">
+<div class="space-y-1">
+<label class="block text-[10px] font-extrabold text-on-surface-variant uppercase tracking-widest px-1">Họ và tên</label>
+<input class="w-full bg-surface-container-lowest border border-outline-variant/30 rounded-lg py-3 px-4 text-sm focus:ring-2 focus:ring-primary-container focus:outline-none" placeholder="NGUYỄN VĂN A" type="text"/>
+</div>
+<div class="grid grid-cols-2 gap-4">
+<div class="space-y-1">
+<label class="block text-[10px] font-extrabold text-on-surface-variant uppercase tracking-widest px-1">Mã số cán bộ</label>
+<input class="w-full bg-surface-container-lowest border border-outline-variant/30 rounded-lg py-3 px-4 text-sm focus:ring-2 focus:ring-primary-container focus:outline-none" placeholder="VTI-XXXX" type="text"/>
+</div>
+<div class="space-y-1">
+<label class="block text-[10px] font-extrabold text-on-surface-variant uppercase tracking-widest px-1">Email công vụ</label>
+<input class="w-full bg-surface-container-lowest border border-outline-variant/30 rounded-lg py-3 px-4 text-sm focus:ring-2 focus:ring-primary-container focus:outline-none" placeholder="@gdt.gov.vn" type="email"/>
+</div>
+</div>
+<div class="space-y-1">
+<label class="block text-[10px] font-extrabold text-on-surface-variant uppercase tracking-widest px-1">Mật khẩu</label>
+<input class="w-full bg-surface-container-lowest border border-outline-variant/30 rounded-lg py-3 px-4 text-sm focus:ring-2 focus:ring-primary-container focus:outline-none" placeholder="Tối thiểu 12 ký tự" type="password"/>
+</div>
+<div class="space-y-1">
+<label class="block text-[10px] font-extrabold text-on-surface-variant uppercase tracking-widest px-1">Xác nhận mật khẩu</label>
+<input class="w-full bg-surface-container-lowest border border-outline-variant/30 rounded-lg py-3 px-4 text-sm focus:ring-2 focus:ring-primary-container focus:outline-none" placeholder="••••••••" type="password"/>
+</div>
+<button class="w-full mt-4 bg-primary-container text-white font-bold py-4 rounded-lg flex items-center justify-center gap-2 hover:bg-primary transition-all active:scale-[0.98]" type="submit">
+<span>Tạo tài khoản cán bộ</span>
+<span class="material-symbols-outlined text-[18px]">verified_user</span>
+</button>
+</form>
+</div>
+</div>
+<!-- Footer Information -->
+<footer class="mt-8 flex flex-col items-center gap-3">
+<div class="flex items-center gap-2 px-3 py-1.5 bg-surface-container-high rounded-full">
+<span class="material-symbols-outlined text-sm text-on-surface-variant" style="font-variation-settings: 'FILL' 1;">lock</span>
+<span class="text-[10px] font-black text-on-surface-variant uppercase tracking-[0.1em]">Mạng nội bộ - Bảo mật Cấp 3</span>
+</div>
+<div class="flex gap-4">
+<span class="text-[10px] font-bold text-outline uppercase tracking-wider">Phiên bản 2.4.0-STABLE</span>
+<span class="text-[10px] font-bold text-outline uppercase tracking-wider">© 2024 Bộ Tài Chính</span>
+</div>
+</footer>
+</main>
+<script>
+        function switchTab(target) {
+            const loginForm = document.getElementById('form-login');
+            const registerForm = document.getElementById('form-register');
+            const loginBtn = document.getElementById('tab-btn-login');
+            const registerBtn = document.getElementById('tab-btn-register');
+
+            if (target === 'login') {
+                // Forms
+                loginForm.classList.remove('hidden');
+                loginForm.classList.add('block');
+                registerForm.classList.remove('block');
+                registerForm.classList.add('hidden');
+                
+                // Tabs
+                loginBtn.classList.add('bg-surface-container-lowest', 'text-primary-container', 'shadow-sm', 'font-bold');
+                loginBtn.classList.remove('text-on-surface-variant', 'font-medium');
+                
+                registerBtn.classList.remove('bg-surface-container-lowest', 'text-primary-container', 'shadow-sm', 'font-bold');
+                registerBtn.classList.add('text-on-surface-variant', 'font-medium');
+            } else {
+                // Forms
+                registerForm.classList.remove('hidden');
+                registerForm.classList.add('block');
+                loginForm.classList.remove('block');
+                loginForm.classList.add('hidden');
+                
+                // Tabs
+                registerBtn.classList.add('bg-surface-container-lowest', 'text-primary-container', 'shadow-sm', 'font-bold');
+                registerBtn.classList.remove('text-on-surface-variant', 'font-medium');
+                
+                loginBtn.classList.remove('bg-surface-container-lowest', 'text-primary-container', 'shadow-sm', 'font-bold');
+                loginBtn.classList.add('text-on-surface-variant', 'font-medium');
+            }
+        }
+    </script>
+</body></html>

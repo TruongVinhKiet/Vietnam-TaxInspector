@@ -1,0 +1,13 @@
+fastapi[all]
+uvicorn
+sqlalchemy
+psycopg2
+scikit-learn
+xgboost
+lightgbm
+networkx
+pandas
+python-multipart
+
+passlib[bcrypt]
+PyJWT

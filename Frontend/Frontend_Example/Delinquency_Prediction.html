@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+
+<html lang="vi"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Dự báo Nợ đọng - Tax Inspectorate</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "tertiary-container": "#3d1500",
+                        "on-tertiary-fixed": "#341100",
+                        "primary-container": "#002147",
+                        "inverse-surface": "#2e3132",
+                        "on-surface": "#191c1d",
+                        "surface-container-low": "#f3f4f5",
+                        "secondary": "#565f70",
+                        "tertiary": "#180500",
+                        "primary-fixed-dim": "#aec7f6",
+                        "outline-variant": "#c4c6cf",
+                        "secondary-container": "#d7e0f5",
+                        "surface-container-high": "#e7e8e9",
+                        "on-primary-fixed": "#001b3d",
+                        "surface-variant": "#e1e3e4",
+                        "outline": "#74777f",
+                        "on-tertiary-container": "#b97958",
+                        "surface-dim": "#d9dadb",
+                        "primary": "#000a1e",
+                        "on-tertiary": "#ffffff",
+                        "background": "#f8f9fa",
+                        "surface": "#f8f9fa",
+                        "secondary-fixed-dim": "#bec7db",
+                        "on-primary": "#ffffff",
+                        "on-error": "#ffffff",
+                        "on-background": "#191c1d",
+                        "error-container": "#ffdad6",
+                        "on-secondary": "#ffffff",
+                        "on-surface-variant": "#44474e",
+                        "inverse-on-surface": "#f0f1f2",
+                        "inverse-primary": "#aec7f6",
+                        "error": "#ba1a1a",
+                        "tertiary-fixed": "#ffdbcb",
+                        "surface-container-highest": "#e1e3e4",
+                        "tertiary-fixed-dim": "#ffb691",
+                        "surface-container-lowest": "#ffffff",
+                        "on-secondary-fixed-variant": "#3e4758",
+                        "on-primary-container": "#708ab5",
+                        "on-error-container": "#93000a",
+                        "on-secondary-fixed": "#131c2b",
+                        "primary-fixed": "#d6e3ff",
+                        "on-tertiary-fixed-variant": "#6c391d",
+                        "surface-container": "#edeeef",
+                        "on-primary-fixed-variant": "#2d476f",
+                        "surface-bright": "#f8f9fa",
+                        "secondary-fixed": "#dae3f8",
+                        "surface-tint": "#465f88",
+                        "on-secondary-container": "#5a6375"
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "0.125rem",
+                        "lg": "0.25rem",
+                        "xl": "0.5rem",
+                        "full": "0.75rem"
+                    },
+                    "fontFamily": {
+                        "headline": ["Inter"],
+                        "body": ["Inter"],
+                        "label": ["Inter"]
+                    }
+                },
+            },
+        }
+    </script>
+<style>
+        body { font-family: 'Inter', sans-serif; }
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        }
+        /* No-Line separation logic from Design System */
+        .no-line { border: none !important; }
+        .ghost-border { outline: 1px solid rgba(196, 198, 207, 0.15); }
+    </style>
+</head>
+<body class="bg-background text-on-surface">
+<!-- SideNavBar -->
+<aside class="fixed left-0 top-0 h-screen w-64 bg-[#002147] dark:bg-[#000a1e] flex flex-col py-6 px-4 z-50 shadow-2xl shadow-[#002147]/20 border-none no-line">
+<div class="mb-10 px-2">
+<h1 class="text-lg font-bold tracking-tight text-white uppercase font-['Inter']">The Sovereign Inspector</h1>
+<p class="text-slate-400 text-xs font-medium tracking-tight">Government Tax System</p>
+</div>
+<nav class="flex-1 space-y-1">
+<!-- Dashboard -->
+<a class="flex items-center gap-3 px-3 py-2 text-slate-400 hover:text-white transition-colors hover:bg-white/5 transition-all rounded-lg group" href="#">
+<span class="material-symbols-outlined text-[20px]">dashboard</span>
+<span class="font-['Inter'] font-medium tracking-tight">Dashboard</span>
+</a>
+<!-- Fraud Alerts -->
+<a class="flex items-center gap-3 px-3 py-2 text-slate-400 hover:text-white transition-colors hover:bg-white/5 transition-all rounded-lg group" href="#">
+<span class="material-symbols-outlined text-[20px]">security</span>
+<span class="font-['Inter'] font-medium tracking-tight">Fraud Alerts</span>
+</a>
+<!-- Invoice Network -->
+<a class="flex items-center gap-3 px-3 py-2 text-slate-400 hover:text-white transition-colors hover:bg-white/5 transition-all rounded-lg group" href="#">
+<span class="material-symbols-outlined text-[20px]">hub</span>
+<span class="font-['Inter'] font-medium tracking-tight">Invoice Network</span>
+</a>
+<!-- Debt Forecast (ACTIVE) -->
+<a class="flex items-center gap-3 px-3 py-2 bg-white/10 text-white rounded-lg font-semibold transition-all scale-95 active:scale-90 group" href="#">
+<span class="material-symbols-outlined text-[20px]">trending_up</span>
+<span class="font-['Inter'] font-medium tracking-tight">Debt Forecast</span>
+</a>
+</nav>
+<div class="mt-auto pt-6 space-y-1 border-t border-white/10">
+<button class="w-full mb-4 flex items-center justify-center gap-2 bg-white/10 hover:bg-white/20 text-white py-2.5 px-4 rounded-lg font-bold text-sm transition-all">
+<span class="material-symbols-outlined text-[18px]">add</span>
+                New Investigation
+            </button>
+<a class="flex items-center gap-3 px-3 py-2 text-slate-400 hover:text-white transition-colors hover:bg-white/5 rounded-lg" href="#">
+<span class="material-symbols-outlined text-[20px]">settings</span>
+<span class="font-['Inter'] font-medium tracking-tight">Settings</span>
+</a>
+<a class="flex items-center gap-3 px-3 py-2 text-slate-400 hover:text-white transition-colors hover:bg-white/5 rounded-lg" href="#">
+<span class="material-symbols-outlined text-[20px]">help</span>
+<span class="font-['Inter'] font-medium tracking-tight">Support</span>
+</a>
+</div>
+</aside>
+<!-- Main Content Wrapper -->
+<div class="ml-64 min-h-screen flex flex-col">
+<!-- TopAppBar -->
+<header class="sticky top-0 z-40 w-full h-16 bg-white/85 dark:bg-[#000a1e]/85 backdrop-blur-xl flex justify-between items-center px-8 relative no-line">
+<div class="flex items-center gap-4">
+<div class="flex items-center gap-2 text-slate-500 font-['Inter'] text-sm tracking-tight">
+<span>Trang chủ</span>
+<span class="material-symbols-outlined text-[14px]">chevron_right</span>
+<span>Báo cáo AI</span>
+<span class="material-symbols-outlined text-[14px]">chevron_right</span>
+<span class="text-[#002147] font-bold border-b-2 border-[#002147]">Dự báo Nợ đọng</span>
+</div>
+</div>
+<div class="flex items-center gap-6">
+<div class="relative focus-within:ring-2 ring-[#002147] rounded-lg">
+<span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-[20px]">search</span>
+<input class="pl-10 pr-4 py-1.5 bg-slate-100 dark:bg-slate-800 border-none rounded-lg text-sm w-64 focus:ring-0" placeholder="Tìm kiếm MST, DN..." type="text"/>
+</div>
+<div class="flex items-center gap-3">
+<button class="text-slate-500 hover:text-[#002147] transition-colors relative">
+<span class="material-symbols-outlined text-[22px]">notifications</span>
+<span class="absolute top-0 right-0 w-2 h-2 bg-error rounded-full border-2 border-white"></span>
+</button>
+<button class="text-slate-500 hover:text-[#002147] transition-colors">
+<span class="material-symbols-outlined text-[22px]">history</span>
+</button>
+<div class="h-8 w-[1px] bg-slate-200"></div>
+<div class="flex items-center gap-3">
+<span class="text-xs font-bold text-[#002147] tracking-tight uppercase">Inspector Profile</span>
+<img alt="Inspector Profile" class="w-8 h-8 rounded-full object-cover shadow-sm" data-alt="professional portrait of a government official in a dark suit with a neutral background, high-end editorial corporate photography" src="https://lh3.googleusercontent.com/aida-public/AB6AXuD4SqCHJiTDDofmdGs9_wlmzO7hjZTHgUIa7p0f3N3ox7Iiz7KSMkVwp8WLxyOSHiIax_kh9mWkfUw4g47h16MtlVoCKY0i9RReqcuJnB_yqhgiXF1LFZB_JAks4dTaTm010nFprnqUGPi6eWduEm-hh6K4lfrGVTtogkK-YDp_LrxPEGFlzKH-3KTTG_PpAajoWbCKiEhAD9Oau6RvtcH65BcjG9_T-nQFUeuzN1nedHAyqUgdx9-83MlSjjoeoLcAdV_RPYOK3MQ"/>
+</div>
+</div>
+</div>
+<div class="bg-slate-100 dark:bg-slate-800 h-[1px] w-full absolute bottom-0 left-0"></div>
+</header>
+<!-- Canvas -->
+<main class="flex-1 p-10 bg-surface">
+<!-- Page Header -->
+<div class="mb-10 max-w-6xl mx-auto">
+<h2 class="text-[2rem] font-extrabold tracking-[-0.02em] text-primary mb-2">Dự báo Rủi ro Trễ hạn Nộp thuế (Quý tới)</h2>
+<p class="text-on-surface-variant font-medium text-sm uppercase tracking-widest">Phân tích dữ liệu hành vi và tài chính bằng mô hình AI Sovereign v2.4</p>
+</div>
+<!-- KPI Row -->
+<div class="grid grid-cols-1 md:grid-cols-3 gap-8 max-w-6xl mx-auto mb-10">
+<!-- KPI 1 -->
+<div class="bg-surface-container-lowest p-6 rounded-xl shadow-[0_20px_40px_rgba(0,33,71,0.06)] border-none">
+<div class="flex justify-between items-start mb-4">
+<span class="text-xs font-bold uppercase tracking-widest text-slate-500">Tổng DN rủi ro cao</span>
+<span class="material-symbols-outlined text-primary-container" data-weight="fill">warning</span>
+</div>
+<div class="text-4xl font-extrabold tracking-tighter text-primary-container">1,245</div>
+<div class="mt-2 text-xs font-medium text-slate-400">+12% so với quý trước</div>
+</div>
+<!-- KPI 2 -->
+<div class="bg-surface-container-lowest p-6 rounded-xl shadow-[0_20px_40px_rgba(0,33,71,0.06)] border-none">
+<div class="flex justify-between items-start mb-4">
+<span class="text-xs font-bold uppercase tracking-widest text-slate-500">Dự kiến thất thu</span>
+<span class="material-symbols-outlined text-error" data-weight="fill">account_balance_wallet</span>
+</div>
+<div class="text-4xl font-extrabold tracking-tighter text-error">45.2 <span class="text-lg">Tỷ VNĐ</span></div>
+<div class="mt-2 text-xs font-medium text-slate-400">Ước tính dòng tiền chậm nộp</div>
+</div>
+<!-- KPI 3 -->
+<div class="bg-surface-container-lowest p-6 rounded-xl shadow-[0_20px_40px_rgba(0,33,71,0.06)] border-none">
+<div class="flex justify-between items-start mb-4">
+<span class="text-xs font-bold uppercase tracking-widest text-slate-500">Độ chính xác AI</span>
+<span class="material-symbols-outlined text-emerald-600" data-weight="fill">verified</span>
+</div>
+<div class="text-4xl font-extrabold tracking-tighter text-emerald-600">92.4%</div>
+<div class="mt-2 text-xs font-medium text-slate-400">Dựa trên 1.2M điểm dữ liệu</div>
+</div>
+</div>
+<!-- Enterprise Data Grid -->
+<div class="max-w-6xl mx-auto bg-surface-container-lowest rounded-xl overflow-hidden shadow-[0_20px_40px_rgba(0,33,71,0.06)]">
+<div class="px-8 py-6 bg-white flex justify-between items-center">
+<h3 class="text-lg font-bold text-primary-container tracking-tight">Danh sách Doanh nghiệp phân tích</h3>
+<div class="flex gap-2">
+<button class="bg-surface-container-low px-4 py-2 rounded-lg text-xs font-bold uppercase tracking-widest text-slate-600 hover:bg-surface-container-high transition-colors">
+                            Lọc rủi ro
+                        </button>
+<button class="bg-primary-container text-white px-4 py-2 rounded-lg text-xs font-bold uppercase tracking-widest flex items-center gap-2 hover:opacity-90 transition-all">
+<span class="material-symbols-outlined text-[16px]">file_download</span> Xuất báo cáo
+                        </button>
+</div>
+</div>
+<div class="overflow-x-auto">
+<table class="w-full text-left border-collapse">
+<thead>
+<tr class="bg-surface-container-low text-slate-500 font-['Inter'] text-[10px] uppercase tracking-widest font-bold">
+<th class="px-8 py-4">MST</th>
+<th class="px-4 py-4">Doanh nghiệp</th>
+<th class="px-4 py-4">Lĩnh vực</th>
+<th class="px-4 py-4">Xác suất Trễ hạn (%)</th>
+<th class="px-4 py-4">Số tiền Dự kiến</th>
+<th class="px-8 py-4 text-right">Hành động</th>
+</tr>
+</thead>
+<tbody class="text-sm font-medium">
+<!-- Row 1 -->
+<tr class="hover:bg-slate-50 transition-colors">
+<td class="px-8 py-5 text-slate-500 font-mono">0101234567</td>
+<td class="px-4 py-5 font-bold text-primary-container">Cty Alpha</td>
+<td class="px-4 py-5 text-on-surface-variant">Sản xuất</td>
+<td class="px-4 py-5">
+<div class="flex items-center gap-2">
+<div class="w-16 h-1.5 bg-slate-100 rounded-full overflow-hidden">
+<div class="h-full bg-error w-[95%]"></div>
+</div>
+<span class="px-2 py-0.5 bg-error-container text-on-error-container rounded text-[11px] font-bold">95%</span>
+</div>
+</td>
+<td class="px-4 py-5 font-bold text-primary-container">12.5 Tỷ</td>
+<td class="px-8 py-5 text-right">
+<button class="bg-primary-container text-white px-3 py-1.5 rounded-lg text-xs font-bold hover:opacity-90 transition-all">Ra thông báo</button>
+</td>
+</tr>
+<!-- Row 2 -->
+<tr class="bg-surface-container-low/30 hover:bg-slate-50 transition-colors">
+<td class="px-8 py-5 text-slate-500 font-mono">0314982345</td>
+<td class="px-4 py-5 font-bold text-primary-container">Tập đoàn Mekong</td>
+<td class="px-4 py-5 text-on-surface-variant">Xây dựng</td>
+<td class="px-4 py-5">
+<div class="flex items-center gap-2">
+<div class="w-16 h-1.5 bg-slate-100 rounded-full overflow-hidden">
+<div class="h-full bg-orange-500 w-[78%]"></div>
+</div>
+<span class="px-2 py-0.5 bg-orange-100 text-orange-700 rounded text-[11px] font-bold">78%</span>
+</div>
+</td>
+<td class="px-4 py-5 font-bold text-primary-container">28.2 Tỷ</td>
+<td class="px-8 py-5 text-right">
+<button class="bg-primary-container text-white px-3 py-1.5 rounded-lg text-xs font-bold hover:opacity-90 transition-all">Ra thông báo</button>
+</td>
+</tr>
+<!-- Row 3 -->
+<tr class="hover:bg-slate-50 transition-colors">
+<td class="px-8 py-5 text-slate-500 font-mono">0210455789</td>
+<td class="px-4 py-5 font-bold text-primary-container">Cty Delta</td>
+<td class="px-4 py-5 text-on-surface-variant">Thương mại</td>
+<td class="px-4 py-5">
+<div class="flex items-center gap-2">
+<div class="w-16 h-1.5 bg-slate-100 rounded-full overflow-hidden">
+<div class="h-full bg-yellow-500 w-[45%]"></div>
+</div>
+<span class="px-2 py-0.5 bg-yellow-100 text-yellow-700 rounded text-[11px] font-bold">45%</span>
+</div>
+</td>
+<td class="px-4 py-5 font-bold text-primary-container">3.1 Tỷ</td>
+<td class="px-8 py-5 text-right">
+<button class="bg-primary-container text-white px-3 py-1.5 rounded-lg text-xs font-bold hover:opacity-90 transition-all">Ra thông báo</button>
+</td>
+</tr>
+<!-- Row 4 -->
+<tr class="bg-surface-container-low/30 hover:bg-slate-50 transition-colors">
+<td class="px-8 py-5 text-slate-500 font-mono">0892341234</td>
+<td class="px-4 py-5 font-bold text-primary-container">Chuỗi Fusion</td>
+<td class="px-4 py-5 text-on-surface-variant">Dịch vụ</td>
+<td class="px-4 py-5">
+<div class="flex items-center gap-2">
+<div class="w-16 h-1.5 bg-slate-100 rounded-full overflow-hidden">
+<div class="h-full bg-orange-500 w-[82%]"></div>
+</div>
+<span class="px-2 py-0.5 bg-orange-100 text-orange-700 rounded text-[11px] font-bold">82%</span>
+</div>
+</td>
+<td class="px-4 py-5 font-bold text-primary-container">1.4 Tỷ</td>
+<td class="px-8 py-5 text-right">
+<button class="bg-primary-container text-white px-3 py-1.5 rounded-lg text-xs font-bold hover:opacity-90 transition-all">Ra thông báo</button>
+</td>
+</tr>
+</tbody>
+</table>
+</div>
+<!-- Pagination Footer -->
+<div class="px-8 py-6 border-t border-slate-100 flex justify-between items-center">
+<span class="text-xs font-bold text-slate-400 uppercase tracking-widest">Hiển thị 1-25 của 1,245 kết quả</span>
+<div class="flex items-center gap-2">
+<button class="p-1 hover:bg-slate-100 rounded transition-colors text-slate-400">
+<span class="material-symbols-outlined text-[18px]">chevron_left</span>
+</button>
+<button class="w-8 h-8 flex items-center justify-center rounded bg-primary-container text-white text-xs font-bold">1</button>
+<button class="w-8 h-8 flex items-center justify-center rounded hover:bg-slate-100 text-xs font-bold text-slate-600">2</button>
+<button class="w-8 h-8 flex items-center justify-center rounded hover:bg-slate-100 text-xs font-bold text-slate-600">3</button>
+<span class="text-slate-400 mx-1">...</span>
+<button class="w-8 h-8 flex items-center justify-center rounded hover:bg-slate-100 text-xs font-bold text-slate-600">50</button>
+<button class="p-1 hover:bg-slate-100 rounded transition-colors text-slate-400">
+<span class="material-symbols-outlined text-[18px]">chevron_right</span>
+</button>
+</div>
+</div>
+</div>
+</main>
+<!-- Footer -->
+<footer class="sticky bottom-0 w-full ml-0 py-2 bg-slate-50 dark:bg-[#000a1e] flex justify-between items-center px-8 border-t border-slate-200 dark:border-slate-800 z-30">
+<span class="text-slate-500 dark:text-slate-400 font-['Inter'] text-[10px] uppercase tracking-widest font-bold">OFFICIAL - SENSITIVE | v2.4.0-build.89</span>
+<div class="flex gap-6">
+<a class="text-slate-400 font-['Inter'] text-[10px] uppercase tracking-widest font-bold hover:underline opacity-80 hover:opacity-100 transition-colors" href="#">Security Policy</a>
+<a class="text-slate-400 font-['Inter'] text-[10px] uppercase tracking-widest font-bold hover:underline opacity-80 hover:opacity-100 transition-colors" href="#">Terms of Service</a>
+</div>
+</footer>
+</div>
+</body></html>
