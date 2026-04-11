@@ -1,10 +1,27 @@
+"""
+auth.py – Core Authentication Module (Security Hardened)
+=========================================================
+Changes from original:
+    1. JWT Token now set as HttpOnly+SameSite Cookie (not returned in JSON body)
+    2. get_current_user reads token from Cookie instead of Authorization header
+    3. Added set_auth_cookie() and clear_auth_cookie() helpers
+    4. Added log_audit() helper for immutable audit logging
+    5. Password hashing remains PBKDF2-SHA256 (unchanged)
+"""
+
 import os
 import base64
 import hashlib
 import hmac
 from datetime import datetime, timedelta
 from typing import Optional
+
 import jwt
+from fastapi import Depends, HTTPException, Request, Response, status
+from sqlalchemy.orm import Session
+
+from .database import get_db
+from . import models
 
 # Secret key to encode the JWT token
 SECRET_KEY = os.getenv("SECRET_KEY", "7b4c6e9d2f1a8c5b3e0d4f9a7c6b5a4d3f2e1b0c9a8b7c6d5e4f3a2b1c0d9e8f")
@@ -14,6 +31,17 @@ PASSWORD_HASH_SCHEME = "pbkdf2_sha256"
 PBKDF2_ITERATIONS = int(os.getenv("PBKDF2_ITERATIONS", "390000"))
 SALT_SIZE = 16
 
+# Cookie configuration
+COOKIE_NAME = "tax_session"
+COOKIE_MAX_AGE = ACCESS_TOKEN_EXPIRE_MINUTES * 60  # seconds
+COOKIE_SECURE = os.getenv("COOKIE_SECURE", "false").lower() == "true"  # True in production (HTTPS)
+COOKIE_SAMESITE = "lax"
+COOKIE_DOMAIN = os.getenv("COOKIE_DOMAIN", None)  # None = current domain only
+
+
+# =============================================================================
+# PASSWORD HASHING (unchanged)
+# =============================================================================
 
 def _verify_pbkdf2_password(plain_password: str, hashed_password: str) -> bool:
     try:
@@ -70,6 +98,11 @@ def get_password_hash(password: str) -> str:
     digest_b64 = base64.b64encode(digest).decode("ascii")
     return f"{PASSWORD_HASH_SCHEME}${PBKDF2_ITERATIONS}${salt_b64}${digest_b64}"
 
+
+# =============================================================================
+# JWT TOKEN (unchanged logic, new cookie delivery)
+# =============================================================================
+
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
     to_encode = data.copy()
     if expires_delta:
@@ -79,3 +112,218 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
     to_encode.update({"exp": expire})
     encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
     return encoded_jwt
+
+
+# =============================================================================
+# HTTPONLY COOKIE MANAGEMENT
+# =============================================================================
+
+def set_auth_cookie(response: Response, token: str):
+    """Set JWT token as an HttpOnly cookie on the response."""
+    response.set_cookie(
+        key=COOKIE_NAME,
+        value=token,
+        httponly=True,          # JS cannot read this cookie (XSS-proof)
+        secure=COOKIE_SECURE,   # Only sent over HTTPS (set True in production)
+        samesite=COOKIE_SAMESITE,
+        max_age=COOKIE_MAX_AGE,
+        path="/",
+        domain=COOKIE_DOMAIN,
+    )
+
+
+def clear_auth_cookie(response: Response):
+    """Clear the auth cookie (logout)."""
+    response.delete_cookie(
+        key=COOKIE_NAME,
+        path="/",
+        domain=COOKIE_DOMAIN,
+    )
+
+
+# =============================================================================
+# GET CURRENT USER (reads from Cookie instead of Authorization header)
+# =============================================================================
+
+def get_current_user(
+    request: Request,
+    db: Session = Depends(get_db),
+) -> models.User:
+    """
+    Decode JWT token from HttpOnly cookie and return the corresponding User.
+    Falls back to Authorization header for API tools like Swagger UI.
+    """
+    credentials_exception = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Phiên đăng nhập không hợp lệ hoặc đã hết hạn.",
+    )
+
+    # Priority 1: HttpOnly Cookie
+    token = request.cookies.get(COOKIE_NAME)
+
+    # Priority 2: Authorization Bearer header (for Swagger UI / API tools)
+    if not token:
+        auth_header = request.headers.get("Authorization", "")
+        if auth_header.startswith("Bearer "):
+            token = auth_header[7:]
+
+    if not token:
+        raise credentials_exception
+
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        badge_id: str = payload.get("sub")
+        if badge_id is None:
+            raise credentials_exception
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.",
+        )
+    except jwt.PyJWTError:
+        raise credentials_exception
+
+    user = db.query(models.User).filter(models.User.badge_id == badge_id).first()
+    if user is None:
+        raise credentials_exception
+    return user
+
+
+# =============================================================================
+# AUDIT LOGGING
+# =============================================================================
+
+def log_audit(
+    db: Session,
+    action: str,
+    request: Request = None,
+    user_id: int = None,
+    badge_id: str = None,
+    detail: str = None,
+):
+    """
+    Record an immutable audit log entry.
+    Actions: LOGIN_SUCCESS, LOGIN_FAILED, LOGOUT, REGISTER,
+             FACE_SETUP, FACE_RESET, FACE_LOGIN_SUCCESS, FACE_LOGIN_FAILED,
+             CCCD_SETUP, CCCD_RESET, CCCD_LOGIN_SUCCESS, CCCD_LOGIN_FAILED,
+             SIGNATURE_SETUP, SIGNATURE_RESET, SIGNATURE_LOGIN_SUCCESS, SIGNATURE_LOGIN_FAILED,
+             PHONE_UPDATE
+    """
+    ip = None
+    ua = None
+    if request:
+        ip = request.client.host if request.client else None
+        ua = request.headers.get("user-agent", "")[:500]
+
+    entry = models.AuditLog(
+        user_id=user_id,
+        badge_id=badge_id,
+        action=action,
+        detail=detail,
+        ip_address=ip,
+        user_agent=ua,
+    )
+    db.add(entry)
+    db.commit()
+
+
+# =============================================================================
+# TEMPORARY TOKEN (for 2FA intermediate step: face/cccd → signature)
+# =============================================================================
+
+TEMP_TOKEN_EXPIRE_MINUTES = 5  # 5 minutes to complete signature step
+
+def create_temp_token(badge_id: str) -> str:
+    """Create a short-lived JWT for the 2FA intermediate step."""
+    expire = datetime.utcnow() + timedelta(minutes=TEMP_TOKEN_EXPIRE_MINUTES)
+    return jwt.encode(
+        {"sub": badge_id, "type": "2fa_temp", "exp": expire},
+        SECRET_KEY,
+        algorithm=ALGORITHM,
+    )
+
+
+def verify_temp_token(token: str) -> str:
+    """Verify a temp token and return the badge_id. Raises HTTPException on failure."""
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        if payload.get("type") != "2fa_temp":
+            raise HTTPException(status_code=401, detail="Token không hợp lệ.")
+        badge_id = payload.get("sub")
+        if not badge_id:
+            raise HTTPException(status_code=401, detail="Token không hợp lệ.")
+        return badge_id
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(status_code=401, detail="Token xác thực đã hết hạn (5 phút). Vui lòng thử lại.")
+    except jwt.PyJWTError:
+        raise HTTPException(status_code=401, detail="Token không hợp lệ.")
+
+
+# =============================================================================
+# SIGNATURE COMPARISON (dHash - Fuzzy Matching)
+# =============================================================================
+
+def _preprocess_signature(img):
+    from PIL import ImageOps, Image, ImageFilter
+    # Invert to make background black (0) and strokes white (255)
+    inv = ImageOps.invert(img)
+    bbox = inv.getbbox()
+    if bbox:
+        # Pad slightly
+        padding = 20
+        width, height = img.size
+        # Unpack bbox (left, upper, right, lower)
+        left = max(0, bbox[0] - padding)
+        upper = max(0, bbox[1] - padding)
+        right = min(width, bbox[2] + padding)
+        lower = min(height, bbox[3] + padding)
+        
+        c = img.crop((left, upper, right, lower))
+        
+        # Make squarely padded to prevent aspect ratio distortion during hash resize
+        cw, ch = c.size
+        size = max(cw, ch)
+        sq = Image.new("L", (size, size), "WHITE")
+        sq.paste(c, ((size - cw)//2, (size - ch)//2))
+        
+        # Blur to thicken strokes, making dHash more robust to handwriting jitter
+        sq = sq.filter(ImageFilter.GaussianBlur(1.5))
+        return sq
+    return img
+
+def compare_signatures(stored_b64: str, candidate_b64: str, threshold: int = 16) -> tuple:
+    import io
+    import base64
+    from PIL import Image, ImageChops
+    import imagehash
+
+    try:
+        stored_bytes = base64.b64decode(stored_b64)
+        candidate_bytes = base64.b64decode(candidate_b64)
+
+        img_stored = Image.open(io.BytesIO(stored_bytes)).convert("RGBA")
+        img_candidate = Image.open(io.BytesIO(candidate_bytes)).convert("RGBA")
+
+        # Paste over white background
+        bg_stored = Image.new("RGBA", img_stored.size, "WHITE")
+        bg_stored.paste(img_stored, (0, 0), img_stored)
+        img_stored_L = bg_stored.convert('L')
+        
+        bg_cand = Image.new("RGBA", img_candidate.size, "WHITE")
+        bg_cand.paste(img_candidate, (0, 0), img_candidate)
+        img_candidate_L = bg_cand.convert('L')
+
+        # Crop to square bounding box and blur
+        img_stored_final = _preprocess_signature(img_stored_L)
+        img_candidate_final = _preprocess_signature(img_candidate_L)
+
+        # Hash: use dHash (difference hash) which is better for strokes, size 8 = 64bit
+        hash_stored = imagehash.dhash(img_stored_final, hash_size=8)
+        hash_candidate = imagehash.dhash(img_candidate_final, hash_size=8)
+
+        distance = hash_stored - hash_candidate
+
+        return distance <= threshold, distance
+    except Exception as e:
+        print("[Auth Error] compare_signatures error:", e)
+        return False, -1

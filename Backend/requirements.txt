@@ -11,3 +11,11 @@ python-multipart
 
 passlib[bcrypt]
 PyJWT
+
+# Security modules
+slowapi
+cryptography
+
+# Image processing (signature comparison)
+Pillow
+imagehash

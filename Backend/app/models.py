@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Float, Boolean, Date, DateTime, Numeric, ForeignKey
+from sqlalchemy import Column, Integer, String, Float, Boolean, Date, DateTime, Numeric, ForeignKey, Text
 from sqlalchemy.sql import func
 
 from .database import Base
@@ -15,6 +15,12 @@ class User(Base):
     phone = Column(String(20))
     password_hash = Column(String(255))
     role = Column(String(20), default="viewer")
+    face_data = Column(Text, nullable=True)           # JSON string of 128-d face descriptor vector
+    face_verified = Column(Boolean, default=False)
+    cccd_data = Column(Text, nullable=True)            # AES-256 encrypted CCCD number
+    cccd_verified = Column(Boolean, default=False)
+    signature_data = Column(Text, nullable=True)        # AES-256 encrypted Base64 signature image
+    signature_verified = Column(Boolean, default=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
@@ -54,4 +60,22 @@ class Invoice(Base):
     vat_rate = Column(Numeric(5, 2), default=10.0)
     date = Column(Date, nullable=False)
     invoice_number = Column(String(50), unique=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class AuditLog(Base):
+    """
+    Nhật ký kiểm toán bất biến (Immutable Audit Log).
+    Chỉ INSERT – nghiêm cấm UPDATE hoặc DELETE.
+    Ghi lại mọi hành vi liên quan đến xác thực và bảo mật.
+    """
+    __tablename__ = "audit_logs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, nullable=True, index=True)       # NULL cho anonymous events (failed login)
+    badge_id = Column(String(50), nullable=True, index=True)   # Badge ID of the actor
+    action = Column(String(100), nullable=False, index=True)   # e.g. LOGIN_SUCCESS, LOGIN_FAILED, FACE_SETUP, etc.
+    detail = Column(Text, nullable=True)                       # Additional context/reason
+    ip_address = Column(String(45), nullable=True)             # IPv4 or IPv6
+    user_agent = Column(String(500), nullable=True)            # Browser user agent string
     created_at = Column(DateTime(timezone=True), server_default=func.now())

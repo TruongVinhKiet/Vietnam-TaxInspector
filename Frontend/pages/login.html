@@ -8,6 +8,7 @@
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&amp;display=swap" rel="stylesheet"/>
 <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
 <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script defer src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
 <script id="tailwind-config">
         tailwind.config = {
           darkMode: "class",
@@ -191,7 +192,73 @@
             border: 1px solid rgba(15, 90, 49, 0.12);
         }
 
+        /* Biometric scan overlay */
+        .bio-overlay {
+            position: fixed; inset: 0; z-index: 100;
+            background: rgba(0,10,30,0.92);
+            backdrop-filter: blur(12px);
+            display: flex; align-items: center; justify-content: center;
+            flex-direction: column;
+            opacity: 0; pointer-events: none;
+            transition: opacity 400ms cubic-bezier(0.16,1,0.3,1);
+        }
+        .bio-overlay.active { opacity: 1; pointer-events: auto; }
 
+        .scan-frame {
+            width: 320px; height: 320px;
+            border: 3px solid rgba(174,199,246,0.4);
+            border-radius: 24px;
+            position: relative;
+            overflow: hidden;
+            box-shadow: 0 0 60px rgba(70,95,136,0.2), inset 0 0 40px rgba(0,33,71,0.15);
+        }
+        .scan-frame video {
+            width: 100%; height: 100%; object-fit: cover;
+            border-radius: 21px;
+        }
+        .scan-line {
+            position: absolute; left: 0; right: 0; height: 3px;
+            background: linear-gradient(90deg, transparent, #aec7f6, transparent);
+            animation: scanMove 2.2s ease-in-out infinite;
+            box-shadow: 0 0 20px rgba(174,199,246,0.6);
+        }
+        @keyframes scanMove {
+            0%, 100% { top: 10%; }
+            50% { top: 85%; }
+        }
+        .scan-corner {
+            position: absolute; width: 28px; height: 28px;
+            border-color: #aec7f6; border-style: solid; border-width: 0;
+        }
+        .scan-corner.tl { top: 8px; left: 8px; border-top-width: 3px; border-left-width: 3px; border-top-left-radius: 12px; }
+        .scan-corner.tr { top: 8px; right: 8px; border-top-width: 3px; border-right-width: 3px; border-top-right-radius: 12px; }
+        .scan-corner.bl { bottom: 8px; left: 8px; border-bottom-width: 3px; border-left-width: 3px; border-bottom-left-radius: 12px; }
+        .scan-corner.br { bottom: 8px; right: 8px; border-bottom-width: 3px; border-right-width: 3px; border-bottom-right-radius: 12px; }
+
+        .bio-status-text {
+            margin-top: 24px; color: #aec7f6; font-size: 13px;
+            font-weight: 700; text-align: center; letter-spacing: 0.05em;
+        }
+
+        .cccd-modal, .sig-modal {
+            position: fixed; inset: 0; z-index: 100;
+            background: rgba(0,10,30,0.85);
+            backdrop-filter: blur(12px);
+            display: flex; align-items: center; justify-content: center;
+            opacity: 0; pointer-events: none;
+            transition: opacity 400ms ease;
+        }
+        .cccd-modal.active, .sig-modal.active { opacity: 1; pointer-events: auto; }
+        .sig-canvas-wrap {
+            background: white; border-radius: 12px; position: relative;
+            box-shadow: inset 0 2px 8px rgba(0,0,0,0.06);
+            border: 2px solid #e2e4e9; cursor: crosshair;
+        }
+        .sig-canvas-wrap canvas { display: block; border-radius: 10px; }
+        .sig-baseline {
+            position: absolute; bottom: 40px; left: 24px; right: 24px;
+            border-bottom: 1px dashed #c4c6cf; pointer-events: none;
+        }
     </style>
 <link rel="stylesheet" href="../css/global.css">
 
@@ -253,7 +320,18 @@
 <input id="login-pwd" class="w-full bg-surface-container-lowest border border-outline-variant/30 rounded-lg py-3 px-4 text-sm focus:outline-none focus:ring-2 focus:ring-primary-container focus:border-transparent transition-all placeholder:text-outline/50" placeholder="••••••••" type="password"/>
 </div>
 </div>
-<button id="login-btn" class="w-full mt-6 bg-primary-container text-white font-bold py-4 rounded-lg flex items-center justify-center gap-2 hover:bg-primary transition-all active:scale-[0.98] shadow-lg shadow-primary-container/10" type="submit">
+<!-- Biometric Login Buttons -->
+<div class="grid grid-cols-2 gap-3 mt-4">
+    <button type="button" id="btn-login-face" class="py-3 bg-surface-container-low border border-outline-variant/30 text-on-surface font-bold rounded-lg text-xs flex items-center justify-center gap-2 hover:bg-surface-container hover:border-primary-container/40 transition-all active:scale-[0.97]" onclick="openFaceLogin()">
+        <span class="material-symbols-outlined text-primary-container text-base" style="font-variation-settings: 'FILL' 1;">face</span>
+        Khuôn mặt
+    </button>
+    <button type="button" id="btn-login-cccd" class="py-3 bg-surface-container-low border border-outline-variant/30 text-on-surface font-bold rounded-lg text-xs flex items-center justify-center gap-2 hover:bg-surface-container hover:border-primary-container/40 transition-all active:scale-[0.97]" onclick="openCccdLogin()">
+        <span class="material-symbols-outlined text-primary-container text-base" style="font-variation-settings: 'FILL' 1;">id_card</span>
+        CCCD
+    </button>
+</div>
+<button id="login-btn" class="w-full mt-4 bg-primary-container text-white font-bold py-4 rounded-lg flex items-center justify-center gap-2 hover:bg-primary transition-all active:scale-[0.98] shadow-lg shadow-primary-container/10" type="submit">
 <span>Đăng nhập hệ thống</span>
 <span class="material-symbols-outlined text-[18px]">login</span>
 </button>
@@ -323,6 +401,9 @@
 <span class="text-[10px] font-bold text-outline uppercase tracking-wider">© 2024 Bộ Tài Chính</span>
 </div>
 </footer>
+
+<!-- Face Login Overlay -->
+
 </main>
 <script>
         const AUTH_TAB_ANIMATION_MS = 240;
@@ -439,4 +520,79 @@
     </script>
 <script src="../js/api.js"></script>
 <script src="../js/login.js"></script>
+<div id="bio-overlay" class="bio-overlay">
+    <button onclick="closeBioOverlay()" class="absolute top-6 right-6 text-white/60 hover:text-white transition-colors z-20">
+        <span class="material-symbols-outlined text-3xl">close</span>
+    </button>
+    <p class="text-white/40 text-[10px] font-black uppercase tracking-[0.2em] mb-6">Xác thực Sinh trắc học</p>
+    <div class="scan-frame">
+        <video id="bio-video" autoplay playsinline muted></video>
+        <div class="scan-line"></div>
+        <div class="scan-corner tl"></div>
+        <div class="scan-corner tr"></div>
+        <div class="scan-corner bl"></div>
+        <div class="scan-corner br"></div>
+    </div>
+    <p id="bio-status" class="bio-status-text">Đang khởi tạo camera...</p>
+    <div class="flex gap-3 mt-6">
+        <button id="bio-capture-btn" onclick="captureFaceLogin()" class="px-8 py-3 bg-primary-container text-white font-bold rounded-lg text-sm hover:bg-primary transition-all flex items-center gap-2 disabled:opacity-50" disabled>
+            <span class="material-symbols-outlined text-base">photo_camera</span> Xác nhận
+        </button>
+        <button onclick="closeBioOverlay()" class="px-6 py-3 bg-white/10 text-white font-bold rounded-lg text-sm hover:bg-white/20 transition-all">Hủy</button>
+    </div>
+</div>
+
+<!-- CCCD Login Modal -->
+<div id="cccd-modal" class="cccd-modal">
+    <div class="bg-surface-container-lowest rounded-2xl p-8 max-w-md w-full shadow-2xl mx-4 relative">
+        <button onclick="closeCccdModal()" class="absolute top-4 right-4 text-slate-400 hover:text-slate-700 transition-colors">
+            <span class="material-symbols-outlined">close</span>
+        </button>
+        <div class="text-center mb-6">
+            <div class="w-16 h-16 bg-primary-container/10 rounded-2xl flex items-center justify-center mx-auto mb-4">
+                <span class="material-symbols-outlined text-primary-container text-3xl" style="font-variation-settings: 'FILL' 1;">id_card</span>
+            </div>
+            <h3 class="text-lg font-bold text-primary-container">Đăng nhập bằng CCCD</h3>
+            <p class="text-xs text-on-surface-variant mt-1">Nhập số Căn cước công dân đã xác minh</p>
+        </div>
+        <div class="space-y-1 mb-6">
+            <label class="block text-[10px] font-extrabold text-on-surface-variant uppercase tracking-widest px-1">Số CCCD</label>
+            <input id="cccd-login-input" class="w-full bg-surface-container-lowest border border-outline-variant/30 rounded-lg py-3 px-4 text-sm font-mono tracking-wider focus:outline-none focus:ring-2 focus:ring-primary-container focus:border-transparent transition-all" placeholder="0XX XXX XXX XXX" type="text" maxlength="12" />
+        </div>
+        <button id="cccd-login-btn" onclick="submitCccdLogin()" class="w-full py-3 bg-primary-container text-white font-bold rounded-lg text-sm hover:bg-primary transition-all flex items-center justify-center gap-2">
+            <span class="material-symbols-outlined text-base">login</span> Xác nhận đăng nhập
+        </button>
+        <p id="cccd-login-error" class="text-xs text-error font-bold mt-3 text-center hidden"></p>
+    </div>
+</div>
+
+<!-- 2FA Signature Verification Modal (Login) -->
+<div id="login-sig-modal" class="sig-modal">
+    <div class="bg-surface-container-lowest rounded-2xl p-8 max-w-lg w-full shadow-2xl mx-4 relative">
+        <button onclick="closeLoginSigModal()" class="absolute top-4 right-4 text-slate-400 hover:text-slate-700 transition-colors">
+            <span class="material-symbols-outlined">close</span>
+        </button>
+        <div class="text-center mb-6">
+            <div class="w-16 h-16 bg-amber-50 rounded-2xl flex items-center justify-center mx-auto mb-4 border border-amber-200">
+                <span class="material-symbols-outlined text-amber-600 text-3xl" style="font-variation-settings: 'FILL' 1;">draw</span>
+            </div>
+            <h3 class="text-lg font-bold text-primary-container">Xác thực Chữ ký số (Bước 2)</h3>
+            <p class="text-xs text-on-surface-variant mt-1">Ký tên để hoàn tất quá trình đăng nhập 2 bước</p>
+        </div>
+        <div class="sig-canvas-wrap mx-auto" style="width:420px;height:180px;">
+            <canvas id="login-sig-canvas" width="420" height="180"></canvas>
+            <div class="sig-baseline"></div>
+        </div>
+        <div class="flex gap-3 mt-4 justify-center">
+            <button onclick="clearLoginSigCanvas()" class="px-4 py-2 bg-slate-100 text-slate-600 font-bold rounded-lg text-xs hover:bg-slate-200 transition-all flex items-center gap-1">
+                <span class="material-symbols-outlined text-sm">ink_eraser</span> Xóa
+            </button>
+        </div>
+        <button id="login-sig-submit-btn" onclick="submitLoginSignature()" class="w-full py-3 bg-primary-container text-white font-bold rounded-lg text-sm hover:bg-primary transition-all flex items-center justify-center gap-2 mt-4">
+            <span class="material-symbols-outlined text-base">login</span> Xác nhận đăng nhập
+        </button>
+        <p id="login-sig-error" class="text-xs text-error font-bold mt-3 text-center hidden"></p>
+    </div>
+</div>
+</body></html>
 </body></html>

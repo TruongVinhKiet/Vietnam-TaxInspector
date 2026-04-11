@@ -119,6 +119,10 @@
 <span class="material-symbols-outlined">trending_down</span>
 <span class="text-sm">Dự báo Nợ đọng</span>
 </a>
+<a class="nav-item text-slate-400 hover:text-white transition-colors hover:bg-white/5 flex items-center gap-3 px-4 py-3 scale-95 active:scale-90 transition-transform rounded-lg" href="profile.html" data-page="profile.html" data-title="Tài khoản Cán bộ">
+<span class="material-symbols-outlined">account_circle</span>
+<span class="text-sm">Tài khoản</span>
+</a>
 </nav>
 <div class="mt-auto px-6 pt-6 border-t border-white/5">
 <div class="flex items-center gap-3 p-2 rounded-lg bg-white/5">
@@ -159,7 +163,7 @@
 </div>
 </header>
 <!-- Main Content Canvas -->
-<main class="ml-64 p-12 min-h-screen bg-grid-subtle">
+<main class="ml-64 p-12 min-h-screen bg-grid-subtle page-transition">
 <div class="max-w-6xl mx-auto space-y-12">
 <!-- Page Header Section -->
 <section class="flex flex-col md:flex-row md:items-end justify-between gap-6">
@@ -226,8 +230,8 @@
 <!-- AI Red Flags Section -->
 <div class="space-y-4">
 <div class="flex items-center justify-between">
-<h4 class="text-sm font-black uppercase tracking-widest text-primary-container">AI Anomalies Detected</h4>
-<span class="text-[10px] text-slate-400 font-medium">3 CRITICAL FINDINGS</span>
+<h4 class="text-sm font-black uppercase tracking-widest text-primary-container">Dấu hiệu Bất thường AI</h4>
+<span class="text-[10px] text-slate-400 font-medium">3 CẢNH BÁO NGHIÊM TRỌNG</span>
 </div>
 <div class="space-y-3">
 <div class="group bg-error-container/20 p-5 rounded-xl border-l-4 border-error flex items-start gap-4 transition-all hover:translate-x-1">
@@ -257,15 +261,15 @@
 <!-- Risk Meter (Spans 4 columns) -->
 <div class="col-span-12 lg:col-span-4 sticky top-24">
 <div class="bg-white p-8 rounded-2xl shadow-[0_30px_60px_rgba(0,0,0,0.05)] border border-outline-variant/10 text-center space-y-6">
-<p class="text-[10px] font-black uppercase tracking-[0.3em] text-slate-400">Tax Compliance Score</p>
+<p class="text-[10px] font-black uppercase tracking-[0.3em] text-slate-400">Điểm số Tuân thủ Thuế</p>
 <div class="relative inline-flex items-center justify-center">
 <svg class="w-48 h-48 transform -rotate-90">
 <circle class="text-slate-100" cx="96" cy="96" fill="transparent" r="88" stroke="currentColor" stroke-width="12"></circle>
-<circle cx="96" cy="96" fill="transparent" r="88" stroke="#ba1a1a" stroke-dasharray="552.92" stroke-dashoffset="82.94" stroke-linecap="round" stroke-width="12"></circle>
+<circle cx="96" cy="96" fill="transparent" r="88" stroke="#ba1a1a" stroke-dasharray="552.92" stroke-dashoffset="552.92" stroke-linecap="round" stroke-width="12" id="risk-circle" style="transition: stroke-dashoffset 2s cubic-bezier(0.16, 1, 0.3, 1);"></circle>
 </svg>
 <div class="absolute flex flex-col items-center">
-<span class="text-6xl font-black text-error tracking-tighter">85</span>
-<span class="text-[10px] font-bold text-slate-400 uppercase">/ 100 PTS</span>
+<span class="text-6xl font-black text-error tracking-tighter" id="risk-score">0</span>
+<span class="text-[10px] font-bold text-slate-400 uppercase">/ 100 ĐIỂM</span>
 </div>
 </div>
 <div class="py-2 px-4 bg-error text-white rounded-lg inline-block mx-auto text-xs font-black tracking-widest">
@@ -276,19 +280,19 @@
                         </p>
 <div class="pt-6 border-t border-slate-100 grid grid-cols-2 gap-4">
 <div class="text-left">
-<p class="text-[10px] text-slate-400 font-bold uppercase">Confidence</p>
-<p class="text-sm font-bold text-primary-container">94.2% AI</p>
+<p class="text-[10px] text-slate-400 font-bold uppercase">Độ tin cậy</p>
+<p class="text-sm font-bold text-primary-container"><span id="anim-confidence">0</span>% AI</p>
 </div>
 <div class="text-right">
-<p class="text-[10px] text-slate-400 font-bold uppercase">Priority</p>
-<p class="text-sm font-bold text-error">Tier 1</p>
+<p class="text-[10px] text-slate-400 font-bold uppercase">Mức ưu tiên</p>
+<p class="text-sm font-bold text-error">Cấp độ 1</p>
 </div>
 </div>
 </div>
 <div class="mt-6 p-6 bg-primary-container rounded-2xl text-white">
 <div class="flex items-center gap-3 mb-4">
 <span class="material-symbols-outlined text-white text-xl">gavel</span>
-<h5 class="text-xs font-black uppercase tracking-widest">Inspector Action</h5>
+<h5 class="text-xs font-black uppercase tracking-widest">Hành động Thanh tra</h5>
 </div>
 <div class="space-y-3">
 <button class="w-full py-3 bg-white/10 hover:bg-white/20 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all">Gửi thông báo giải trình</button>
