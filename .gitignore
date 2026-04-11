@@ -103,6 +103,7 @@ Backend/__pycache__/
 Backend/.env
 Database/*.db
 Database/*.sqlite
+*.sql
 
 # Frontend
 Frontend/node_modules/
