@@ -143,13 +143,39 @@
         .scan-corner.bl { bottom: 8px; left: 8px; border-bottom-width: 3px; border-left-width: 3px; border-bottom-left-radius: 12px; }
         .scan-corner.br { bottom: 8px; right: 8px; border-bottom-width: 3px; border-right-width: 3px; border-bottom-right-radius: 12px; }
         .bio-status-text { margin-top: 24px; color: #aec7f6; font-size: 13px; font-weight: 700; text-align: center; letter-spacing: 0.05em; }
-        .cccd-modal, .sig-modal {
+        .cccd-modal, .sig-modal, .avatar-modal {
             position: fixed; inset: 0; z-index: 100;
             background: rgba(0,10,30,0.85); backdrop-filter: blur(12px);
             display: flex; align-items: center; justify-content: center;
             opacity: 0; pointer-events: none; transition: opacity 400ms ease;
         }
-        .cccd-modal.active, .sig-modal.active { opacity: 1; pointer-events: auto; }
+        .cccd-modal.active, .sig-modal.active, .avatar-modal.active { opacity: 1; pointer-events: auto; }
+        .avatar-modal-panel {
+            transform: translateY(10px) scale(0.98);
+            opacity: 0;
+            transition: transform 260ms cubic-bezier(0.16, 1, 0.3, 1), opacity 220ms ease;
+        }
+        .avatar-modal.active .avatar-modal-panel {
+            transform: translateY(0) scale(1);
+            opacity: 1;
+        }
+        .avatar-choice-btn {
+            transition: transform 180ms ease, border-color 180ms ease, background-color 180ms ease;
+        }
+        .avatar-choice-btn:hover {
+            transform: translateY(-2px);
+            border-color: rgba(0, 33, 71, 0.25);
+            background: #f7f9fc;
+        }
+        .avatar-preview-frame {
+            width: 280px;
+            height: 280px;
+            border-radius: 20px;
+            overflow: hidden;
+            background: #eef2f8;
+            border: 2px solid rgba(0, 33, 71, 0.12);
+            box-shadow: inset 0 0 0 1px rgba(255,255,255,0.5);
+        }
         .sig-canvas-wrap {
             background: white; border-radius: 12px; position: relative;
             box-shadow: inset 0 2px 8px rgba(0,0,0,0.06);
@@ -162,12 +188,33 @@
             position: absolute; bottom: 40px; left: 24px; right: 24px;
             border-bottom: 1px dashed #c4c6cf; pointer-events: none;
         }
+        .profile-toast {
+            position: fixed;
+            top: 18px;
+            left: 50%;
+            transform: translate(-50%, -12px);
+            min-width: 280px;
+            max-width: 560px;
+            padding: 12px 16px;
+            border-radius: 12px;
+            font-size: 13px;
+            font-weight: 700;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 220ms ease, transform 220ms ease;
+            box-shadow: 0 12px 30px rgba(2, 16, 43, 0.18);
+            z-index: 120;
+        }
+        .profile-toast.show { opacity: 1; transform: translate(-50%, 0); }
+        .profile-toast-success { background: #0e7a3c; color: #fff; }
+        .profile-toast-error { background: #ba1a1a; color: #fff; }
     </style>
 <script defer src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
 <link rel="stylesheet" href="../css/global.css?v=3.1">
 <link rel="icon" type="image/png" href="../assets/logo.png">
 </head>
 <body class="bg-surface text-on-surface selection:bg-primary-fixed-dim">
+<div id="profile-toast" class="profile-toast" aria-live="polite"></div>
 <!-- SideNavBar Component -->
 <aside class="fixed left-0 top-0 bottom-0 w-64 bg-slate-900 dark:bg-[#000a1e] text-white font-inter tracking-tight shadow-2xl flex flex-col py-6 z-50">
 <div class="px-6 mb-10 flex items-center gap-3">
@@ -203,8 +250,9 @@
 </nav>
 <div class="mt-auto px-6 pt-6 border-t border-white/5">
 <div class="flex items-center gap-3 p-2 rounded-lg bg-white/5">
-<div class="w-8 h-8 rounded bg-primary-fixed-dim/20 flex items-center justify-center">
-<span class="material-symbols-outlined text-primary-fixed-dim text-sm" style="font-variation-settings: 'FILL' 1;">admin_panel_settings</span>
+<div class="w-8 h-8 rounded bg-primary-fixed-dim/20 flex items-center justify-center overflow-hidden shrink-0">
+<img id="user-avatar-image" alt="Avatar" class="w-full h-full object-cover hidden" />
+<span id="user-avatar-fallback" class="text-primary-fixed-dim text-[10px] font-black tracking-tight">AD</span>
 </div>
 <div id="user-profile-badge">
 <p class="text-xs font-bold" id="user-full-name">Admin Profile</p>
@@ -268,9 +316,20 @@
     <div class="absolute -right-4 -bottom-12 w-40 h-40 bg-white/5 rounded-full"></div>
     <div class="relative z-10 flex items-center gap-6">
         <!-- Avatar -->
-        <div class="w-20 h-20 bg-white/15 rounded-2xl flex items-center justify-center border-2 border-white/20 shadow-lg">
+        <button
+            id="profile-avatar-trigger"
+            type="button"
+            onclick="openAvatarPickerModal()"
+            class="w-20 h-20 bg-white/15 rounded-2xl flex items-center justify-center border-2 border-white/20 shadow-lg overflow-hidden relative group cursor-pointer focus:outline-none focus:ring-2 focus:ring-white/60"
+            title="Cập nhật ảnh đại diện"
+            aria-label="Cập nhật ảnh đại diện"
+        >
+            <img id="profile-avatar-image" alt="Ảnh đại diện cán bộ" class="w-full h-full object-cover hidden" />
             <span id="profile-avatar-initials" class="text-2xl font-black tracking-tighter">--</span>
-        </div>
+            <div class="absolute inset-0 bg-black/35 opacity-0 group-hover:opacity-100 group-focus:opacity-100 transition-opacity flex items-center justify-center">
+                <span class="material-symbols-outlined text-white text-xl">photo_camera</span>
+            </div>
+        </button>
         <div class="flex-1">
             <h3 id="profile-full-name" class="text-2xl font-bold tracking-tight mb-1">Đang tải...</h3>
             <div class="flex items-center gap-3">
@@ -292,46 +351,74 @@
 <!-- Content Grid -->
 <div class="grid grid-cols-12 gap-6">
 
-    <div class="col-span-12 lg:col-span-7 self-start profile-card bg-surface-container-lowest rounded-xl shadow-sm overflow-hidden">
-        <div class="p-6 border-b border-surface-container flex items-center gap-3">
-            <span class="material-symbols-outlined text-primary-container" style="font-variation-settings: 'FILL' 1;">badge</span>
-            <h3 class="font-bold text-primary-container">Thông tin Tài khoản</h3>
+    <div class="col-span-12 lg:col-span-7 self-start space-y-6">
+        <div class="profile-card bg-surface-container-lowest rounded-xl shadow-sm overflow-hidden">
+            <div class="p-6 border-b border-surface-container flex items-center gap-3">
+                <span class="material-symbols-outlined text-primary-container" style="font-variation-settings: 'FILL' 1;">badge</span>
+                <h3 class="font-bold text-primary-container">Thông tin Tài khoản</h3>
+            </div>
+            <div class="divide-y divide-surface-container">
+                <div class="flex items-center px-6 py-3 hover:bg-surface-container-low/50 transition-colors">
+                    <span class="text-xs font-bold uppercase tracking-widest text-slate-400 w-40 shrink-0">Mã cán bộ</span>
+                    <span id="info-badge" class="text-sm font-medium font-mono">---</span>
+                </div>
+                <div class="flex items-center px-6 py-3 hover:bg-surface-container-low/50 transition-colors">
+                    <span class="text-xs font-bold uppercase tracking-widest text-slate-400 w-40 shrink-0">Họ và tên</span>
+                    <span id="info-name" class="text-sm font-bold">---</span>
+                </div>
+                <div class="flex items-center px-6 py-3 hover:bg-surface-container-low/50 transition-colors">
+                    <span class="text-xs font-bold uppercase tracking-widest text-slate-400 w-40 shrink-0">Email công vụ</span>
+                    <span id="info-email" class="text-sm font-medium text-primary-container">---</span>
+                </div>
+                <div class="flex items-center px-6 py-3 hover:bg-surface-container-low/50 transition-colors">
+                    <span class="text-xs font-bold uppercase tracking-widest text-slate-400 w-40 shrink-0">Phòng ban</span>
+                    <span id="info-department" class="text-sm font-medium">---</span>
+                </div>
+                <div class="flex items-center px-6 py-3 hover:bg-surface-container-low/50 transition-colors group">
+                    <span class="text-xs font-bold uppercase tracking-widest text-slate-400 w-40 shrink-0">Số điện thoại</span>
+                    <span id="info-phone" class="text-sm font-medium">---</span>
+                    <input id="phone-edit-input" class="text-sm font-medium font-mono border border-primary-container/40 rounded-lg px-3 py-1.5 ml-2 hidden focus:outline-none focus:ring-2 focus:ring-primary-container w-40" type="tel" maxlength="11" placeholder="0xxx xxx xxx" />
+                    <button id="btn-edit-phone" onclick="togglePhoneEdit()" class="ml-auto text-slate-400 hover:text-primary-container transition-colors opacity-0 group-hover:opacity-100" title="Chỉnh sửa SĐT">
+                        <span class="material-symbols-outlined text-lg">edit</span>
+                    </button>
+                    <button id="btn-save-phone" onclick="savePhone()" class="ml-2 px-3 py-1 bg-primary-container text-white text-xs font-bold rounded-lg hover:bg-primary transition-all hidden">Lưu</button>
+                    <button id="btn-cancel-phone" onclick="cancelPhoneEdit()" class="ml-1 px-3 py-1 bg-slate-100 text-slate-600 text-xs font-bold rounded-lg hover:bg-slate-200 transition-all hidden">Hủy</button>
+                </div>
+                <div class="flex items-center px-6 py-3 hover:bg-surface-container-low/50 transition-colors">
+                    <span class="text-xs font-bold uppercase tracking-widest text-slate-400 w-40 shrink-0">Quyền hạn</span>
+                    <span id="info-role" class="text-sm font-bold">---</span>
+                </div>
+                <div class="flex items-center px-6 py-3 hover:bg-surface-container-low/50 transition-colors">
+                    <span class="text-xs font-bold uppercase tracking-widest text-slate-400 w-40 shrink-0">Ngày tạo</span>
+                    <span id="info-created" class="text-sm font-medium text-slate-500">---</span>
+                </div>
+            </div>
         </div>
-        <div class="divide-y divide-surface-container">
-            <div class="flex items-center px-6 py-3 hover:bg-surface-container-low/50 transition-colors">
-                <span class="text-xs font-bold uppercase tracking-widest text-slate-400 w-40 shrink-0">Mã cán bộ</span>
-                <span id="info-badge" class="text-sm font-medium font-mono">---</span>
+
+        <!-- Card: Đổi mật khẩu -->
+        <div id="change-password-card" class="profile-card bg-surface-container-lowest rounded-xl shadow-sm overflow-hidden">
+            <div class="p-6 border-b border-surface-container flex items-center gap-3">
+                <span class="material-symbols-outlined text-primary-container" style="font-variation-settings: 'FILL' 1;">password</span>
+                <h3 class="font-bold text-primary-container">Đổi mật khẩu</h3>
             </div>
-            <div class="flex items-center px-6 py-3 hover:bg-surface-container-low/50 transition-colors">
-                <span class="text-xs font-bold uppercase tracking-widest text-slate-400 w-40 shrink-0">Họ và tên</span>
-                <span id="info-name" class="text-sm font-bold">---</span>
-            </div>
-            <div class="flex items-center px-6 py-3 hover:bg-surface-container-low/50 transition-colors">
-                <span class="text-xs font-bold uppercase tracking-widest text-slate-400 w-40 shrink-0">Email công vụ</span>
-                <span id="info-email" class="text-sm font-medium text-primary-container">---</span>
-            </div>
-            <div class="flex items-center px-6 py-3 hover:bg-surface-container-low/50 transition-colors">
-                <span class="text-xs font-bold uppercase tracking-widest text-slate-400 w-40 shrink-0">Phòng ban</span>
-                <span id="info-department" class="text-sm font-medium">---</span>
-            </div>
-            <div class="flex items-center px-6 py-3 hover:bg-surface-container-low/50 transition-colors group">
-                <span class="text-xs font-bold uppercase tracking-widest text-slate-400 w-40 shrink-0">Số điện thoại</span>
-                <span id="info-phone" class="text-sm font-medium">---</span>
-                <input id="phone-edit-input" class="text-sm font-medium font-mono border border-primary-container/40 rounded-lg px-3 py-1.5 ml-2 hidden focus:outline-none focus:ring-2 focus:ring-primary-container w-40" type="tel" maxlength="11" placeholder="0xxx xxx xxx" />
-                <button id="btn-edit-phone" onclick="togglePhoneEdit()" class="ml-auto text-slate-400 hover:text-primary-container transition-colors opacity-0 group-hover:opacity-100" title="Chỉnh sửa SĐT">
-                    <span class="material-symbols-outlined text-lg">edit</span>
+            <form id="change-password-form" class="p-6 space-y-3">
+                <div>
+                    <label class="block text-[10px] font-extrabold uppercase tracking-widest text-slate-500 mb-1">Mật khẩu hiện tại</label>
+                    <input id="current-password" type="password" class="w-full border border-outline-variant/30 rounded-lg py-3 px-4 text-sm focus:outline-none focus:ring-2 focus:ring-primary-container" placeholder="Nhập mật khẩu hiện tại" />
+                </div>
+                <div>
+                    <label class="block text-[10px] font-extrabold uppercase tracking-widest text-slate-500 mb-1">Mật khẩu mới</label>
+                    <input id="new-password" type="password" class="w-full border border-outline-variant/30 rounded-lg py-3 px-4 text-sm focus:outline-none focus:ring-2 focus:ring-primary-container" placeholder="Tối thiểu 8 ký tự" />
+                </div>
+                <div>
+                    <label class="block text-[10px] font-extrabold uppercase tracking-widest text-slate-500 mb-1">Xác nhận mật khẩu mới</label>
+                    <input id="confirm-password" type="password" class="w-full border border-outline-variant/30 rounded-lg py-3 px-4 text-sm focus:outline-none focus:ring-2 focus:ring-primary-container" placeholder="Nhập lại mật khẩu mới" />
+                </div>
+                <button id="change-password-btn" type="button" onclick="submitChangePassword()" class="w-full mt-2 py-3 bg-primary-container text-white font-bold rounded-lg text-sm hover:bg-primary transition-colors flex items-center justify-center gap-2 active:scale-[0.98]">
+                    <span class="material-symbols-outlined text-sm">lock_reset</span>
+                    Cập nhật mật khẩu
                 </button>
-                <button id="btn-save-phone" onclick="savePhone()" class="ml-2 px-3 py-1 bg-primary-container text-white text-xs font-bold rounded-lg hover:bg-primary transition-all hidden">Lưu</button>
-                <button id="btn-cancel-phone" onclick="cancelPhoneEdit()" class="ml-1 px-3 py-1 bg-slate-100 text-slate-600 text-xs font-bold rounded-lg hover:bg-slate-200 transition-all hidden">Hủy</button>
-            </div>
-            <div class="flex items-center px-6 py-3 hover:bg-surface-container-low/50 transition-colors">
-                <span class="text-xs font-bold uppercase tracking-widest text-slate-400 w-40 shrink-0">Quyền hạn</span>
-                <span id="info-role" class="text-sm font-bold">---</span>
-            </div>
-            <div class="flex items-center px-6 py-3 hover:bg-surface-container-low/50 transition-colors">
-                <span class="text-xs font-bold uppercase tracking-widest text-slate-400 w-40 shrink-0">Ngày tạo</span>
-                <span id="info-created" class="text-sm font-medium text-slate-500">---</span>
-            </div>
+            </form>
         </div>
     </div>
 
@@ -624,6 +711,81 @@ document.addEventListener("DOMContentLoaded", function() {
             <span class="material-symbols-outlined text-base">verified</span> Lưu chữ ký
         </button>
         <p id="sig-error" class="text-xs text-error font-bold mt-3 text-center hidden"></p>
+    </div>
+</div>
+
+<!-- Avatar Picker Modal -->
+<div id="avatar-chooser-modal" class="avatar-modal">
+    <div class="avatar-modal-panel bg-surface-container-lowest rounded-2xl p-8 max-w-md w-full shadow-2xl mx-4 relative">
+        <button onclick="closeAvatarPickerModal()" class="absolute top-4 right-4 text-slate-400 hover:text-slate-700 transition-colors">
+            <span class="material-symbols-outlined">close</span>
+        </button>
+        <div class="text-center mb-6">
+            <div class="w-16 h-16 bg-primary-container/10 rounded-2xl flex items-center justify-center mx-auto mb-4">
+                <span class="material-symbols-outlined text-primary-container text-3xl" style="font-variation-settings: 'FILL' 1;">account_circle</span>
+            </div>
+            <h3 class="text-lg font-bold text-primary-container">Cập nhật ảnh đại diện</h3>
+            <p class="text-xs text-on-surface-variant mt-1">Chọn camera hoặc tải ảnh có sẵn từ máy tính.</p>
+        </div>
+        <div class="space-y-3">
+            <button type="button" onclick="openAvatarCameraModal()" class="avatar-choice-btn w-full border border-outline-variant/30 rounded-xl px-4 py-4 text-left flex items-center gap-3">
+                <span class="material-symbols-outlined text-primary-container">photo_camera</span>
+                <span>
+                    <span class="block text-sm font-bold text-primary-container">Mở camera và chụp ảnh</span>
+                    <span class="block text-[11px] text-slate-500">Cho phép xem trước trước khi lưu.</span>
+                </span>
+            </button>
+            <button type="button" onclick="triggerAvatarFileInput()" class="avatar-choice-btn w-full border border-outline-variant/30 rounded-xl px-4 py-4 text-left flex items-center gap-3">
+                <span class="material-symbols-outlined text-primary-container">upload</span>
+                <span>
+                    <span class="block text-sm font-bold text-primary-container">Chọn ảnh từ máy tính</span>
+                    <span class="block text-[11px] text-slate-500">Hỗ trợ PNG/JPEG, tối đa 5MB.</span>
+                </span>
+            </button>
+        </div>
+        <input id="avatar-file-input" type="file" accept="image/png,image/jpeg" class="hidden" onchange="handleAvatarFileSelect(event)" />
+    </div>
+</div>
+
+<!-- Avatar Camera Modal -->
+<div id="avatar-camera-modal" class="avatar-modal">
+    <div class="avatar-modal-panel bg-surface-container-lowest rounded-2xl p-8 max-w-xl w-full shadow-2xl mx-4 relative">
+        <button onclick="closeAvatarCameraModal()" class="absolute top-4 right-4 text-slate-400 hover:text-slate-700 transition-colors">
+            <span class="material-symbols-outlined">close</span>
+        </button>
+        <div class="text-center mb-6">
+            <h3 class="text-lg font-bold text-primary-container">Chụp ảnh đại diện</h3>
+            <p id="avatar-camera-status" class="text-xs text-on-surface-variant mt-1">Đưa khuôn mặt vào khung hình, sau đó nhấn Chụp ảnh.</p>
+        </div>
+        <div class="avatar-preview-frame mx-auto mb-5">
+            <video id="avatar-camera-video" autoplay playsinline muted class="w-full h-full object-cover"></video>
+            <img id="avatar-camera-preview" alt="Xem trước ảnh camera" class="w-full h-full object-cover hidden" />
+        </div>
+        <div class="flex flex-wrap gap-2 justify-center">
+            <button id="avatar-capture-btn" type="button" onclick="captureAvatarFromCamera()" class="px-5 py-2.5 bg-primary-container text-white font-bold rounded-lg text-sm hover:bg-primary transition-all">Chụp ảnh</button>
+            <button id="avatar-retake-btn" type="button" onclick="retakeAvatarCamera()" class="px-5 py-2.5 bg-slate-100 text-slate-700 font-bold rounded-lg text-sm hover:bg-slate-200 transition-all hidden">Chụp lại</button>
+            <button id="avatar-camera-confirm-btn" type="button" onclick="confirmAvatarCameraUpload()" class="px-5 py-2.5 bg-emerald-600 text-white font-bold rounded-lg text-sm hover:bg-emerald-700 transition-all hidden">Xác nhận lưu</button>
+        </div>
+    </div>
+</div>
+
+<!-- Avatar File Preview Modal -->
+<div id="avatar-preview-modal" class="avatar-modal">
+    <div class="avatar-modal-panel bg-surface-container-lowest rounded-2xl p-8 max-w-lg w-full shadow-2xl mx-4 relative">
+        <button onclick="closeAvatarPreviewModal()" class="absolute top-4 right-4 text-slate-400 hover:text-slate-700 transition-colors">
+            <span class="material-symbols-outlined">close</span>
+        </button>
+        <div class="text-center mb-6">
+            <h3 class="text-lg font-bold text-primary-container">Xem trước ảnh đại diện</h3>
+            <p class="text-xs text-on-surface-variant mt-1">Bạn có thể chọn lại ảnh khác trước khi lưu.</p>
+        </div>
+        <div class="avatar-preview-frame mx-auto mb-5">
+            <img id="avatar-preview-image" alt="Xem trước ảnh tải lên" class="w-full h-full object-cover" />
+        </div>
+        <div class="flex flex-wrap gap-2 justify-center">
+            <button type="button" onclick="triggerAvatarFileInput()" class="px-5 py-2.5 bg-slate-100 text-slate-700 font-bold rounded-lg text-sm hover:bg-slate-200 transition-all">Chọn ảnh khác</button>
+            <button id="avatar-preview-confirm-btn" type="button" onclick="confirmAvatarFileUpload()" class="px-5 py-2.5 bg-primary-container text-white font-bold rounded-lg text-sm hover:bg-primary transition-all">Lưu ảnh đại diện</button>
+        </div>
     </div>
 </div>
 </body></html>

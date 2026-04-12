@@ -11,6 +11,20 @@ Tài liệu này lưu trữ toàn bộ thông tin về kiến trúc tổng thể
 
 ## 2. Các Modules Nghiệp Vụ Cốt Lõi (Core Features)
 
+### 📌 Module Bảo mật Tài khoản: Quên mật khẩu / Đổi mật khẩu
+*   **Mô tả**: Bổ sung luồng tự khôi phục mật khẩu và đổi mật khẩu trong phiên đăng nhập.
+*   **Luồng khôi phục**:
+    *   Người dùng gửi yêu cầu tại trang đăng nhập (email công vụ).
+    *   Backend phát hành reset token một lần, thời hạn ngắn.
+    *   Trong local mode, reset link ghi vào `Backend/.otp_outbox.log` để kiểm thử không cần mailbox thật.
+    *   Người dùng mở `reset-password.html` để đặt mật khẩu mới.
+*   **Luồng đổi mật khẩu**:
+    *   Thực hiện tại trang Tài khoản, yêu cầu mật khẩu hiện tại + mật khẩu mới.
+*   **Tiêu chí an toàn**:
+    *   Không lộ thông tin email tồn tại/không tồn tại.
+    *   Token reset chỉ dùng một lần, có hạn dùng, lưu dạng hash trong DB.
+    *   Mọi thao tác được ghi audit log.
+
 ### 📌 Tab 1: Hệ thống Chấm điểm Rủi ro (Fraud Risk Scoring)
 *   **Mô tả**: Tự động đánh giá hàng triệu tờ khai thuế, phát hiện "xào nấu" số liệu (doanh thu cao, chi phí đột biến, v.v.).
 *   **Điểm kỹ thuật yếu tố**:

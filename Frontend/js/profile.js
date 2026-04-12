@@ -15,6 +15,38 @@ const ROLE_MAP = {
     admin:     { label: 'Quản trị viên',color: 'bg-emerald-100 text-emerald-700', dot: 'bg-emerald-500' },
 };
 
+let profileToastTimer = null;
+const AVATAR_MAX_BYTES = 5 * 1024 * 1024;
+const AVATAR_ALLOWED_TYPES = ['image/png', 'image/jpeg'];
+
+let avatarCameraStream = null;
+let avatarPendingData = null;
+let avatarUploadInProgress = false;
+
+function showProfileToast(message, type = 'error') {
+    const toast = document.getElementById('profile-toast');
+    if (!toast) {
+        alert(message);
+        return;
+    }
+
+    if (profileToastTimer) {
+        clearTimeout(profileToastTimer);
+    }
+
+    toast.textContent = message;
+    toast.classList.remove('profile-toast-success', 'profile-toast-error', 'show');
+    toast.classList.add(type === 'success' ? 'profile-toast-success' : 'profile-toast-error');
+
+    requestAnimationFrame(() => {
+        toast.classList.add('show');
+    });
+
+    profileToastTimer = setTimeout(() => {
+        toast.classList.remove('show');
+    }, 3400);
+}
+
 function redirectToLogin() {
     window.location.href = 'login.html';
 }
@@ -37,7 +69,7 @@ function renderProfile(user) {
     const role = ROLE_MAP[user.role] || ROLE_MAP.viewer;
     const initials = (user.full_name || '').split(' ').map(w => w[0]).slice(0, 2).join('').toUpperCase();
 
-    document.getElementById('profile-avatar-initials').textContent = initials;
+    setProfileAvatar(user.avatar_data, initials);
     document.getElementById('profile-full-name').textContent = user.full_name;
     document.getElementById('profile-badge-id').textContent = user.badge_id;
 
@@ -57,14 +89,31 @@ function renderProfile(user) {
         year: 'numeric', month: 'long', day: 'numeric',
     });
 
-    const sidebarName = document.getElementById('user-full-name');
-    const sidebarRole = document.getElementById('user-current-role');
-    if (sidebarName) sidebarName.textContent = user.full_name;
-    if (sidebarRole) sidebarRole.textContent = role.label;
+    if (typeof applySidebarIdentity === 'function') {
+        applySidebarIdentity(user);
+    }
 
     updateFaceCard(user.face_verified);
     updateCccdCard(user.cccd_verified);
     updateSignatureCard(user.signature_verified);
+}
+
+function setProfileAvatar(avatarData, initials) {
+    const avatarImg = document.getElementById('profile-avatar-image');
+    const avatarText = document.getElementById('profile-avatar-initials');
+    if (!avatarImg || !avatarText) return;
+
+    if (avatarData) {
+        avatarImg.src = avatarData;
+        avatarImg.classList.remove('hidden');
+        avatarText.classList.add('hidden');
+        return;
+    }
+
+    avatarImg.removeAttribute('src');
+    avatarImg.classList.add('hidden');
+    avatarText.classList.remove('hidden');
+    avatarText.textContent = initials || '--';
 }
 
 function updateFaceCard(verified) {
@@ -86,12 +135,310 @@ function handleLogout() {
     logout();
 }
 
+
+// =============================================================================
+// AVATAR UPDATE (camera or local file)
+// =============================================================================
+
+function openAvatarPickerModal() {
+    if (avatarUploadInProgress) return;
+    const modal = document.getElementById('avatar-chooser-modal');
+    if (modal) modal.classList.add('active');
+}
+
+function closeAvatarPickerModal() {
+    const modal = document.getElementById('avatar-chooser-modal');
+    if (modal) modal.classList.remove('active');
+}
+
+function triggerAvatarFileInput() {
+    const input = document.getElementById('avatar-file-input');
+    if (!input) return;
+    input.click();
+}
+
+function handleAvatarFileSelect(event) {
+    const file = event?.target?.files?.[0];
+    if (!file) return;
+
+    if (!AVATAR_ALLOWED_TYPES.includes(file.type)) {
+        showProfileToast('Chỉ hỗ trợ ảnh PNG hoặc JPEG.');
+        return;
+    }
+
+    if (file.size > AVATAR_MAX_BYTES) {
+        showProfileToast('Dung lượng ảnh vượt quá giới hạn 5MB.');
+        return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = () => {
+        const result = String(reader.result || '');
+        if (!result.startsWith('data:image/')) {
+            showProfileToast('Ảnh tải lên không hợp lệ.');
+            return;
+        }
+
+        avatarPendingData = result;
+        closeAvatarPickerModal();
+        openAvatarPreviewModal(result);
+    };
+    reader.onerror = () => {
+        showProfileToast('Không thể đọc ảnh từ máy tính.');
+    };
+    reader.readAsDataURL(file);
+}
+
+function openAvatarPreviewModal(dataUrl) {
+    const modal = document.getElementById('avatar-preview-modal');
+    const image = document.getElementById('avatar-preview-image');
+    if (!modal || !image) return;
+
+    image.src = dataUrl;
+    modal.classList.add('active');
+}
+
+function closeAvatarPreviewModal(clearPending = true) {
+    const modal = document.getElementById('avatar-preview-modal');
+    if (modal) modal.classList.remove('active');
+    if (clearPending) avatarPendingData = null;
+}
+
+async function confirmAvatarFileUpload() {
+    if (!avatarPendingData) {
+        showProfileToast('Vui lòng chọn ảnh trước khi lưu.');
+        return;
+    }
+
+    const saved = await submitAvatarUpdate(avatarPendingData);
+    if (saved) {
+        closeAvatarPreviewModal();
+    }
+}
+
+function setAvatarCameraStatus(message) {
+    const statusEl = document.getElementById('avatar-camera-status');
+    if (statusEl) statusEl.textContent = message;
+}
+
+function resetAvatarCameraControls() {
+    const video = document.getElementById('avatar-camera-video');
+    const preview = document.getElementById('avatar-camera-preview');
+    const captureBtn = document.getElementById('avatar-capture-btn');
+    const retakeBtn = document.getElementById('avatar-retake-btn');
+    const confirmBtn = document.getElementById('avatar-camera-confirm-btn');
+
+    if (video) video.classList.remove('hidden');
+    if (preview) {
+        preview.classList.add('hidden');
+        preview.removeAttribute('src');
+    }
+    if (captureBtn) captureBtn.classList.remove('hidden');
+    if (retakeBtn) retakeBtn.classList.add('hidden');
+    if (confirmBtn) confirmBtn.classList.add('hidden');
+}
+
+async function startAvatarCamera() {
+    const video = document.getElementById('avatar-camera-video');
+    if (!video || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        return false;
+    }
+
+    try {
+        avatarCameraStream = await navigator.mediaDevices.getUserMedia({
+            video: { width: 640, height: 640, facingMode: 'user' },
+            audio: false,
+        });
+        video.srcObject = avatarCameraStream;
+        await video.play();
+        return true;
+    } catch {
+        return false;
+    }
+}
+
+function stopAvatarCamera() {
+    if (avatarCameraStream) {
+        avatarCameraStream.getTracks().forEach(track => track.stop());
+        avatarCameraStream = null;
+    }
+
+    const video = document.getElementById('avatar-camera-video');
+    if (video) video.srcObject = null;
+}
+
+async function openAvatarCameraModal() {
+    closeAvatarPickerModal();
+    avatarPendingData = null;
+
+    const modal = document.getElementById('avatar-camera-modal');
+    if (!modal) return;
+
+    resetAvatarCameraControls();
+    modal.classList.add('active');
+    setAvatarCameraStatus('Đang xin quyền truy cập camera...');
+
+    const started = await startAvatarCamera();
+    if (!started) {
+        setAvatarCameraStatus('Không thể truy cập camera. Vui lòng chọn ảnh từ máy tính.');
+        showProfileToast('Không thể truy cập camera.');
+        return;
+    }
+
+    setAvatarCameraStatus('Camera đã sẵn sàng. Hãy nhấn Chụp ảnh.');
+}
+
+function closeAvatarCameraModal() {
+    stopAvatarCamera();
+    avatarPendingData = null;
+    const modal = document.getElementById('avatar-camera-modal');
+    if (modal) modal.classList.remove('active');
+    resetAvatarCameraControls();
+}
+
+function captureAvatarFromCamera() {
+    const video = document.getElementById('avatar-camera-video');
+    const preview = document.getElementById('avatar-camera-preview');
+    const captureBtn = document.getElementById('avatar-capture-btn');
+    const retakeBtn = document.getElementById('avatar-retake-btn');
+    const confirmBtn = document.getElementById('avatar-camera-confirm-btn');
+
+    if (!video || video.readyState < 2) {
+        showProfileToast('Camera chưa sẵn sàng. Vui lòng thử lại.');
+        return;
+    }
+
+    const sourceWidth = video.videoWidth;
+    const sourceHeight = video.videoHeight;
+    const side = Math.min(sourceWidth, sourceHeight);
+    const sx = (sourceWidth - side) / 2;
+    const sy = (sourceHeight - side) / 2;
+
+    const canvas = document.createElement('canvas');
+    canvas.width = 640;
+    canvas.height = 640;
+
+    const ctx = canvas.getContext('2d');
+    if (!ctx) {
+        showProfileToast('Không thể xử lý ảnh từ camera.');
+        return;
+    }
+
+    ctx.drawImage(video, sx, sy, side, side, 0, 0, canvas.width, canvas.height);
+    const dataUrl = canvas.toDataURL('image/jpeg', 0.9);
+
+    avatarPendingData = dataUrl;
+    stopAvatarCamera();
+
+    if (preview) {
+        preview.src = dataUrl;
+        preview.classList.remove('hidden');
+    }
+    video.classList.add('hidden');
+    if (captureBtn) captureBtn.classList.add('hidden');
+    if (retakeBtn) retakeBtn.classList.remove('hidden');
+    if (confirmBtn) confirmBtn.classList.remove('hidden');
+
+    setAvatarCameraStatus('Ảnh đã chụp. Bạn có thể chụp lại hoặc xác nhận lưu.');
+}
+
+async function retakeAvatarCamera() {
+    avatarPendingData = null;
+    resetAvatarCameraControls();
+
+    setAvatarCameraStatus('Đang khởi động lại camera...');
+    const started = await startAvatarCamera();
+    if (!started) {
+        setAvatarCameraStatus('Không thể truy cập camera. Vui lòng chọn ảnh từ máy tính.');
+        showProfileToast('Không thể truy cập camera.');
+        return;
+    }
+
+    setAvatarCameraStatus('Camera đã sẵn sàng. Hãy nhấn Chụp ảnh.');
+}
+
+async function confirmAvatarCameraUpload() {
+    if (!avatarPendingData) {
+        showProfileToast('Vui lòng chụp ảnh trước khi lưu.');
+        return;
+    }
+
+    const saved = await submitAvatarUpdate(avatarPendingData);
+    if (saved) {
+        closeAvatarCameraModal();
+    }
+}
+
+function setAvatarControlsDisabled(disabled) {
+    const ids = [
+        'avatar-capture-btn',
+        'avatar-retake-btn',
+        'avatar-camera-confirm-btn',
+        'avatar-preview-confirm-btn',
+    ];
+
+    ids.forEach((id) => {
+        const btn = document.getElementById(id);
+        if (btn) btn.disabled = disabled;
+    });
+}
+
+async function submitAvatarUpdate(avatarImage) {
+    if (!avatarImage || avatarUploadInProgress) {
+        return false;
+    }
+
+    avatarUploadInProgress = true;
+    setAvatarControlsDisabled(true);
+
+    try {
+        const response = await secureFetch(`${API_BASE}/auth/update-avatar`, {
+            method: 'PUT',
+            body: JSON.stringify({ avatar_image: avatarImage }),
+        });
+
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) {
+            showProfileToast(data.detail || 'Không thể cập nhật ảnh đại diện.');
+            return false;
+        }
+
+        showProfileToast(data.message || 'Cập nhật ảnh đại diện thành công.', 'success');
+        await loadProfile();
+        if (typeof hydrateSidebarIdentity === 'function') {
+            hydrateSidebarIdentity({ forceRefresh: true });
+        }
+        return true;
+    } catch (err) {
+        console.error('[Avatar]', err);
+        showProfileToast('Lỗi kết nối API. Vui lòng thử lại.');
+        return false;
+    } finally {
+        avatarUploadInProgress = false;
+        setAvatarControlsDisabled(false);
+    }
+}
+
 document.addEventListener('DOMContentLoaded', () => {
     loadProfile();
     initSigCanvas();
 
     const logoutBtn = document.getElementById('btn-logout');
     if (logoutBtn) logoutBtn.addEventListener('click', handleLogout);
+
+    const avatarFileInput = document.getElementById('avatar-file-input');
+    if (avatarFileInput) {
+        avatarFileInput.addEventListener('click', () => {
+            avatarFileInput.value = '';
+        });
+    }
+
+    document.addEventListener('keydown', (event) => {
+        if (event.key !== 'Escape') return;
+        closeAvatarPickerModal();
+        closeAvatarPreviewModal();
+        closeAvatarCameraModal();
+    });
 });
 
 
@@ -150,6 +497,73 @@ async function savePhone() {
     } catch (err) {
         console.error('[Phone]', err);
         alert('Lỗi kết nối. Vui lòng thử lại.');
+    }
+}
+
+
+// =============================================================================
+// CHANGE PASSWORD
+// =============================================================================
+
+async function submitChangePassword() {
+    const currentPassword = document.getElementById('current-password');
+    const newPassword = document.getElementById('new-password');
+    const confirmPassword = document.getElementById('confirm-password');
+    const submitBtn = document.getElementById('change-password-btn');
+
+    if (!currentPassword || !newPassword || !confirmPassword || !submitBtn) {
+        return;
+    }
+
+    const currentValue = currentPassword.value;
+    const newValue = newPassword.value;
+    const confirmValue = confirmPassword.value;
+
+    if (!currentValue || !newValue || !confirmValue) {
+        showProfileToast('Vui lòng điền đầy đủ thông tin đổi mật khẩu.');
+        return;
+    }
+
+    if (newValue.length < 8) {
+        showProfileToast('Mật khẩu mới phải có ít nhất 8 ký tự.');
+        return;
+    }
+
+    if (newValue !== confirmValue) {
+        showProfileToast('Mật khẩu xác nhận không khớp.');
+        return;
+    }
+
+    const originalText = submitBtn.innerHTML;
+    submitBtn.disabled = true;
+    submitBtn.innerHTML = '<div class="loader" style="width:18px;height:18px;border-width:2px;border-top-color:white;display:inline-block;"></div> Đang cập nhật...';
+
+    try {
+        const response = await secureFetch(`${API_BASE}/auth/change-password`, {
+            method: 'POST',
+            body: JSON.stringify({
+                current_password: currentValue,
+                new_password: newValue,
+                confirm_password: confirmValue,
+            }),
+        });
+
+        if (!response.ok) {
+            const data = await response.json().catch(() => ({}));
+            showProfileToast(data.detail || 'Không thể đổi mật khẩu lúc này.');
+            return;
+        }
+
+        currentPassword.value = '';
+        newPassword.value = '';
+        confirmPassword.value = '';
+        showProfileToast('Đổi mật khẩu thành công.', 'success');
+    } catch (err) {
+        console.error('[ChangePassword]', err);
+        showProfileToast('Lỗi kết nối API. Vui lòng thử lại.');
+    } finally {
+        submitBtn.disabled = false;
+        submitBtn.innerHTML = originalText;
     }
 }
 

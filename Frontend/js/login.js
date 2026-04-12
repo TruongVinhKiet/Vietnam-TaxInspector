@@ -49,6 +49,68 @@ function showApiOfflineMessage() {
     showAuthToast('Backend API chưa chạy trên cổng 8000. Hãy chạy: uvicorn app.main:app --reload --port 8000');
 }
 
+function openForgotModal() {
+    const modal = document.getElementById('forgot-modal');
+    const input = document.getElementById('forgot-email-input');
+    const errorEl = document.getElementById('forgot-error');
+    if (!modal) return;
+    modal.classList.add('active');
+    if (errorEl) {
+        errorEl.textContent = '';
+        errorEl.classList.add('hidden');
+    }
+    if (input) {
+        input.value = '';
+        setTimeout(() => input.focus(), 200);
+    }
+}
+
+function closeForgotModal() {
+    const modal = document.getElementById('forgot-modal');
+    if (modal) {
+        modal.classList.remove('active');
+    }
+}
+
+async function submitForgotPassword() {
+    const input = document.getElementById('forgot-email-input');
+    const errorEl = document.getElementById('forgot-error');
+    const btn = document.getElementById('forgot-submit-btn');
+    if (!input || !errorEl || !btn) return;
+
+    const email = input.value.trim().toLowerCase();
+    if (!email || !email.includes('@')) {
+        errorEl.textContent = 'Vui lòng nhập email công vụ hợp lệ.';
+        errorEl.classList.remove('hidden');
+        return;
+    }
+
+    errorEl.classList.add('hidden');
+    const restore = setButtonLoading(btn, 'Đang gửi...');
+
+    try {
+        const response = await secureFetch(`${API_BASE}/auth/forgot-password`, {
+            method: 'POST',
+            body: JSON.stringify({ email }),
+        });
+
+        if (!response.ok) {
+            errorEl.textContent = await parseApiError(response, 'Không thể gửi yêu cầu khôi phục lúc này.');
+            errorEl.classList.remove('hidden');
+            return;
+        }
+
+        const data = await response.json().catch(() => ({ message: 'Yêu cầu đã được ghi nhận.' }));
+        closeForgotModal();
+        showAuthToast(data.message || 'Yêu cầu khôi phục đã được ghi nhận.', 'success');
+    } catch (err) {
+        console.error('[ForgotPassword]', err);
+        showApiOfflineMessage();
+    } finally {
+        restore();
+    }
+}
+
 function enhanceAuthControls() {
     const controls = document.querySelectorAll('#forms-wrapper input, #forms-wrapper select');
     controls.forEach((control) => {

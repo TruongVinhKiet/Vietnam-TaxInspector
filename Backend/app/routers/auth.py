@@ -12,7 +12,9 @@ Features:
     8. Phone number update
 """
 
-from datetime import timedelta
+from datetime import datetime, timedelta
+import base64
+import binascii
 import json
 import math
 import re
@@ -29,6 +31,8 @@ router = APIRouter(prefix="/api/auth", tags=["Authentication"])
 
 # --- Face matching config ---
 FACE_TOLERANCE = 0.6  # Euclidean distance threshold (0.6 is standard for face-api.js)
+AVATAR_MAX_BYTES = 5 * 1024 * 1024  # 5 MB
+AVATAR_ALLOWED_MIME = {"image/png", "image/jpeg", "image/jpg"}
 
 
 def _euclidean_distance(a: List[float], b: List[float]) -> float:
@@ -79,6 +83,90 @@ def _strip_base64_prefix(data: str) -> str:
     if "," in data:
         return data.split(",", 1)[1]
     return data
+
+
+def _decode_avatar_bytes(avatar_image: str) -> bytes:
+    """
+    Decode and validate avatar payload.
+    Accepts either raw Base64 or data URL format.
+    """
+    if not avatar_image:
+        raise HTTPException(status_code=400, detail="Ảnh đại diện không hợp lệ.")
+
+    data = avatar_image.strip()
+
+    if data.startswith("data:"):
+        try:
+            header, payload = data.split(",", 1)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Dữ liệu ảnh không hợp lệ.")
+
+        if ";base64" not in header:
+            raise HTTPException(status_code=400, detail="Dữ liệu ảnh không đúng định dạng Base64.")
+
+        mime_type = header[5:].split(";", 1)[0].lower()
+        if mime_type not in AVATAR_ALLOWED_MIME:
+            raise HTTPException(status_code=400, detail="Chỉ hỗ trợ ảnh PNG hoặc JPEG.")
+
+        data = payload.strip()
+
+    try:
+        image_bytes = base64.b64decode(data, validate=True)
+    except (binascii.Error, ValueError):
+        raise HTTPException(status_code=400, detail="Ảnh tải lên không phải Base64 hợp lệ.")
+
+    if not image_bytes:
+        raise HTTPException(status_code=400, detail="Ảnh đại diện không hợp lệ.")
+
+    if len(image_bytes) > AVATAR_MAX_BYTES:
+        raise HTTPException(status_code=400, detail="Dung lượng ảnh vượt quá giới hạn 5MB.")
+
+    return image_bytes
+
+
+def _normalize_avatar_data_url(image_bytes: bytes) -> str:
+    """
+    Normalize avatar to a square JPEG for consistent rendering and safer payload size.
+    Returns data URL string.
+    """
+    from io import BytesIO
+    from PIL import Image, ImageOps
+
+    try:
+        with Image.open(BytesIO(image_bytes)) as img:
+            img.verify()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Tệp ảnh không hợp lệ hoặc bị hỏng.")
+
+    try:
+        with Image.open(BytesIO(image_bytes)) as img:
+            image = ImageOps.exif_transpose(img).convert("RGB")
+            width, height = image.size
+
+            if min(width, height) < 80:
+                raise HTTPException(status_code=400, detail="Ảnh quá nhỏ. Vui lòng chọn ảnh rõ hơn.")
+
+            side = min(width, height)
+            left = (width - side) // 2
+            top = (height - side) // 2
+            image = image.crop((left, top, left + side, top + side))
+
+            resampling = Image.Resampling.LANCZOS if hasattr(Image, "Resampling") else Image.LANCZOS
+            image = image.resize((320, 320), resampling)
+
+            output = BytesIO()
+            image.save(output, format="JPEG", quality=88, optimize=True)
+            normalized_bytes = output.getvalue()
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(status_code=400, detail="Không thể xử lý ảnh đại diện.")
+
+    if len(normalized_bytes) > AVATAR_MAX_BYTES:
+        raise HTTPException(status_code=400, detail="Ảnh sau xử lý vẫn vượt quá giới hạn 5MB.")
+
+    normalized_b64 = base64.b64encode(normalized_bytes).decode("ascii")
+    return f"data:image/jpeg;base64,{normalized_b64}"
 
 
 # =============================================================================
@@ -158,6 +246,176 @@ def login(
 
 
 # =============================================================================
+# PASSWORD RECOVERY (forgot/reset/change)
+# =============================================================================
+
+@router.post("/forgot-password", response_model=schemas.GenericMessage)
+@limiter.limit("3/minute")
+def forgot_password(
+    request: Request,
+    body: schemas.ForgotPasswordRequest,
+    db: Session = Depends(get_db),
+):
+    """
+    Create a one-time password reset token.
+    Always returns a generic message to avoid account enumeration.
+    """
+    generic_message = (
+        "Nếu email tồn tại, hướng dẫn đặt lại mật khẩu đã được gửi. "
+        "Trong môi trường local, vui lòng kiểm tra file Backend/.otp_outbox.log."
+    )
+
+    email = body.email.strip().lower()
+    user = db.query(models.User).filter(models.User.email == email).first()
+
+    if not user:
+        auth.log_audit(db, "PASSWORD_FORGOT_REQUEST", request, detail="Email not found")
+        return {"success": True, "message": generic_message}
+
+    now = datetime.utcnow()
+
+    # Invalidate previous active reset tokens for this user.
+    db.query(models.PasswordResetToken).filter(
+        models.PasswordResetToken.user_id == user.id,
+        models.PasswordResetToken.used == False,
+    ).update(
+        {"used": True, "used_at": now},
+        synchronize_session=False,
+    )
+
+    raw_token = auth.generate_password_reset_token()
+    token_hash = auth.hash_password_reset_token(raw_token)
+    expires_at = auth.get_password_reset_expiry()
+
+    reset_entry = models.PasswordResetToken(
+        user_id=user.id,
+        token_hash=token_hash,
+        expires_at=expires_at,
+        used=False,
+    )
+    db.add(reset_entry)
+    db.commit()
+
+    try:
+        channel = auth.deliver_password_reset(user.email, user.badge_id, raw_token, expires_at)
+    except Exception as exc:
+        auth.log_audit(
+            db,
+            "PASSWORD_FORGOT_REQUEST",
+            request,
+            user_id=user.id,
+            badge_id=user.badge_id,
+            detail=f"Reset delivery failed: {type(exc).__name__}",
+        )
+        return {"success": True, "message": generic_message}
+
+    auth.log_audit(
+        db,
+        "PASSWORD_FORGOT_REQUEST",
+        request,
+        user_id=user.id,
+        badge_id=user.badge_id,
+        detail=f"Reset link delivered via {channel}",
+    )
+    return {"success": True, "message": generic_message}
+
+
+@router.post("/reset-password", response_model=schemas.GenericMessage)
+@limiter.limit("5/minute")
+def reset_password(
+    request: Request,
+    body: schemas.ResetPasswordRequest,
+    db: Session = Depends(get_db),
+):
+    if body.new_password != body.confirm_password:
+        raise HTTPException(status_code=400, detail="Mật khẩu xác nhận không khớp.")
+
+    auth.validate_new_password(body.new_password)
+
+    token_hash = auth.hash_password_reset_token(body.token)
+
+    reset_entry = db.query(models.PasswordResetToken).filter(
+        models.PasswordResetToken.token_hash == token_hash,
+        models.PasswordResetToken.used == False,
+    ).first()
+
+    if not reset_entry:
+        auth.log_audit(db, "PASSWORD_RESET_FAILED", request, detail="Invalid or used reset token")
+        raise HTTPException(status_code=400, detail="Liên kết đặt lại mật khẩu không hợp lệ hoặc đã được sử dụng.")
+
+    now = datetime.now(reset_entry.expires_at.tzinfo) if reset_entry.expires_at.tzinfo else datetime.utcnow()
+
+    if reset_entry.expires_at < now:
+        reset_entry.used = True
+        reset_entry.used_at = now
+        db.commit()
+        auth.log_audit(db, "PASSWORD_RESET_FAILED", request, detail="Expired reset token")
+        raise HTTPException(status_code=400, detail="Liên kết đặt lại mật khẩu đã hết hạn.")
+
+    user = db.query(models.User).filter(models.User.id == reset_entry.user_id).first()
+    if not user:
+        reset_entry.used = True
+        reset_entry.used_at = now
+        db.commit()
+        auth.log_audit(db, "PASSWORD_RESET_FAILED", request, detail="User missing for token")
+        raise HTTPException(status_code=400, detail="Tài khoản không tồn tại hoặc đã bị xóa.")
+
+    if auth.verify_password(body.new_password, user.password_hash):
+        raise HTTPException(status_code=400, detail="Mật khẩu mới phải khác mật khẩu hiện tại.")
+
+    user.password_hash = auth.get_password_hash(body.new_password)
+    reset_entry.used = True
+    reset_entry.used_at = now
+
+    # Revoke all remaining active reset tokens after password was changed.
+    db.query(models.PasswordResetToken).filter(
+        models.PasswordResetToken.user_id == user.id,
+        models.PasswordResetToken.used == False,
+    ).update(
+        {"used": True, "used_at": now},
+        synchronize_session=False,
+    )
+
+    db.commit()
+    auth.log_audit(db, "PASSWORD_RESET_SUCCESS", request, user_id=user.id, badge_id=user.badge_id)
+    return {"success": True, "message": "Đặt lại mật khẩu thành công. Bạn có thể đăng nhập bằng mật khẩu mới."}
+
+
+@router.post("/change-password", response_model=schemas.GenericMessage)
+@limiter.limit("10/minute")
+def change_password(
+    request: Request,
+    body: schemas.ChangePasswordRequest,
+    current_user: models.User = Depends(auth.get_current_user),
+    db: Session = Depends(get_db),
+):
+    if body.new_password != body.confirm_password:
+        raise HTTPException(status_code=400, detail="Mật khẩu xác nhận không khớp.")
+
+    auth.validate_new_password(body.new_password)
+
+    if not auth.verify_password(body.current_password, current_user.password_hash):
+        auth.log_audit(
+            db,
+            "PASSWORD_CHANGE_FAILED",
+            request,
+            user_id=current_user.id,
+            badge_id=current_user.badge_id,
+            detail="Current password mismatch",
+        )
+        raise HTTPException(status_code=401, detail="Mật khẩu hiện tại không chính xác.")
+
+    if auth.verify_password(body.new_password, current_user.password_hash):
+        raise HTTPException(status_code=400, detail="Mật khẩu mới phải khác mật khẩu hiện tại.")
+
+    current_user.password_hash = auth.get_password_hash(body.new_password)
+    db.commit()
+
+    auth.log_audit(db, "PASSWORD_CHANGE_SUCCESS", request, user_id=current_user.id, badge_id=current_user.badge_id)
+    return {"success": True, "message": "Đổi mật khẩu thành công."}
+
+
+# =============================================================================
 # LOGOUT – Clear cookie
 # =============================================================================
 
@@ -207,6 +465,58 @@ def update_phone(
     auth.log_audit(db, "PHONE_UPDATE", request, user_id=current_user.id, badge_id=current_user.badge_id,
                    detail=f"SĐT cập nhật: {phone_clean[:4]}****")
     return {"success": True, "message": "Cập nhật số điện thoại thành công.", "phone": phone_clean}
+
+
+@router.put("/update-avatar")
+@limiter.limit("10/minute")
+def update_avatar(
+    request: Request,
+    body: schemas.UpdateAvatarRequest,
+    current_user: models.User = Depends(auth.get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Update avatar for the authenticated user (PNG/JPEG, max 5MB)."""
+    try:
+        image_bytes = _decode_avatar_bytes(body.avatar_image)
+        normalized_avatar = _normalize_avatar_data_url(image_bytes)
+    except HTTPException as exc:
+        auth.log_audit(
+            db,
+            "AVATAR_UPDATE_FAILED",
+            request,
+            user_id=current_user.id,
+            badge_id=current_user.badge_id,
+            detail=f"Validation failed: {exc.detail}",
+        )
+        raise
+    except Exception as exc:
+        auth.log_audit(
+            db,
+            "AVATAR_UPDATE_FAILED",
+            request,
+            user_id=current_user.id,
+            badge_id=current_user.badge_id,
+            detail=f"Unexpected error: {type(exc).__name__}",
+        )
+        raise HTTPException(status_code=500, detail="Không thể cập nhật ảnh đại diện lúc này.")
+
+    current_user.avatar_data = normalized_avatar
+    db.commit()
+
+    auth.log_audit(
+        db,
+        "AVATAR_UPDATE_SUCCESS",
+        request,
+        user_id=current_user.id,
+        badge_id=current_user.badge_id,
+        detail=f"Avatar updated ({len(normalized_avatar)} chars)",
+    )
+
+    return {
+        "success": True,
+        "message": "Cập nhật ảnh đại diện thành công.",
+        "avatar_data": normalized_avatar,
+    }
 
 
 # =============================================================================

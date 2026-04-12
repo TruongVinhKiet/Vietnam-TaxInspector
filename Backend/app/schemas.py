@@ -16,6 +16,27 @@ class LoginRequest(BaseModel):
     badge_id: str
     password: str = Field(min_length=1, max_length=128)
 
+
+class GenericMessage(BaseModel):
+    success: bool
+    message: str
+
+
+class ForgotPasswordRequest(BaseModel):
+    email: str = Field(min_length=8, max_length=100)
+
+
+class ResetPasswordRequest(BaseModel):
+    token: str = Field(min_length=20, max_length=256)
+    new_password: str = Field(min_length=8, max_length=128)
+    confirm_password: str = Field(min_length=8, max_length=128)
+
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str = Field(min_length=1, max_length=128)
+    new_password: str = Field(min_length=8, max_length=128)
+    confirm_password: str = Field(min_length=8, max_length=128)
+
 # --- User Schemas ---
 class UserBase(BaseModel):
     badge_id: str
@@ -31,6 +52,7 @@ class UserCreate(UserBase):
 class UserResponse(UserBase):
     model_config = ConfigDict(from_attributes=True)
     id: int
+    avatar_data: Optional[str] = None
     face_verified: bool = False
     cccd_verified: bool = False
     signature_verified: bool = False
@@ -63,6 +85,15 @@ class SignatureLoginRequest(BaseModel):
 # --- Phone Update Schema ---
 class UpdatePhoneRequest(BaseModel):
     phone: str = Field(..., min_length=10, max_length=15, description="Số điện thoại mới")
+
+
+class UpdateAvatarRequest(BaseModel):
+    avatar_image: str = Field(
+        ...,
+        min_length=64,
+        max_length=8_000_000,
+        description="Data URL hoặc raw Base64 PNG/JPEG (toi da 5MB).",
+    )
 
 
 

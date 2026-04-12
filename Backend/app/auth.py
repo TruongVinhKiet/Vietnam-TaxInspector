@@ -13,7 +13,11 @@ import os
 import base64
 import hashlib
 import hmac
+import secrets
+import smtplib
 from datetime import datetime, timedelta
+from email.message import EmailMessage
+from pathlib import Path
 from typing import Optional
 
 import jwt
@@ -37,6 +41,22 @@ COOKIE_MAX_AGE = ACCESS_TOKEN_EXPIRE_MINUTES * 60  # seconds
 COOKIE_SECURE = os.getenv("COOKIE_SECURE", "false").lower() == "true"  # True in production (HTTPS)
 COOKIE_SAMESITE = "lax"
 COOKIE_DOMAIN = os.getenv("COOKIE_DOMAIN", None)  # None = current domain only
+
+# Password recovery configuration
+RESET_TOKEN_EXPIRE_MINUTES = int(os.getenv("RESET_TOKEN_EXPIRE_MINUTES", "30"))
+FRONTEND_RESET_URL = os.getenv("FRONTEND_RESET_URL", "http://localhost:3000/pages/reset-password.html")
+PASSWORD_OUTBOX_PATH = os.getenv(
+    "PASSWORD_OUTBOX_PATH",
+    str(Path(__file__).resolve().parents[1] / ".otp_outbox.log"),
+)
+SMTP_ENABLED = os.getenv("SMTP_ENABLED", "false").lower() == "true"
+SMTP_HOST = os.getenv("SMTP_HOST", "")
+SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
+SMTP_USER = os.getenv("SMTP_USER", "")
+SMTP_PASS = os.getenv("SMTP_PASS", "")
+SMTP_FROM = os.getenv("SMTP_FROM", "noreply-taxinspector@gdt.gov.vn")
+SMTP_USE_TLS = os.getenv("SMTP_USE_TLS", "true").lower() == "true"
+ALLOW_OUTBOX_FALLBACK = os.getenv("ALLOW_OUTBOX_FALLBACK", "true").lower() == "true"
 
 
 # =============================================================================
@@ -97,6 +117,13 @@ def get_password_hash(password: str) -> str:
     salt_b64 = base64.b64encode(salt).decode("ascii")
     digest_b64 = base64.b64encode(digest).decode("ascii")
     return f"{PASSWORD_HASH_SCHEME}${PBKDF2_ITERATIONS}${salt_b64}${digest_b64}"
+
+
+def validate_new_password(password: str):
+    if len(password) < 8:
+        raise HTTPException(status_code=400, detail="Mật khẩu mới phải có ít nhất 8 ký tự.")
+    if len(password) > 128:
+        raise HTTPException(status_code=400, detail="Mật khẩu mới không hợp lệ.")
 
 
 # =============================================================================
@@ -225,6 +252,89 @@ def log_audit(
     )
     db.add(entry)
     db.commit()
+
+
+# =============================================================================
+# PASSWORD RESET (forgot/reset password)
+# =============================================================================
+
+def generate_password_reset_token() -> str:
+    """Generate a URL-safe random token for password reset."""
+    return secrets.token_urlsafe(32)
+
+
+def hash_password_reset_token(token: str) -> str:
+    """Hash token before storing in DB (never store raw reset token)."""
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+def build_password_reset_link(token: str) -> str:
+    sep = "&" if "?" in FRONTEND_RESET_URL else "?"
+    return f"{FRONTEND_RESET_URL}{sep}token={token}"
+
+
+def get_password_reset_expiry() -> datetime:
+    return datetime.utcnow() + timedelta(minutes=RESET_TOKEN_EXPIRE_MINUTES)
+
+
+def _append_password_outbox(email: str, badge_id: str, reset_link: str, expires_at: datetime):
+    outbox_file = Path(PASSWORD_OUTBOX_PATH)
+    outbox_file.parent.mkdir(parents=True, exist_ok=True)
+
+    lines = [
+        f"[{datetime.utcnow().isoformat()}] PASSWORD_RESET",
+        f"email={email}",
+        f"badge_id={badge_id}",
+        f"expires_utc={expires_at.isoformat()}",
+        f"reset_link={reset_link}",
+        "-",
+    ]
+    with outbox_file.open("a", encoding="utf-8") as f:
+        f.write("\n".join(lines) + "\n")
+
+
+def _try_send_reset_email(email: str, reset_link: str) -> bool:
+    if not (SMTP_ENABLED and SMTP_HOST):
+        return False
+
+    msg = EmailMessage()
+    msg["From"] = SMTP_FROM
+    msg["To"] = email
+    msg["Subject"] = "TaxInspector - Dat lai mat khau"
+    msg.set_content(
+        "Yeu cau dat lai mat khau cua ban:\n\n"
+        f"{reset_link}\n\n"
+        f"Lien ket nay het han sau {RESET_TOKEN_EXPIRE_MINUTES} phut."
+    )
+
+    with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=15) as server:
+        if SMTP_USE_TLS:
+            server.starttls()
+        if SMTP_USER:
+            server.login(SMTP_USER, SMTP_PASS)
+        server.send_message(msg)
+    return True
+
+
+def deliver_password_reset(email: str, badge_id: str, token: str, expires_at: datetime) -> str:
+    """
+    Deliver reset link by SMTP if configured, otherwise write to local outbox file.
+    Returns channel name: 'smtp' or 'outbox'.
+    """
+    reset_link = build_password_reset_link(token)
+
+    try:
+        if _try_send_reset_email(email, reset_link):
+            return "smtp"
+
+        if SMTP_ENABLED and not ALLOW_OUTBOX_FALLBACK:
+            raise RuntimeError("SMTP delivery unavailable and outbox fallback disabled.")
+    except Exception:
+        if not ALLOW_OUTBOX_FALLBACK:
+            raise
+
+    _append_password_outbox(email, badge_id, reset_link, expires_at)
+    return "outbox"
 
 
 # =============================================================================

@@ -128,8 +128,9 @@
 </nav>
 <div class="mt-auto px-6 pt-6 border-t border-white/5">
 <div class="flex items-center gap-3 p-2 rounded-lg bg-white/5">
-<div class="w-8 h-8 rounded bg-primary-fixed-dim/20 flex items-center justify-center">
-<span class="material-symbols-outlined text-primary-fixed-dim text-sm" style="font-variation-settings: 'FILL' 1;">admin_panel_settings</span>
+<div class="w-8 h-8 rounded bg-primary-fixed-dim/20 flex items-center justify-center overflow-hidden shrink-0">
+<img id="user-avatar-image" alt="Avatar" class="w-full h-full object-cover hidden" />
+<span id="user-avatar-fallback" class="text-primary-fixed-dim text-[10px] font-black tracking-tight">AD</span>
 </div>
 <div id="user-profile-badge">
 <p class="text-xs font-bold" id="user-full-name">Admin Profile</p>
@@ -323,7 +324,7 @@
 </div>
 </main>
 <script type="text/javascript" src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
-<script src="../js/api.js"></script>
+<script src="../js/api.js?v=3.2"></script>
 <script src="../js/graph.js"></script>
 <script>
 document.addEventListener("DOMContentLoaded", function() {
@@ -343,6 +344,16 @@ document.addEventListener("DOMContentLoaded", function() {
     if (breadcrumbCurrent) breadcrumbCurrent.textContent = pageTitle;
     const sidebarSubtitle = document.getElementById('sidebar-subtitle');
     if (sidebarSubtitle) sidebarSubtitle.textContent = pageTitle;
+
+    if (typeof hydrateSidebarIdentity === 'function') {
+        hydrateSidebarIdentity({ forceRefresh: true });
+    }
+});
+
+window.addEventListener('pageshow', function() {
+    if (typeof hydrateSidebarIdentity === 'function') {
+        hydrateSidebarIdentity({ forceRefresh: true });
+    }
 });
 </script>
 </body></html>

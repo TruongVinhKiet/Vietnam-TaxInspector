@@ -20,8 +20,21 @@ class User(Base):
     cccd_data = Column(Text, nullable=True)            # AES-256 encrypted CCCD number
     cccd_verified = Column(Boolean, default=False)
     signature_data = Column(Text, nullable=True)        # AES-256 encrypted Base64 signature image
+    avatar_data = Column(Text, nullable=True)           # Base64 normalized avatar image (data URL)
     signature_verified = Column(Boolean, default=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class PasswordResetToken(Base):
+    __tablename__ = "password_reset_tokens"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    token_hash = Column(String(128), unique=True, nullable=False, index=True)
+    expires_at = Column(DateTime(timezone=False), nullable=False, index=True)
+    used = Column(Boolean, default=False, nullable=False)
+    used_at = Column(DateTime(timezone=False), nullable=True)
+    created_at = Column(DateTime(timezone=False), server_default=func.now())
 
 
 class Company(Base):

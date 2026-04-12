@@ -8,6 +8,14 @@
  */
 
 const API_BASE = "http://localhost:8000/api";
+const SIDEBAR_IDENTITY_CACHE_KEY = "taxinspector_sidebar_identity_v1";
+
+const SIDEBAR_ROLE_MAP = {
+    viewer: "Chuyên viên",
+    analyst: "Phân tích",
+    inspector: "Thanh tra",
+    admin: "Quản trị viên",
+};
 
 /**
  * Secure fetch wrapper that automatically includes HttpOnly cookie credentials
@@ -76,8 +84,109 @@ async function logout() {
     } catch {
         // Continue regardless
     }
+    try {
+        sessionStorage.removeItem(SIDEBAR_IDENTITY_CACHE_KEY);
+    } catch {
+        // Ignore storage errors
+    }
     window.location.href = "login.html";
 }
+
+
+function getUserInitials(fullName) {
+    if (!fullName) return "--";
+    return fullName
+        .split(" ")
+        .filter(Boolean)
+        .slice(0, 2)
+        .map((word) => word[0])
+        .join("")
+        .toUpperCase();
+}
+
+
+function getRoleLabel(role) {
+    return SIDEBAR_ROLE_MAP[role] || SIDEBAR_ROLE_MAP.viewer;
+}
+
+
+function applySidebarIdentity(user) {
+    if (!user || typeof user !== "object") return;
+
+    const sidebarName = document.getElementById("user-full-name");
+    const sidebarRole = document.getElementById("user-current-role");
+    const avatarImg = document.getElementById("user-avatar-image");
+    const avatarFallback = document.getElementById("user-avatar-fallback");
+
+    if (sidebarName && user.full_name) {
+        sidebarName.textContent = user.full_name;
+    }
+
+    if (sidebarRole) {
+        sidebarRole.textContent = getRoleLabel(user.role);
+    }
+
+    if (avatarImg && avatarFallback) {
+        if (user.avatar_data) {
+            avatarImg.src = user.avatar_data;
+            avatarImg.classList.remove("hidden");
+            avatarFallback.classList.add("hidden");
+        } else {
+            avatarImg.removeAttribute("src");
+            avatarImg.classList.add("hidden");
+            avatarFallback.classList.remove("hidden");
+            avatarFallback.textContent = getUserInitials(user.full_name);
+        }
+    }
+}
+
+
+async function hydrateSidebarIdentity(options = {}) {
+    const { forceRefresh = false } = options;
+    if (!document.getElementById("user-profile-badge")) return null;
+
+    if (!forceRefresh) {
+        try {
+            const raw = sessionStorage.getItem(SIDEBAR_IDENTITY_CACHE_KEY);
+            if (raw) {
+                const cached = JSON.parse(raw);
+                applySidebarIdentity(cached);
+            }
+        } catch {
+            // Ignore cache parse issues
+        }
+    }
+
+    try {
+        const res = await secureFetch(`${API_BASE}/auth/me`);
+        if (!res.ok) return null;
+
+        const user = await res.json();
+        applySidebarIdentity(user);
+
+        try {
+            const cachedPayload = {
+                full_name: user.full_name || "",
+                role: user.role || "viewer",
+                avatar_data: user.avatar_data || null,
+            };
+            sessionStorage.setItem(SIDEBAR_IDENTITY_CACHE_KEY, JSON.stringify(cachedPayload));
+        } catch {
+            // Ignore storage errors
+        }
+
+        return user;
+    } catch {
+        return null;
+    }
+}
+
+
+document.addEventListener("DOMContentLoaded", () => {
+    if (document.getElementById("user-profile-badge")) {
+        hydrateSidebarIdentity();
+    }
+});
 
 
 function formatCurrencyCode(amount) {

@@ -68,6 +68,19 @@ python -m http.server 3000
 ```
 Truy cập: **http://localhost:3000** để bắt đầu.
 
+### 4. Quên mật khẩu / Đổi mật khẩu (Local mode)
+- Tại trang đăng nhập có nút **Quên mật khẩu**.
+- Hệ thống tạo link reset và ghi vào file nội bộ: `Backend/.otp_outbox.log` (dùng để test khi chưa có mailbox `@gdt.gov.vn` thật).
+- Mở link trong outbox để vào trang `reset-password.html` và đặt mật khẩu mới.
+- Sau khi đăng nhập, vào trang **Tài khoản** để dùng chức năng **Đổi mật khẩu**.
+
+Biến môi trường tùy chọn:
+- `RESET_TOKEN_EXPIRE_MINUTES` (mặc định: 30)
+- `FRONTEND_RESET_URL` (mặc định: http://localhost:3000/pages/reset-password.html)
+- `PASSWORD_OUTBOX_PATH` (mặc định: Backend/.otp_outbox.log)
+- `SMTP_ENABLED` (mặc định: false)
+- `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM`, `SMTP_USE_TLS`
+
 ---
 
 ## 🔒 Bảo Mật (Security)
