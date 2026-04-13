@@ -341,3 +341,58 @@ def batch_results(batch_id: int, db: Session = Depends(get_db)):
         "statistics": batch.result_summary or {},
         "assessments": assessment_list,
     }
+
+
+# ==================================================================
+# 5. WHAT-IF SIMULATION (Scenario Analysis)
+# ==================================================================
+@router.post("/what-if/{tax_code}")
+def what_if_simulation(tax_code: str, adjustments: dict, db: Session = Depends(get_db)):
+    """
+    Chế độ 5: Mô phỏng Tình huống (What-If Analysis).
+    Nhận điều chỉnh % cho các chỉ số tài chính, chạy lại AI pipeline
+    và trả về điểm rủi ro mới để so sánh.
+    
+    Body JSON example:
+    {
+        "revenue": -20,          // Giảm doanh thu 20%
+        "total_expenses": 30     // Tăng chi phí 30%
+    }
+    """
+    # Find cached assessment
+    cached = (
+        db.query(models.AIRiskAssessment)
+        .filter(models.AIRiskAssessment.tax_code == tax_code)
+        .order_by(models.AIRiskAssessment.created_at.desc())
+        .first()
+    )
+
+    if not cached:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Chưa có dữ liệu phân tích cho MST {tax_code}. Hãy phân tích AI trước."
+        )
+
+    # Build base data from cached assessment
+    base_data = {
+        "tax_code": cached.tax_code,
+        "company_name": cached.company_name or "",
+        "industry": cached.industry or "",
+        "year": cached.year,
+        "revenue": float(cached.revenue or 0),
+        "total_expenses": float(cached.total_expenses or 0),
+        "net_profit": float(cached.revenue or 0) - float(cached.total_expenses or 0),
+        "cost_of_goods": float(cached.total_expenses or 0) * 0.75,
+        "operating_expenses": float(cached.total_expenses or 0) * 0.25,
+        "vat_output": float(cached.revenue or 0) * 0.10,
+        "vat_input": float(cached.total_expenses or 0) * 0.75 * 0.10,
+        "industry_avg_profit_margin": 0.08,
+    }
+
+    pipeline = get_pipeline()
+    result = pipeline.predict_whatif(base_data, adjustments)
+    result["original_risk_score"] = cached.risk_score
+    result["original_risk_level"] = cached.risk_level
+    result["delta_risk"] = round(result["simulated_risk_score"] - cached.risk_score, 2)
+
+    return result

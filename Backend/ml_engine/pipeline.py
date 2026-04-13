@@ -407,6 +407,78 @@ class TaxFraudPipeline:
                 })
             year_trend_data.sort(key=lambda x: x["year"])
 
+        # ---- Global XGBoost Feature Importance (AI-native) ----
+        global_feature_importance = []
+        try:
+            feature_names = TaxFeatureEngineer.FEATURE_COLS
+            importances = self.xgboost_model.feature_importances_
+            total_imp = float(np.sum(importances))
+            feature_label_map = {
+                "f1_divergence": "Lệch pha Tăng trưởng (F1)",
+                "f2_ratio_limit": "Đội Chi phí/Doanh thu (F2)",
+                "f3_vat_structure": "Cấu trúc VAT (F3)",
+                "f4_peer_comparison": "So sánh Ngành (F4)",
+                "revenue_log": "Quy mô Doanh thu",
+                "expense_log": "Quy mô Chi phí",
+                "profit_margin": "Biên Lợi Nhuận",
+                "revenue_growth_rate": "Tăng trưởng DT",
+                "expense_growth_rate": "Tăng trưởng CP",
+                "vat_net_ratio": "VAT Ròng",
+            }
+            for name, imp in zip(feature_names, importances):
+                global_feature_importance.append({
+                    "feature": name,
+                    "label": feature_label_map.get(name, name),
+                    "importance": round(float(imp), 4),
+                    "importance_pct": round(float(imp) / total_imp * 100, 1) if total_imp > 0 else 0,
+                })
+            global_feature_importance.sort(key=lambda x: x["importance"], reverse=True)
+        except Exception:
+            pass
+
+        # ---- Contour Grid (Isolation Forest decision boundary in PCA space) ----
+        contour_data = None
+        if PCA_AVAILABLE and len(pca_available_cols) >= 2:
+            try:
+                from sklearn.preprocessing import StandardScaler
+                pca_matrix = df_stats[pca_available_cols].fillna(0).values
+                scaler = StandardScaler()
+                pca_matrix_scaled = scaler.fit_transform(pca_matrix)
+                pca_model = PCA(n_components=2)
+                coords = pca_model.fit_transform(pca_matrix_scaled)
+
+                # Build a grid over PCA space
+                x_min, x_max = coords[:, 0].min() - 1, coords[:, 0].max() + 1
+                y_min, y_max = coords[:, 1].min() - 1, coords[:, 1].max() + 1
+                grid_res = 40  # 40x40 grid for performance
+                xx = np.linspace(x_min, x_max, grid_res)
+                yy = np.linspace(y_min, y_max, grid_res)
+                xx_grid, yy_grid = np.meshgrid(xx, yy)
+                grid_2d = np.c_[xx_grid.ravel(), yy_grid.ravel()]
+
+                # Inverse PCA to get back to feature space, then score with Isolation Forest
+                grid_features = pca_model.inverse_transform(grid_2d)
+                grid_original = scaler.inverse_transform(grid_features)
+                # Pad to full feature matrix if needed
+                full_feat_count = len(TaxFeatureEngineer.FEATURE_COLS)
+                if grid_original.shape[1] < full_feat_count:
+                    padding = np.zeros((grid_original.shape[0], full_feat_count - grid_original.shape[1]))
+                    grid_original = np.hstack([grid_original, padding])
+                
+                iso_scores = self.isolation_forest.decision_function(grid_original)
+                # Normalize scores: lower = more anomalous → flip to 0-1
+                z_values = np.clip(0.5 - iso_scores, 0, 1)
+                z_grid = z_values.reshape(grid_res, grid_res)
+
+                contour_data = {
+                    "x": xx.tolist(),
+                    "y": yy.tolist(),
+                    "z": z_grid.tolist(),
+                }
+            except Exception as e:
+                print(f"[WARN] Contour grid failed: {e}")
+                contour_data = None
+
         return {
             "summary": summary,
             "risk_distribution": risk_distribution,
@@ -418,6 +490,67 @@ class TaxFraudPipeline:
             "box_plot_data": box_plot_data,
             "key_drivers": key_drivers,
             "year_trend": year_trend_data,
+            "global_feature_importance": global_feature_importance,
+            "contour_data": contour_data,
+        }
+
+    def predict_whatif(self, base_data: dict, adjustments: dict) -> dict:
+        """
+        What-If Scenario Simulation.
+        Takes a base company data dict and applies percentage adjustments,
+        then re-scores through the pipeline.
+
+        Args:
+            base_data: Original financial data dict (single year)
+            adjustments: Dict of {field_name: percentage_change} e.g. {"revenue": -20, "total_expenses": 30}
+
+        Returns:
+            Dict with original and simulated risk scores + delta.
+        """
+        self.ensure_loaded()
+        import copy
+
+        simulated = copy.deepcopy(base_data)
+        adjustment_details = []
+
+        for field, pct_change in adjustments.items():
+            if field in simulated and simulated[field]:
+                original_val = float(simulated[field])
+                new_val = original_val * (1 + pct_change / 100)
+                simulated[field] = new_val
+                adjustment_details.append({
+                    "field": field,
+                    "original": round(original_val, 2),
+                    "simulated": round(new_val, 2),
+                    "change_pct": pct_change,
+                })
+
+        # Recalculate derived fields
+        if "revenue" in adjustments or "total_expenses" in adjustments:
+            rev = float(simulated.get("revenue", 0))
+            exp = float(simulated.get("total_expenses", 0))
+            simulated["net_profit"] = rev - exp
+            simulated["cost_of_goods"] = exp * 0.75
+            simulated["operating_expenses"] = exp * 0.25
+            simulated["vat_output"] = rev * 0.10
+            simulated["vat_input"] = simulated["cost_of_goods"] * 0.10
+
+        # Run pipeline on simulated data
+        result = self.predict_single(simulated)
+
+        return {
+            "simulated_risk_score": result["risk_score"],
+            "simulated_risk_level": result["risk_level"],
+            "simulated_anomaly_score": result["anomaly_score"],
+            "simulated_confidence": result["model_confidence"],
+            "simulated_red_flags": result["red_flags"],
+            "adjustments": adjustment_details,
+            "simulated_features": {
+                "f1_divergence": result["f1_divergence"],
+                "f2_ratio_limit": result["f2_ratio_limit"],
+                "f3_vat_structure": result["f3_vat_structure"],
+                "f4_peer_comparison": result["f4_peer_comparison"],
+            },
         }
 
     def _compute_shap_simple(self, X: np.ndarray, feature_names: list) -> list[dict]:
@@ -427,7 +560,6 @@ class TaxFraudPipeline:
         """
         try:
             importances = self.xgboost_model.feature_importances_
-            # Pair feature names with importance values
             explanations = []
             for name, imp in zip(feature_names, importances):
                 explanations.append({
@@ -435,7 +567,6 @@ class TaxFraudPipeline:
                     "importance": round(float(imp), 4),
                     "value": round(float(X[0][feature_names.index(name)]), 4) if len(X) > 0 else 0,
                 })
-            # Sort by importance descending
             explanations.sort(key=lambda x: abs(x["importance"]), reverse=True)
             return explanations
         except Exception:

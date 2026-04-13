@@ -331,6 +331,46 @@ So sánh Biên Lợi nhuận với Trung bình Ngành
 <div id="chart-peer-comparison" style="height: 200px;"></div>
 </div>
 </div>
+
+<!-- What-If AI Sandbox -->
+<div id="whatif-sandbox" style="display:none;">
+<div class="bg-gradient-to-br from-indigo-50 via-blue-50 to-slate-50 p-6 rounded-2xl border border-blue-200/50 shadow-[0_10px_30px_rgba(0,33,71,0.06)]">
+<div class="flex items-center justify-between mb-5">
+<div class="flex items-center gap-3">
+<div class="w-9 h-9 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-xl flex items-center justify-center shadow-lg shadow-blue-200">
+<span class="material-symbols-outlined text-white text-[18px]">science</span>
+</div>
+<div>
+<h5 class="text-xs font-black uppercase tracking-widest text-primary-container">Mô phỏng What-If (AI Sandbox)</h5>
+<p class="text-[9px] text-slate-400">Kéo thanh trượt để điều chỉnh báo cáo tài chính và xem điểm rủi ro thay đổi real-time</p>
+</div>
+</div>
+<button onclick="resetWhatIf()" class="text-[9px] font-bold uppercase tracking-widest text-slate-400 hover:text-primary-container transition-colors flex items-center gap-1">
+<span class="material-symbols-outlined text-[14px]">restart_alt</span> Reset
+</button>
+</div>
+<div class="grid grid-cols-2 gap-4 mb-5">
+<div>
+<label class="text-[9px] font-bold text-slate-500 uppercase tracking-wider flex justify-between mb-1">
+<span>Doanh thu</span><span id="whatif-revenue-label" class="text-blue-600">0%</span>
+</label>
+<input type="range" id="whatif-revenue" min="-50" max="50" value="0" step="5" class="w-full h-2 bg-blue-100 rounded-lg appearance-none cursor-pointer accent-blue-600" oninput="onWhatIfChange()">
+</div>
+<div>
+<label class="text-[9px] font-bold text-slate-500 uppercase tracking-wider flex justify-between mb-1">
+<span>Chi phí</span><span id="whatif-expenses-label" class="text-blue-600">0%</span>
+</label>
+<input type="range" id="whatif-expenses" min="-50" max="50" value="0" step="5" class="w-full h-2 bg-blue-100 rounded-lg appearance-none cursor-pointer accent-blue-600" oninput="onWhatIfChange()">
+</div>
+</div>
+<div id="whatif-result" class="bg-white/70 backdrop-blur-sm rounded-xl p-4 border border-blue-100 flex items-center justify-between">
+<div class="flex items-center gap-3">
+<span class="material-symbols-outlined text-slate-300 text-2xl">psychology_alt</span>
+<p class="text-[10px] text-slate-400">Di chuyển thanh trượt để bắt đầu mô phỏng...</p>
+</div>
+</div>
+</div>
+</div>
 </div>
 <!-- Risk Meter (4 cols) -->
 <div class="col-span-12 lg:col-span-4 sticky top-24">
@@ -533,10 +573,10 @@ Phân bổ Rủi ro theo Ngành (Box Plot)
 </div>
 <div class="col-span-5 bg-surface-container-lowest p-6 rounded-2xl border border-outline-variant/10">
 <h4 class="text-xs font-black uppercase tracking-widest text-primary-container mb-4 flex items-center gap-2">
-<span class="material-symbols-outlined text-[16px]">key</span>
-Động lực Rủi ro Chính (Key Drivers)
+<span class="material-symbols-outlined text-[16px]">neurology</span>
+Trọng số Đặc trưng AI (XGBoost Feature Importance)
 </h4>
-<p class="text-[10px] text-slate-400 mb-4">Tỷ lệ DN rủi ro cao (≥60 điểm) vi phạm từng tiêu chí</p>
+<p class="text-[9px] text-slate-400 mb-4">Trọng số do thuật toán XGBoost học được từ dữ liệu – không phải rule-based</p>
 <div id="chart-keydrivers" style="height: 340px;"></div>
 </div>
 </div>

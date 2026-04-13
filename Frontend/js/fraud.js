@@ -157,6 +157,14 @@ function renderSingleResult(data) {
         confRow.style.display = 'block';
         confDisplay.textContent = data.model_confidence + '%';
     }
+
+    // What-If Sandbox
+    const whatifBox = document.getElementById('whatif-sandbox');
+    if (whatifBox) {
+        whatifBox.style.display = 'block';
+        window._whatifTaxCode = data.tax_code;
+        window._whatifOriginalScore = data.risk_score;
+    }
 }
 
 
@@ -400,16 +408,21 @@ function renderBatchDashboard(data) {
     animateNumber('stat-high', summary.high_count || 0);
     animateNumber('stat-avg', summary.avg_risk || 0, true);
 
-    // All 8 charts + new Trend chart
+    // All charts + new features
     if (stats.year_trend) renderBatchTrendChart(stats.year_trend);
-    renderScatterPlot(stats.scatter_data || []);
+    renderScatterPlot(stats.scatter_data || [], stats.contour_data || null);
     renderHistogram(stats.risk_distribution || []);
     renderRadarChart(stats, data.assessments || []);
     renderDonutChart(summary);
     renderIndustryChart(stats.industry_stats || []);
     renderCorrelationMatrix(stats.correlation_matrix || {});
     renderBoxPlot(stats.box_plot_data || []);
-    renderKeyDrivers(stats.key_drivers || []);
+    // Use AI global feature importance if available, fallback to rule-based
+    if (stats.global_feature_importance && stats.global_feature_importance.length > 0) {
+        renderGlobalFeatureImportance(stats.global_feature_importance);
+    } else {
+        renderKeyDrivers(stats.key_drivers || []);
+    }
 
     // Populate industry filter
     populateIndustryFilter(stats.industry_stats || []);
@@ -439,13 +452,12 @@ function animateNumber(elementId, target, isDecimal = false) {
 }
 
 
-// ---- PCA SCATTER PLOT (Clustering 2D) ----
-function renderScatterPlot(scatterData) {
+// ---- PCA SCATTER PLOT (Clustering 2D) with Contour Overlay ----
+function renderScatterPlot(scatterData, contourData) {
     const container = document.getElementById('chart-scatter');
     if (!container || !scatterData || scatterData.length === 0) return;
     const chart = echarts.init(container);
 
-    // Risk-based color: green (low) -> yellow (mid) -> red (high)
     const getColor = (score) => {
         if (score >= 80) return '#dc2626';
         if (score >= 60) return '#ea580c';
@@ -466,13 +478,44 @@ function renderScatterPlot(scatterData) {
         _meta: d,
     }));
 
-    chart.setOption({
+    const seriesList = [];
+
+    // Contour heatmap overlay (Isolation Forest decision boundary)
+    if (contourData && contourData.x && contourData.y && contourData.z) {
+        const heatData = [];
+        for (let j = 0; j < contourData.y.length; j++) {
+            for (let i = 0; i < contourData.x.length; i++) {
+                heatData.push([contourData.x[i], contourData.y[j], contourData.z[j][i]]);
+            }
+        }
+        seriesList.push({
+            name: 'Anomaly Density',
+            type: 'heatmap',
+            data: heatData,
+            emphasis: { itemStyle: { borderColor: '#333', borderWidth: 1 } },
+            itemStyle: { opacity: 0.35 },
+            progressive: 1000,
+            z: 0,
+        });
+    }
+
+    // Scatter points on top
+    seriesList.push({
+        name: 'Doanh nghiệp',
+        type: 'scatter',
+        data: seriesData,
+        z: 2,
+    });
+
+    const option = {
         animationDuration: 2000,
         animationEasing: 'cubicOut',
         tooltip: {
             trigger: 'item',
             formatter: p => {
+                if (p.seriesName === 'Anomaly Density') return null;
                 const d = p.data._meta;
+                if (!d) return '';
                 return `<b>${d.company_name}</b><br>`
                     + `MST: ${d.tax_code}<br>`
                     + `Ngành: ${d.industry}<br>`
@@ -491,21 +534,22 @@ function renderScatterPlot(scatterData) {
             type: 'value', axisLabel: { fontSize: 9 },
             splitLine: { lineStyle: { type: 'dashed', opacity: 0.3 } },
         },
-        visualMap: {
-            show: true, type: 'piecewise', orient: 'horizontal', bottom: 0, left: 'center',
-            pieces: [
-                { min: 80, label: 'Rất cao (≥80)', color: '#dc2626' },
-                { min: 60, max: 79, label: 'Cao (60-79)', color: '#ea580c' },
-                { min: 40, max: 59, label: 'TB (40-59)', color: '#eab308' },
-                { max: 39, label: 'Thấp (<40)', color: '#16a34a' },
-            ],
-            dimension: 'none',
-            textStyle: { fontSize: 9 },
-        },
-        series: [{
-            type: 'scatter', data: seriesData,
-        }],
-    });
+        series: seriesList,
+    };
+
+    // Add visualMap for contour if present
+    if (contourData) {
+        option.visualMap = [
+            {
+                show: false, min: 0, max: 1, seriesIndex: 0, calculable: false,
+                inRange: {
+                    color: ['rgba(22,163,74,0.05)', 'rgba(234,179,8,0.15)', 'rgba(234,88,12,0.25)', 'rgba(220,38,38,0.4)']
+                },
+            }
+        ];
+    }
+
+    chart.setOption(option);
     window.addEventListener('resize', () => chart.resize());
 }
 
@@ -1136,6 +1180,69 @@ function renderBoxPlot(boxPlotData) {
 }
 
 
+// ---- GLOBAL FEATURE IMPORTANCE (XGBoost AI-native) ----
+function renderGlobalFeatureImportance(featureData) {
+    const container = document.getElementById('chart-keydrivers');
+    if (!container || !featureData || featureData.length === 0) return;
+
+    const chart = echarts.init(container);
+    const gradientColors = [
+        ['#1e3a5f', '#4a90d9'],
+        ['#002147', '#3b82f6'],
+        ['#0f172a', '#6366f1'],
+        ['#1a1a2e', '#818cf8'],
+        ['#2d2d52', '#a5b4fc'],
+        ['#374151', '#93c5fd'],
+        ['#475569', '#bfdbfe'],
+        ['#64748b', '#dbeafe'],
+        ['#94a3b8', '#e0e7ff'],
+        ['#cbd5e1', '#f0f4ff'],
+    ];
+
+    chart.setOption({
+        animationDuration: 1500,
+        animationEasing: 'cubicOut',
+        tooltip: {
+            trigger: 'axis', axisPointer: { type: 'shadow' },
+            formatter: p => {
+                const d = featureData[p[0].dataIndex];
+                return `<b>${d.label}</b><br>`
+                     + `Trọng số (Gain): <b>${d.importance.toFixed(4)}</b><br>`
+                     + `Tỷ trọng: <b>${d.importance_pct}%</b>`;
+            }
+        },
+        grid: { left: '5%', right: '15%', top: '5%', bottom: '5%' },
+        xAxis: { type: 'value', axisLabel: { formatter: '{value}%' } },
+        yAxis: {
+            type: 'category',
+            data: featureData.map(d => d.label),
+            axisLabel: { fontSize: 9, width: 130, overflow: 'break' },
+            inverse: true,
+        },
+        series: [{
+            type: 'bar',
+            data: featureData.map((d, i) => ({
+                value: d.importance_pct,
+                itemStyle: {
+                    color: new echarts.graphic.LinearGradient(0, 0, 1, 0, [
+                        { offset: 0, color: gradientColors[i % gradientColors.length][0] },
+                        { offset: 1, color: gradientColors[i % gradientColors.length][1] },
+                    ]),
+                    borderRadius: [0, 6, 6, 0],
+                },
+            })),
+            barWidth: '55%',
+            label: {
+                show: true, position: 'right', fontSize: 10, fontWeight: 'bold',
+                formatter: p => `${p.value}%`,
+                color: '#1e293b',
+            },
+        }],
+    });
+    window.addEventListener('resize', () => chart.resize());
+}
+
+// Fallback: rule-based key drivers (kept for backward compatibility)
 function renderKeyDrivers(keyDrivers) {
     const container = document.getElementById('chart-keydrivers');
     if (!container || !keyDrivers || keyDrivers.length === 0) return;
@@ -1290,4 +1397,140 @@ function actionCreateReport() {
         'success',
         6000
     );
+}
+
+
+// ===================================================================
+// WHAT-IF AI SANDBOX (Scenario Simulation)
+// ===================================================================
+
+let _whatifDebounceTimer = null;
+
+function onWhatIfChange() {
+    const revSlider = document.getElementById('whatif-revenue');
+    const expSlider = document.getElementById('whatif-expenses');
+    const revLabel = document.getElementById('whatif-revenue-label');
+    const expLabel = document.getElementById('whatif-expenses-label');
+    if (!revSlider || !expSlider) return;
+
+    const revPct = parseInt(revSlider.value);
+    const expPct = parseInt(expSlider.value);
+
+    revLabel.textContent = `${revPct > 0 ? '+' : ''}${revPct}%`;
+    expLabel.textContent = `${expPct > 0 ? '+' : ''}${expPct}%`;
+
+    // Color the labels based on direction
+    revLabel.className = revPct < 0 ? 'text-red-500 font-bold' : revPct > 0 ? 'text-emerald-600 font-bold' : 'text-blue-600';
+    expLabel.className = expPct > 0 ? 'text-red-500 font-bold' : expPct < 0 ? 'text-emerald-600 font-bold' : 'text-blue-600';
+
+    // Debounce API call
+    if (_whatifDebounceTimer) clearTimeout(_whatifDebounceTimer);
+    if (revPct === 0 && expPct === 0) {
+        renderWhatIfIdle();
+        return;
+    }
+    _whatifDebounceTimer = setTimeout(() => runWhatIfSimulation(revPct, expPct), 400);
+}
+
+
+function resetWhatIf() {
+    const revSlider = document.getElementById('whatif-revenue');
+    const expSlider = document.getElementById('whatif-expenses');
+    if (revSlider) revSlider.value = 0;
+    if (expSlider) expSlider.value = 0;
+    document.getElementById('whatif-revenue-label').textContent = '0%';
+    document.getElementById('whatif-revenue-label').className = 'text-blue-600';
+    document.getElementById('whatif-expenses-label').textContent = '0%';
+    document.getElementById('whatif-expenses-label').className = 'text-blue-600';
+    renderWhatIfIdle();
+}
+
+
+function renderWhatIfIdle() {
+    const resultDiv = document.getElementById('whatif-result');
+    if (!resultDiv) return;
+    resultDiv.innerHTML = `
+        <div class="flex items-center gap-3">
+            <span class="material-symbols-outlined text-slate-300 text-2xl">psychology_alt</span>
+            <p class="text-[10px] text-slate-400">Di chuyển thanh trượt để bắt đầu mô phỏng...</p>
+        </div>`;
+}
+
+
+async function runWhatIfSimulation(revPct, expPct) {
+    const taxCode = window._whatifTaxCode;
+    if (!taxCode) return;
+
+    const resultDiv = document.getElementById('whatif-result');
+    resultDiv.innerHTML = `
+        <div class="flex items-center gap-3">
+            <span class="material-symbols-outlined text-blue-400 text-xl animate-spin">autorenew</span>
+            <p class="text-[10px] text-blue-500 font-bold">AI đang tính toán kịch bản mới...</p>
+        </div>`;
+
+    try {
+        const adjustments = {};
+        if (revPct !== 0) adjustments.revenue = revPct;
+        if (expPct !== 0) adjustments.total_expenses = expPct;
+
+        const response = await secureFetch(`${API_BASE}/ai/what-if/${taxCode}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(adjustments),
+        });
+
+        if (!response.ok) {
+            const err = await response.json();
+            throw new Error(err.detail || 'Mô phỏng thất bại');
+        }
+
+        const data = await response.json();
+        renderWhatIfResult(data);
+
+    } catch (error) {
+        resultDiv.innerHTML = `
+            <div class="flex items-center gap-3">
+                <span class="material-symbols-outlined text-red-400 text-xl">error</span>
+                <p class="text-[10px] text-red-500">${error.message}</p>
+            </div>`;
+    }
+}
+
+
+function renderWhatIfResult(data) {
+    const resultDiv = document.getElementById('whatif-result');
+    if (!resultDiv) return;
+
+    const origScore = data.original_risk_score || window._whatifOriginalScore || 0;
+    const simScore = data.simulated_risk_score || 0;
+    const delta = data.delta_risk || (simScore - origScore);
+    const deltaColor = delta > 0 ? 'text-red-600' : delta < 0 ? 'text-emerald-600' : 'text-slate-500';
+    const deltaIcon = delta > 0 ? 'trending_up' : delta < 0 ? 'trending_down' : 'trending_flat';
+    const deltaSign = delta > 0 ? '+' : '';
+
+    const getRiskColor = (score) => {
+        if (score >= 80) return '#dc2626';
+        if (score >= 60) return '#ea580c';
+        if (score >= 40) return '#eab308';
+        return '#16a34a';
+    };
+
+    resultDiv.innerHTML = `
+        <div class="flex items-center justify-between w-full gap-4">
+            <div class="flex items-center gap-4">
+                <div class="text-center">
+                    <p class="text-[8px] text-slate-400 uppercase tracking-wider mb-1">Gốc</p>
+                    <span class="text-xl font-black" style="color:${getRiskColor(origScore)}">${origScore.toFixed(1)}</span>
+                </div>
+                <span class="material-symbols-outlined text-slate-300">arrow_forward</span>
+                <div class="text-center">
+                    <p class="text-[8px] text-slate-400 uppercase tracking-wider mb-1">Mô phỏng</p>
+                    <span class="text-xl font-black" style="color:${getRiskColor(simScore)}">${simScore.toFixed(1)}</span>
+                </div>
+            </div>
+            <div class="flex items-center gap-2 px-3 py-2 rounded-lg ${delta > 0 ? 'bg-red-50' : delta < 0 ? 'bg-emerald-50' : 'bg-slate-50'}">
+                <span class="material-symbols-outlined ${deltaColor} text-lg">${deltaIcon}</span>
+                <span class="text-sm font-black ${deltaColor}">${deltaSign}${delta.toFixed(1)}</span>
+            </div>
+        </div>`;
 }
