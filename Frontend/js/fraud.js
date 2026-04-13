@@ -149,6 +149,14 @@ function renderSingleResult(data) {
         peerRow.style.display = 'block';
         renderPeerComparison(data);
     }
+
+    // Model Confidence Badge
+    const confRow = document.getElementById('confidence-row');
+    const confDisplay = document.getElementById('model-confidence-display');
+    if (confRow && confDisplay && data.model_confidence) {
+        confRow.style.display = 'block';
+        confDisplay.textContent = data.model_confidence + '%';
+    }
 }
 
 
@@ -327,7 +335,7 @@ function startPolling(batchId) {
             const pct = status.progress_percent || 0;
             document.getElementById('progress-bar').style.width = `${pct}%`;
             document.getElementById('progress-percent').textContent = `${pct}%`;
-            document.getElementById('progress-detail').textContent = `${status.processed_rows || 0} / ${status.total_rows || '?'} doanh nghiệp`;
+            document.getElementById('progress-detail').textContent = `Đã đọc ${status.processed_rows || 0} / ${status.total_rows || '?'} dòng dữ liệu CSV`;
 
             if (status.status === 'done') {
                 clearInterval(pollingInterval); pollingInterval = null;
@@ -392,7 +400,8 @@ function renderBatchDashboard(data) {
     animateNumber('stat-high', summary.high_count || 0);
     animateNumber('stat-avg', summary.avg_risk || 0, true);
 
-    // All 8 charts
+    // All 8 charts + new Trend chart
+    if (stats.year_trend) renderBatchTrendChart(stats.year_trend);
     renderScatterPlot(stats.scatter_data || []);
     renderHistogram(stats.risk_distribution || []);
     renderRadarChart(stats, data.assessments || []);
@@ -430,28 +439,127 @@ function animateNumber(elementId, target, isDecimal = false) {
 }
 
 
-// ---- SCATTER PLOT ----
+// ---- PCA SCATTER PLOT (Clustering 2D) ----
 function renderScatterPlot(scatterData) {
-    const chart = echarts.init(document.getElementById('chart-scatter'));
-    const industries = [...new Set(scatterData.map(d => d.industry))];
-    const palette = ['#002147','#465f88','#aec7f6','#dc2626','#ea580c','#eab308','#16a34a','#7c3aed','#0ea5e9','#f43f5e','#6366f1','#10b981','#f59e0b','#8b5cf6','#06b6d4'];
+    const container = document.getElementById('chart-scatter');
+    if (!container || !scatterData || scatterData.length === 0) return;
+    const chart = echarts.init(container);
 
-    const series = industries.map((ind, i) => ({
-        name: ind, type: 'scatter',
-        data: scatterData.filter(d => d.industry === ind).map(d => [
-            Math.log10(Math.max(d.revenue, 1)), d.risk_score, d.company_name, d.tax_code, d.revenue
-        ]),
-        symbolSize: val => Math.max(6, Math.min(val[1] / 5, 20)),
-        itemStyle: { color: palette[i % palette.length], opacity: 0.7 },
+    // Risk-based color: green (low) -> yellow (mid) -> red (high)
+    const getColor = (score) => {
+        if (score >= 80) return '#dc2626';
+        if (score >= 60) return '#ea580c';
+        if (score >= 40) return '#eab308';
+        return '#16a34a';
+    };
+
+    const seriesData = scatterData.map(d => ({
+        value: [d.pc1, d.pc2],
+        name: d.company_name,
+        itemStyle: {
+            color: getColor(d.risk_score),
+            opacity: d.risk_score >= 60 ? 0.9 : 0.5,
+            shadowBlur: d.risk_score >= 60 ? 8 : 0,
+            shadowColor: getColor(d.risk_score)
+        },
+        symbolSize: d.risk_score >= 60 ? Math.max(10, d.risk_score / 6) : 6,
+        _meta: d,
     }));
 
     chart.setOption({
-        tooltip: { trigger: 'item', formatter: p => `<b>${p.data[2]}</b><br>MST: ${p.data[3]}<br>Doanh thu: ${formatVND(p.data[4])}<br>Điểm rủi ro: <b>${p.data[1]}</b>` },
-        legend: { type: 'scroll', bottom: 0, textStyle: { fontSize: 9 } },
-        grid: { left: '12%', right: '5%', top: '5%', bottom: '18%' },
-        xAxis: { name: 'Log₁₀(Doanh thu)', nameLocation: 'center', nameGap: 30, type: 'value' },
-        yAxis: { name: 'Điểm Rủi Ro', type: 'value', max: 100 },
-        series,
+        animationDuration: 2000,
+        animationEasing: 'cubicOut',
+        tooltip: {
+            trigger: 'item',
+            formatter: p => {
+                const d = p.data._meta;
+                return `<b>${d.company_name}</b><br>`
+                    + `MST: ${d.tax_code}<br>`
+                    + `Ngành: ${d.industry}<br>`
+                    + `Doanh thu: ${formatVND(d.revenue)}<br>`
+                    + `Điểm rủi ro: <b style="color:${getColor(d.risk_score)}">${d.risk_score}</b>`;
+            }
+        },
+        grid: { left: '10%', right: '5%', top: '5%', bottom: '20%' },
+        xAxis: {
+            name: 'PC1 (Trục Chính 1)', nameLocation: 'center', nameGap: 24,
+            type: 'value', axisLabel: { fontSize: 9 },
+            splitLine: { lineStyle: { type: 'dashed', opacity: 0.3 } },
+        },
+        yAxis: {
+            name: 'PC2 (Trục Chính 2)',
+            type: 'value', axisLabel: { fontSize: 9 },
+            splitLine: { lineStyle: { type: 'dashed', opacity: 0.3 } },
+        },
+        visualMap: {
+            show: true, type: 'piecewise', orient: 'horizontal', bottom: 0, left: 'center',
+            pieces: [
+                { min: 80, label: 'Rất cao (≥80)', color: '#dc2626' },
+                { min: 60, max: 79, label: 'Cao (60-79)', color: '#ea580c' },
+                { min: 40, max: 59, label: 'TB (40-59)', color: '#eab308' },
+                { max: 39, label: 'Thấp (<40)', color: '#16a34a' },
+            ],
+            dimension: 'none',
+            textStyle: { fontSize: 9 },
+        },
+        series: [{
+            type: 'scatter', data: seriesData,
+        }],
+    });
+    window.addEventListener('resize', () => chart.resize());
+}
+
+
+// ---- BATCH TREND CHART (Yearly) ----
+function renderBatchTrendChart(trendData) {
+    const container = document.getElementById('chart-batch-trend');
+    if (!container || !trendData || trendData.length === 0) {
+        if(container) container.innerHTML = '<div class="text-slate-400 text-xs flex items-center justify-center h-full">Không đủ dữ liệu nhiều năm để phân tích xu hướng</div>';
+        return;
+    }
+
+    const chart = echarts.init(container);
+    const years = trendData.map(d => d.year);
+    const avgRisks = trendData.map(d => d.avg_risk);
+    const highRiskCounts = trendData.map(d => d.high_risk_count);
+
+    chart.setOption({
+        animationDuration: 1500,
+        animationEasing: 'cubicOut',
+        tooltip: { trigger: 'axis', axisPointer: { type: 'cross' } },
+        legend: { data: ['Điểm Rủi ro TB', 'Số DN Rủi ro cao'], bottom: 0, textStyle: { fontSize: 10 } },
+        grid: { left: '5%', right: '5%', top: '15%', bottom: '15%' },
+        xAxis: { type: 'category', data: years, axisLabel: { fontSize: 10, fontWeight: 'bold' } },
+        yAxis: [
+            {
+                type: 'value', name: 'Điểm Rủi ro TB', position: 'left',
+                axisLabel: { color: '#002147', fontWeight: 'bold' },
+                splitLine: { lineStyle: { type: 'dashed', opacity: 0.3 } }
+            },
+            {
+                type: 'value', name: 'Số DN', position: 'right',
+                axisLabel: { color: '#dc2626', fontWeight: 'bold' },
+                splitLine: { show: false }
+            }
+        ],
+        series: [
+            {
+                name: 'Điểm Rủi ro TB', type: 'line', yAxisIndex: 0, data: avgRisks,
+                smooth: true, symbol: 'circle', symbolSize: 10,
+                lineStyle: { width: 4, color: '#002147' },
+                itemStyle: { color: '#002147', borderWidth: 2, borderColor: '#fff' },
+                areaStyle: { color: { type: 'linear', x: 0, y: 0, x2: 0, y2: 1, colorStops: [
+                    { offset: 0, color: 'rgba(0,33,71,0.2)' },
+                    { offset: 1, color: 'rgba(0,33,71,0.01)' }
+                ]}}
+            },
+            {
+                name: 'Số DN Rủi ro cao', type: 'line', yAxisIndex: 1, data: highRiskCounts,
+                smooth: true, symbol: 'rect', symbolSize: 8,
+                lineStyle: { width: 3, color: '#dc2626', type: 'dashed' },
+                itemStyle: { color: '#dc2626' }
+            }
+        ],
     });
     window.addEventListener('resize', () => chart.resize());
 }
@@ -807,6 +915,33 @@ function renderSingleTrendChart(yearlyHistory) {
     const revenues = yearlyHistory.map(d => d.revenue);
     const expenses = yearlyHistory.map(d => d.total_expenses);
 
+    // Forecast 2025 using growth rate extrapolation
+    let forecastRevenue = null, forecastExpense = null;
+    if (revenues.length >= 2) {
+        const rGrowth = revenues[revenues.length - 1] / Math.max(revenues[revenues.length - 2], 1);
+        const eGrowth = expenses[expenses.length - 1] / Math.max(expenses[expenses.length - 2], 1);
+        forecastRevenue = Math.round(revenues[revenues.length - 1] * rGrowth);
+        forecastExpense = Math.round(expenses[expenses.length - 1] * eGrowth);
+    }
+
+    // Add forecast year
+    const allYears = [...years];
+    const revActual = [...revenues];
+    const expActual = [...expenses];
+    const revForecast = new Array(years.length).fill(null);
+    const expForecast = new Array(years.length).fill(null);
+
+    if (forecastRevenue !== null) {
+        allYears.push('2025 (Dự báo)');
+        // Connect forecast line to last actual point
+        revForecast[revenues.length - 1] = revenues[revenues.length - 1];
+        expForecast[expenses.length - 1] = expenses[expenses.length - 1];
+        revActual.push(null);
+        expActual.push(null);
+        revForecast.push(forecastRevenue);
+        expForecast.push(forecastExpense);
+    }
+
     chart.setOption({
         animationDuration: 1500,
         animationEasing: 'cubicOut',
@@ -815,18 +950,23 @@ function renderSingleTrendChart(yearlyHistory) {
             formatter: params => {
                 let s = `<b>${params[0].axisValue}</b><br>`;
                 params.forEach(p => {
-                    s += `${p.marker} ${p.seriesName}: <b>${formatVND(p.value)}</b><br>`;
+                    if (p.value !== null && p.value !== undefined) {
+                        s += `${p.marker} ${p.seriesName}: <b>${formatVND(p.value)}</b><br>`;
+                    }
                 });
                 return s;
             }
         },
-        legend: { data: ['Doanh thu', 'Tổng Chi phí'], bottom: 0, textStyle: { fontSize: 10 } },
-        grid: { left: '15%', right: '5%', top: '10%', bottom: '20%' },
-        xAxis: { type: 'category', data: years, axisLabel: { fontSize: 11 } },
+        legend: {
+            data: ['Doanh thu', 'Tổng Chi phí', 'DT Dự báo 2025', 'CP Dự báo 2025'],
+            bottom: 0, textStyle: { fontSize: 9 }
+        },
+        grid: { left: '15%', right: '5%', top: '10%', bottom: '22%' },
+        xAxis: { type: 'category', data: allYears, axisLabel: { fontSize: 10 } },
         yAxis: { type: 'value', axisLabel: { fontSize: 9, formatter: v => formatVND(v) } },
         series: [
             {
-                name: 'Doanh thu', type: 'line', data: revenues,
+                name: 'Doanh thu', type: 'line', data: revActual,
                 smooth: true, symbol: 'circle', symbolSize: 8,
                 lineStyle: { width: 3, color: '#002147' },
                 itemStyle: { color: '#002147' },
@@ -834,9 +974,10 @@ function renderSingleTrendChart(yearlyHistory) {
                     { offset: 0, color: 'rgba(0,33,71,0.15)' },
                     { offset: 1, color: 'rgba(0,33,71,0.01)' }
                 ]}},
+                connectNulls: false,
             },
             {
-                name: 'Tổng Chi phí', type: 'line', data: expenses,
+                name: 'Tổng Chi phí', type: 'line', data: expActual,
                 smooth: true, symbol: 'diamond', symbolSize: 8,
                 lineStyle: { width: 3, color: '#dc2626', type: 'dashed' },
                 itemStyle: { color: '#dc2626' },
@@ -844,6 +985,21 @@ function renderSingleTrendChart(yearlyHistory) {
                     { offset: 0, color: 'rgba(220,38,38,0.1)' },
                     { offset: 1, color: 'rgba(220,38,38,0.01)' }
                 ]}},
+                connectNulls: false,
+            },
+            {
+                name: 'DT Dự báo 2025', type: 'line', data: revForecast,
+                smooth: true, symbol: 'emptyCircle', symbolSize: 10,
+                lineStyle: { width: 2, color: '#002147', type: 'dotted' },
+                itemStyle: { color: '#002147', borderWidth: 2 },
+                connectNulls: true,
+            },
+            {
+                name: 'CP Dự báo 2025', type: 'line', data: expForecast,
+                smooth: true, symbol: 'emptyDiamond', symbolSize: 10,
+                lineStyle: { width: 2, color: '#dc2626', type: 'dotted' },
+                itemStyle: { color: '#dc2626', borderWidth: 2 },
+                connectNulls: true,
             },
         ],
     });

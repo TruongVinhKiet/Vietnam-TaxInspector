@@ -103,6 +103,7 @@ def single_query(tax_code: str, db: Session = Depends(get_db)):
             "f3_vat_structure": cached_assessment.f3_vat_structure,
             "f4_peer_comparison": cached_assessment.f4_peer_comparison,
             "anomaly_score": cached_assessment.anomaly_score,
+            "model_confidence": round(max(cached_assessment.risk_score, 100 - cached_assessment.risk_score), 1),
             "risk_score": cached_assessment.risk_score,
             "risk_level": cached_assessment.risk_level,
             "red_flags": cached_assessment.red_flags or [],

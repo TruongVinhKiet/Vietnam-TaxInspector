@@ -20,6 +20,12 @@ from typing import Optional
 
 from .feature_engineering import TaxFeatureEngineer
 
+try:
+    from sklearn.decomposition import PCA
+    PCA_AVAILABLE = True
+except ImportError:
+    PCA_AVAILABLE = False
+
 # Path to saved models
 MODEL_DIR = Path(__file__).resolve().parent.parent / "data" / "models"
 
@@ -126,6 +132,7 @@ class TaxFraudPipeline:
             "f3_vat_structure": round(float(latest.get("f3_vat_structure", 0)), 4),
             "f4_peer_comparison": round(float(latest.get("f4_peer_comparison", 0)), 4),
             "anomaly_score": round(anomaly_score, 4),
+            "model_confidence": round(max(fraud_prob, 1 - fraud_prob) * 100, 1),
             "risk_score": risk_score,
             "risk_level": risk_level,
             "red_flags": red_flags,
@@ -151,6 +158,10 @@ class TaxFraudPipeline:
 
         # Feature engineering on full dataset
         df = self.feature_engineer.compute_features(df)
+
+        # Calculate risk score for all rows to build trend data
+        X_all = self.feature_engineer.get_feature_matrix(df)
+        df["risk_score"] = np.round(self.xgboost_model.predict_proba(X_all)[:, 1] * 100, 2)
 
         # Group by tax_code, use latest year
         latest_df = df.sort_values("year").groupby("tax_code").last().reset_index()
@@ -210,7 +221,7 @@ class TaxFraudPipeline:
 
         # ---- Statistics for Dashboard ----
         risk_arr = np.array(risk_scores)
-        stats = self._compute_batch_statistics(latest_df, risk_arr, anomaly_scores)
+        stats = self._compute_batch_statistics(latest_df, risk_arr, anomaly_scores, full_df=df)
 
         return {
             "assessments": assessments,
@@ -219,7 +230,7 @@ class TaxFraudPipeline:
         }
 
     def _compute_batch_statistics(self, df: pd.DataFrame, risk_scores: np.ndarray,
-                                   anomaly_scores: np.ndarray) -> dict:
+                                   anomaly_scores: np.ndarray, full_df: pd.DataFrame = None) -> dict:
         """Compute aggregated statistics for the ECharts dashboard."""
 
         # Risk distribution histogram (bins of 10)
@@ -254,16 +265,41 @@ class TaxFraudPipeline:
         else:
             province_stats = []
 
-        # Scatter plot data (revenue vs risk_score)
+        # Scatter plot data – PCA 2D projection of features F1-F4
         scatter_data = []
-        for i in range(len(df_stats)):
-            scatter_data.append({
-                "tax_code": str(df_stats.iloc[i].get("tax_code", "")),
-                "company_name": str(df_stats.iloc[i].get("company_name", "")),
-                "revenue": float(df_stats.iloc[i].get("revenue", 0)),
-                "risk_score": float(risk_scores[i]),
-                "industry": str(df_stats.iloc[i].get("industry", "")),
-            })
+        pca_features = ["f1_divergence", "f2_ratio_limit", "f3_vat_structure", "f4_peer_comparison"]
+        pca_available_cols = [c for c in pca_features if c in df_stats.columns]
+
+        if PCA_AVAILABLE and len(pca_available_cols) >= 2:
+            from sklearn.preprocessing import StandardScaler
+            pca_matrix = df_stats[pca_available_cols].fillna(0).values
+            pca_matrix_scaled = StandardScaler().fit_transform(pca_matrix)
+            pca = PCA(n_components=2)
+            coords_2d = pca.fit_transform(pca_matrix_scaled)
+            explained = pca.explained_variance_ratio_
+
+            for i in range(len(df_stats)):
+                scatter_data.append({
+                    "tax_code": str(df_stats.iloc[i].get("tax_code", "")),
+                    "company_name": str(df_stats.iloc[i].get("company_name", "")),
+                    "pc1": round(float(coords_2d[i, 0]), 4),
+                    "pc2": round(float(coords_2d[i, 1]), 4),
+                    "risk_score": float(risk_scores[i]),
+                    "industry": str(df_stats.iloc[i].get("industry", "")),
+                    "revenue": float(df_stats.iloc[i].get("revenue", 0)),
+                })
+        else:
+            # Fallback: use revenue vs risk_score
+            for i in range(len(df_stats)):
+                scatter_data.append({
+                    "tax_code": str(df_stats.iloc[i].get("tax_code", "")),
+                    "company_name": str(df_stats.iloc[i].get("company_name", "")),
+                    "pc1": round(float(np.log1p(max(0, df_stats.iloc[i].get("revenue", 0)))), 4),
+                    "pc2": float(risk_scores[i]),
+                    "risk_score": float(risk_scores[i]),
+                    "industry": str(df_stats.iloc[i].get("industry", "")),
+                    "revenue": float(df_stats.iloc[i].get("revenue", 0)),
+                })
 
         # Correlation matrix (features)
         feature_cols = TaxFeatureEngineer.FEATURE_COLS
@@ -355,6 +391,22 @@ class TaxFraudPipeline:
                 })
         key_drivers.sort(key=lambda x: x["triggered_count"], reverse=True)
 
+        # ---- Year Trend Data ----
+        year_trend_data = []
+        if full_df is not None and "year" in full_df.columns:
+            trend_group = full_df.groupby("year")
+            for year, group in trend_group:
+                avg_risk = round(float(group["risk_score"].mean()), 2)
+                critical_count = int((group["risk_score"] >= 60).sum())
+                total_rev = float(group["revenue"].sum()) / 1e9 if "revenue" in group.columns else 0
+                year_trend_data.append({
+                    "year": str(year),
+                    "avg_risk": avg_risk,
+                    "high_risk_count": critical_count,
+                    "total_revenue_bn": round(total_rev, 2)
+                })
+            year_trend_data.sort(key=lambda x: x["year"])
+
         return {
             "summary": summary,
             "risk_distribution": risk_distribution,
@@ -365,6 +417,7 @@ class TaxFraudPipeline:
             "top_50_risky": top_50,
             "box_plot_data": box_plot_data,
             "key_drivers": key_drivers,
+            "year_trend": year_trend_data,
         }
 
     def _compute_shap_simple(self, X: np.ndarray, feature_names: list) -> list[dict]:
