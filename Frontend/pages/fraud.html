@@ -334,16 +334,14 @@ So sánh Biên Lợi nhuận với Trung bình Ngành
 
 <!-- What-If AI Sandbox -->
 <div id="whatif-sandbox" style="display:none;">
-<div class="bg-gradient-to-br from-indigo-50 via-blue-50 to-slate-50 p-6 rounded-2xl border border-blue-200/50 shadow-[0_10px_30px_rgba(0,33,71,0.06)]">
+<div class="mt-6 bg-surface-container-lowest p-6 rounded-2xl border border-outline-variant/10">
 <div class="flex items-center justify-between mb-5">
 <div class="flex items-center gap-3">
-<div class="w-9 h-9 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-xl flex items-center justify-center shadow-lg shadow-blue-200">
-<span class="material-symbols-outlined text-white text-[18px]">science</span>
-</div>
-<div>
-<h5 class="text-xs font-black uppercase tracking-widest text-primary-container">Mô phỏng What-If (AI Sandbox)</h5>
-<p class="text-[9px] text-slate-400">Kéo thanh trượt để điều chỉnh báo cáo tài chính và xem điểm rủi ro thay đổi real-time</p>
-</div>
+<h5 class="text-xs font-black uppercase tracking-widest text-primary-container flex items-center gap-2">
+<span class="material-symbols-outlined text-[16px]">science</span>
+Mô phỏng What-If (AI Sandbox)
+</h5>
+<p class="text-[9px] text-slate-400 hidden sm:block">Kéo thanh trượt để xem rủi ro thay đổi</p>
 </div>
 <button onclick="resetWhatIf()" class="text-[9px] font-bold uppercase tracking-widest text-slate-400 hover:text-primary-container transition-colors flex items-center gap-1">
 <span class="material-symbols-outlined text-[14px]">restart_alt</span> Reset
@@ -363,7 +361,7 @@ So sánh Biên Lợi nhuận với Trung bình Ngành
 <input type="range" id="whatif-expenses" min="-50" max="50" value="0" step="5" class="w-full h-2 bg-blue-100 rounded-lg appearance-none cursor-pointer accent-blue-600" oninput="onWhatIfChange()">
 </div>
 </div>
-<div id="whatif-result" class="bg-white/70 backdrop-blur-sm rounded-xl p-4 border border-blue-100 flex items-center justify-between">
+<div id="whatif-result" class="bg-slate-50/50 rounded-xl p-4 border border-outline-variant/10 flex items-center justify-between">
 <div class="flex items-center gap-3">
 <span class="material-symbols-outlined text-slate-300 text-2xl">psychology_alt</span>
 <p class="text-[10px] text-slate-400">Di chuyển thanh trượt để bắt đầu mô phỏng...</p>

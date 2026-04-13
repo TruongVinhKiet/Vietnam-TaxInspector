@@ -1186,18 +1186,7 @@ function renderGlobalFeatureImportance(featureData) {
     if (!container || !featureData || featureData.length === 0) return;
 
     const chart = echarts.init(container);
-    const gradientColors = [
-        ['#1e3a5f', '#4a90d9'],
-        ['#002147', '#3b82f6'],
-        ['#0f172a', '#6366f1'],
-        ['#1a1a2e', '#818cf8'],
-        ['#2d2d52', '#a5b4fc'],
-        ['#374151', '#93c5fd'],
-        ['#475569', '#bfdbfe'],
-        ['#64748b', '#dbeafe'],
-        ['#94a3b8', '#e0e7ff'],
-        ['#cbd5e1', '#f0f4ff'],
-    ];
+    const driverColors = ['#dc2626', '#ea580c', '#eab308', '#002147'];
 
     chart.setOption({
         animationDuration: 1500,
@@ -1224,10 +1213,7 @@ function renderGlobalFeatureImportance(featureData) {
             data: featureData.map((d, i) => ({
                 value: d.importance_pct,
                 itemStyle: {
-                    color: new echarts.graphic.LinearGradient(0, 0, 1, 0, [
-                        { offset: 0, color: gradientColors[i % gradientColors.length][0] },
-                        { offset: 1, color: gradientColors[i % gradientColors.length][1] },
-                    ]),
+                    color: driverColors[i % driverColors.length],
                     borderRadius: [0, 6, 6, 0],
                 },
             })),
