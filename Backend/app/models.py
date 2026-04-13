@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Float, Boolean, Date, DateTime, Numeric, ForeignKey, Text
+from sqlalchemy import Column, Integer, String, Float, Boolean, Date, DateTime, Numeric, ForeignKey, Text, JSON
 from sqlalchemy.sql import func
 
 from .database import Base
@@ -92,3 +92,52 @@ class AuditLog(Base):
     ip_address = Column(String(45), nullable=True)             # IPv4 or IPv6
     user_agent = Column(String(500), nullable=True)            # Browser user agent string
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class AIAnalysisBatch(Base):
+    """
+    Quản lý tiến độ xử lý file CSV (Batch AI Analysis).
+    status: pending -> processing -> done / failed
+    """
+    __tablename__ = "ai_analysis_batches"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    filename = Column(String(500), nullable=False)
+    file_path = Column(String(1000), nullable=True)
+    total_rows = Column(Integer, default=0)
+    processed_rows = Column(Integer, default=0)
+    status = Column(String(20), nullable=False, default="pending", index=True)
+    error_message = Column(Text, nullable=True)
+    result_summary = Column(JSON, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    started_at = Column(DateTime(timezone=True), nullable=True)
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+
+
+class AIRiskAssessment(Base):
+    """
+    Kết quả chấm điểm rủi ro cho từng doanh nghiệp.
+    Lưu trữ Features (F1-F4), anomaly_score, risk_score và giải thích SHAP dưới dạng JSON.
+    """
+    __tablename__ = "ai_risk_assessments"
+
+    id = Column(Integer, primary_key=True, index=True)
+    batch_id = Column(Integer, ForeignKey("ai_analysis_batches.id", ondelete="CASCADE"), nullable=True, index=True)
+    tax_code = Column(String(20), nullable=False, index=True)
+    company_name = Column(String(255), nullable=True)
+    industry = Column(String(100), nullable=True)
+    year = Column(Integer, nullable=True)
+    revenue = Column(Numeric(18, 2), nullable=True)
+    total_expenses = Column(Numeric(18, 2), nullable=True)
+    f1_divergence = Column(Float, nullable=True)
+    f2_ratio_limit = Column(Float, nullable=True)
+    f3_vat_structure = Column(Float, nullable=True)
+    f4_peer_comparison = Column(Float, nullable=True)
+    anomaly_score = Column(Float, nullable=True)
+    risk_score = Column(Float, nullable=False, default=0.0, index=True)
+    risk_level = Column(String(20), default="low")
+    red_flags = Column(JSON, nullable=True)
+    shap_explanation = Column(JSON, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+

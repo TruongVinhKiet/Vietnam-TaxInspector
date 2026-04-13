@@ -146,3 +146,44 @@ class DelinquencyPrediction(BaseModel):
     company_name: str
     probability: float
     cluster: str
+
+
+# --- AI Batch Analysis Schemas ---
+class BatchUploadResponse(BaseModel):
+    batch_id: int
+    filename: str
+    file_size_mb: float
+    status: str
+    message: str
+
+
+class BatchStatusResponse(BaseModel):
+    batch_id: int
+    filename: str
+    status: str
+    total_rows: Optional[int] = 0
+    processed_rows: Optional[int] = 0
+    progress_percent: float = 0.0
+    error_message: Optional[str] = None
+    created_at: Optional[str] = None
+    started_at: Optional[str] = None
+    completed_at: Optional[str] = None
+
+
+class RiskAssessmentDetail(BaseModel):
+    tax_code: str
+    company_name: Optional[str] = None
+    industry: Optional[str] = None
+    year: Optional[int] = None
+    revenue: float = 0.0
+    total_expenses: float = 0.0
+    f1_divergence: Optional[float] = None
+    f2_ratio_limit: Optional[float] = None
+    f3_vat_structure: Optional[float] = None
+    f4_peer_comparison: Optional[float] = None
+    anomaly_score: Optional[float] = None
+    risk_score: float = 0.0
+    risk_level: str = "low"
+    red_flags: List[dict] = []
+    shap_explanation: Optional[List[dict]] = None
+

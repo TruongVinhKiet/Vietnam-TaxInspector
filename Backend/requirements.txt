@@ -7,7 +7,14 @@ xgboost
 lightgbm
 networkx
 pandas
+numpy
 python-multipart
+joblib
+shap
+
+# Async Task Queue
+celery[redis]
+redis
 
 passlib[bcrypt]
 PyJWT
@@ -19,3 +26,4 @@ cryptography
 # Image processing (signature comparison)
 Pillow
 imagehash
+

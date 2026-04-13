@@ -3,10 +3,13 @@
 <html class="light" lang="vi"><head>
 <meta charset="utf-8"/>
 <meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>TaxInspector – Chấm điểm Rủi ro Thuế</title>
+<meta name="description" content="Hệ thống AI phân tích rủi ro gian lận thuế doanh nghiệp với Isolation Forest và XGBoost">
 <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&amp;display=swap" rel="stylesheet"/>
-<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
-<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
+<!-- Apache ECharts -->
+<script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
 <script id="tailwind-config">
       tailwind.config = {
         darkMode: "class",
@@ -84,13 +87,68 @@
             background-image: linear-gradient(to right, #edeeef 1px, transparent 1px), linear-gradient(to bottom, #edeeef 1px, transparent 1px);
             background-size: 40px 40px;
         }
+        /* Tab active/inactive styles */
+        .tab-btn { transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1); }
+        .tab-btn.active {
+            background: #002147;
+            color: #fff;
+            box-shadow: 0 4px 20px rgba(0,33,71,0.25);
+        }
+        .tab-btn:not(.active) {
+            background: transparent;
+            color: #44474e;
+        }
+        .tab-content { display: none; animation: fadeSlideUp 0.5s cubic-bezier(0.16,1,0.3,1); }
+        .tab-content.active { display: block; }
+        @keyframes fadeSlideUp {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        /* Progress bar */
+        .progress-bar-fill {
+            transition: width 0.4s ease;
+            background: linear-gradient(90deg, #002147, #465f88, #aec7f6);
+            background-size: 200% 100%;
+            animation: shimmer 2s ease infinite;
+        }
+        @keyframes shimmer {
+            0% { background-position: 200% 0; }
+            100% { background-position: -200% 0; }
+        }
+        /* Drop zone */
+        .drop-zone {
+            border: 2px dashed #c4c6cf;
+            transition: all 0.3s ease;
+        }
+        .drop-zone.dragover {
+            border-color: #002147;
+            background: rgba(0,33,71,0.04);
+            transform: scale(1.01);
+        }
+        /* Risk badge colors */
+        .risk-critical { background: #dc2626; color: #fff; }
+        .risk-high { background: #ea580c; color: #fff; }
+        .risk-medium { background: #eab308; color: #000; }
+        .risk-low { background: #16a34a; color: #fff; }
+
+        /* Toast Notification */
+        .toast-container { position: fixed; top: 80px; right: 24px; z-index: 9999; display: flex; flex-direction: column; gap: 12px; pointer-events: none; }
+        .toast { pointer-events: auto; min-width: 340px; max-width: 440px; padding: 16px 20px; border-radius: 12px; display: flex; align-items: flex-start; gap: 12px; box-shadow: 0 20px 40px rgba(0,0,0,.12); animation: toastIn .5s cubic-bezier(.16,1,.3,1); backdrop-filter: blur(12px); border: 1px solid rgba(255,255,255,.1); }
+        .toast.hide { animation: toastOut .4s cubic-bezier(.16,1,.3,1) forwards; }
+        .toast-success { background: linear-gradient(135deg, #065f46, #047857); color: #d1fae5; }
+        .toast-error { background: linear-gradient(135deg, #7f1d1d, #991b1b); color: #fecaca; }
+        .toast-warning { background: linear-gradient(135deg, #78350f, #92400e); color: #fde68a; }
+        .toast-info { background: linear-gradient(135deg, #002147, #1e3a5f); color: #bfdbfe; }
+        @keyframes toastIn { from { opacity: 0; transform: translateX(100px) scale(.9); } to { opacity: 1; transform: translateX(0) scale(1); } }
+        @keyframes toastOut { from { opacity: 1; transform: translateX(0) scale(1); } to { opacity: 0; transform: translateX(100px) scale(.8); } }
     </style>
 <link rel="stylesheet" href="../css/global.css?v=3.1">
-
 <link rel="icon" type="image/png" href="../assets/logo.png">
 </head>
 <body class="bg-background font-body text-on-surface antialiased">
-<!-- SideNavBar (As per JSON) -->
+<!-- Toast Container -->
+<div id="toast-container" class="toast-container"></div>
+<!-- SideNavBar -->
 <aside class="fixed left-0 top-0 bottom-0 w-64 bg-slate-900 dark:bg-[#000a1e] text-white font-inter tracking-tight shadow-2xl flex flex-col py-6 z-50">
 <div class="px-6 mb-10 flex items-center gap-3">
 <div class="w-10 h-10 bg-white/10 rounded flex items-center justify-center p-1.5 shadow-inner">
@@ -102,7 +160,6 @@
 </div>
 </div>
 <nav class="flex-1 space-y-1 px-2" id="sidebar-nav">
-<!-- Items will be styled dynamically via JS -->
 <a class="nav-item text-slate-400 hover:text-white transition-colors hover:bg-white/5 flex items-center gap-3 px-4 py-3 scale-95 active:scale-90 transition-transform rounded-lg" href="dashboard.html" data-page="dashboard.html" data-title="Tổng quan hệ thống">
 <span class="material-symbols-outlined">dashboard</span>
 <span class="text-sm">Tổng quan</span>
@@ -137,10 +194,9 @@
 </div>
 </div>
 </aside>
-<!-- TopAppBar (As per JSON) -->
+<!-- TopAppBar -->
 <header class="sticky top-0 z-40 w-full ml-64 bg-white/85 dark:bg-[#002147]/85 backdrop-blur-md shadow-sm flex items-center justify-between px-8 h-16 font-inter text-sm border-b border-surface-container-high/50 max-w-[calc(100%-16rem)]">
 <div class="flex items-center gap-6">
-<!-- Breadcrumbs -->
 <nav class="flex items-center space-x-2 text-xs font-medium" id="header-breadcrumb">
 <span class="text-slate-400">Ứng dụng</span>
 <span class="material-symbols-outlined text-[14px] text-slate-300">chevron_right</span>
@@ -163,103 +219,120 @@
 </div>
 </div>
 </header>
+
 <!-- Main Content Canvas -->
 <main class="ml-64 p-12 min-h-screen bg-grid-subtle page-transition">
-<div class="max-w-6xl mx-auto space-y-12">
+<div class="max-w-7xl mx-auto space-y-8">
 <!-- Page Header Section -->
 <section class="flex flex-col md:flex-row md:items-end justify-between gap-6">
 <div class="space-y-2">
 <span class="text-[11px] font-black uppercase tracking-[0.2em] text-primary-container">Bộ Công cụ Phân tích Bảo mật</span>
 <h2 class="text-4xl font-black text-primary-container tracking-tighter leading-none">Phân tích Rủi ro Gian lận Thuế</h2>
-<p class="text-slate-500 text-sm max-w-lg">Hệ thống phân tích hành vi doanh nghiệp dựa trên dữ liệu hóa đơn điện tử và dòng tiền thời gian thực.</p>
-</div>
-<div class="flex gap-2">
-<button class="px-6 py-3 bg-surface-container-high text-on-surface text-xs font-bold uppercase tracking-wider rounded-lg hover:bg-surface-container transition-all flex items-center gap-2">
-<span class="material-symbols-outlined text-sm">download</span>
-                        Xuất báo cáo
-                    </button>
-<button class="px-6 py-3 bg-primary-container text-white text-xs font-bold uppercase tracking-wider rounded-lg flex items-center gap-2 shadow-lg shadow-primary-container/20">
-<span class="material-symbols-outlined text-sm">refresh</span>
-                        Cập nhật dữ liệu
-                    </button>
+<p class="text-slate-500 text-sm max-w-lg">Hệ thống AI lai kép (Isolation Forest + XGBoost) phân tích hành vi doanh nghiệp và chấm điểm rủi ro tự động.</p>
 </div>
 </section>
-<!-- Search & Filter Bar (Architecture Monolith Style) -->
-<div class="bg-surface-container-lowest p-2 rounded-xl shadow-[0_20px_40px_rgba(0,33,71,0.04)] flex items-center gap-2 border border-outline-variant/10">
+
+<!-- =============== TAB NAVIGATION =============== -->
+<div class="flex gap-2 bg-surface-container-lowest p-1.5 rounded-xl border border-outline-variant/10 w-fit">
+<button class="tab-btn active px-6 py-2.5 rounded-lg text-xs font-bold uppercase tracking-widest flex items-center gap-2" onclick="switchTab('single')" id="tab-single-btn">
+<span class="material-symbols-outlined text-[18px]">person_search</span>
+Tra cứu đơn lẻ
+</button>
+<button class="tab-btn px-6 py-2.5 rounded-lg text-xs font-bold uppercase tracking-widest flex items-center gap-2" onclick="switchTab('batch')" id="tab-batch-btn">
+<span class="material-symbols-outlined text-[18px]">batch_prediction</span>
+Phân tích Lô (CSV)
+</button>
+</div>
+
+<!-- ================================================ -->
+<!-- TAB 1: TRA CỨU ĐƠN LẺ (SINGLE QUERY)          -->
+<!-- ================================================ -->
+<div class="tab-content active" id="tab-single">
+<!-- Search Bar -->
+<div class="bg-surface-container-lowest p-2 rounded-xl shadow-[0_20px_40px_rgba(0,33,71,0.04)] flex items-center gap-2 border border-outline-variant/10 mb-8">
 <div class="flex-1 flex items-center px-4 gap-3">
 <span class="material-symbols-outlined text-slate-400">search</span>
-<input class="w-full bg-transparent border-none focus:ring-0 text-sm font-medium py-3" id="fraud-mst" placeholder="Nhập Mã số thuế hoặc Tên doanh nghiệp để bắt đầu phân tích rủi ro..." type="text" value="0101234567"/>
+<input class="w-full bg-transparent border-none focus:ring-0 text-sm font-medium py-3" id="fraud-mst" placeholder="Nhập Mã số thuế hoặc Tên doanh nghiệp để bắt đầu phân tích rủi ro..." type="text"/>
 </div>
 <button id="fraud-btn" onclick="checkFraudRisk()" class="bg-primary px-8 py-3 rounded-lg text-white text-xs font-black uppercase tracking-widest flex items-center gap-2 hover:bg-primary-container transition-all">
 <span class="material-symbols-outlined text-[18px]">psychology</span>
-                    Phân tích AI
-                </button>
+Phân tích AI
+</button>
 </div>
-<!-- Analysis Result Grid --><div id="fraud-result" class="hidden">
+
+<!-- Single Query Result -->
+<div id="fraud-result" class="hidden">
 <div class="grid grid-cols-12 gap-8 items-start">
-<!-- Entity Info Card (Spans 8 columns) -->
+<!-- Entity Info Card (8 cols) -->
 <div class="col-span-12 lg:col-span-8 space-y-8">
 <div class="bg-surface-container-lowest p-8 rounded-2xl border border-outline-variant/10">
 <div class="flex justify-between items-start mb-10">
 <div>
 <div class="flex items-center gap-3 mb-2">
-<h3 class="text-2xl font-bold text-primary-container">Công ty TNHH Xuất Nhập Khẩu ABC</h3>
+<h3 class="text-2xl font-bold text-primary-container" id="result-company-name">---</h3>
 <span class="px-3 py-1 bg-emerald-50 text-emerald-700 text-[10px] font-black uppercase tracking-wider rounded-full flex items-center gap-1 border border-emerald-100">
 <span class="w-1.5 h-1.5 bg-emerald-500 rounded-full"></span>
-                                        Đang hoạt động
-                                    </span>
+Đang hoạt động
+</span>
 </div>
-<p class="text-sm font-mono text-slate-500">MST: 0101234567 • Đại diện: Nguyễn Văn A</p>
+<p class="text-sm font-mono text-slate-500" id="result-meta">MST: --- • Ngành: ---</p>
 </div>
 <span class="material-symbols-outlined text-slate-300 scale-150">verified_user</span>
 </div>
 <div class="grid grid-cols-3 gap-6">
 <div class="bg-surface-container-low p-5 rounded-xl">
-<p class="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Vốn điều lệ</p>
-<p class="text-lg font-bold text-primary-container tracking-tight">50,000,000,000 đ</p>
+<p class="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Doanh thu</p>
+<p class="text-lg font-bold text-primary-container tracking-tight" id="result-revenue">---</p>
 </div>
 <div class="bg-surface-container-low p-5 rounded-xl">
-<p class="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Tuổi đời DN</p>
-<p class="text-lg font-bold text-primary-container tracking-tight">14 Năm</p>
+<p class="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Tổng chi phí</p>
+<p class="text-lg font-bold text-primary-container tracking-tight" id="result-expenses">---</p>
 </div>
 <div class="bg-surface-container-low p-5 rounded-xl">
-<p class="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Ngành nghề</p>
-<p class="text-lg font-bold text-primary-container tracking-tight">XNK Gỗ</p>
+<p class="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Năm phân tích</p>
+<p class="text-lg font-bold text-primary-container tracking-tight" id="result-year">---</p>
 </div>
 </div>
 </div>
-<!-- AI Red Flags Section -->
-<div class="space-y-4">
+<!-- Red Flags -->
+<div class="space-y-4" id="red-flags-container">
 <div class="flex items-center justify-between">
 <h4 class="text-sm font-black uppercase tracking-widest text-primary-container">Dấu hiệu Bất thường AI</h4>
-<span class="text-[10px] text-slate-400 font-medium">3 CẢNH BÁO NGHIÊM TRỌNG</span>
+<span class="text-[10px] text-slate-400 font-medium" id="red-flags-count">0 CẢNH BÁO</span>
 </div>
-<div class="space-y-3">
-<div class="group bg-error-container/20 p-5 rounded-xl border-l-4 border-error flex items-start gap-4 transition-all hover:translate-x-1">
-<span class="material-symbols-outlined text-error" style="font-variation-settings: 'FILL' 1;">warning</span>
-<div>
-<p class="text-sm font-bold text-on-error-container">Doanh thu tăng 300% so với cùng kỳ</p>
-<p class="text-xs text-slate-600 mt-1">Biến động bất thường không tương xứng với quy mô cơ sở hạ tầng và số lượng lao động hiện tại.</p>
+<div id="red-flags-list" class="space-y-3">
+<!-- Dynamically populated -->
 </div>
 </div>
-<div class="group bg-error-container/20 p-5 rounded-xl border-l-4 border-error flex items-start gap-4 transition-all hover:translate-x-1">
-<span class="material-symbols-outlined text-error" style="font-variation-settings: 'FILL' 1;">trending_up</span>
-<div>
-<p class="text-sm font-bold text-on-error-container">Tỷ lệ chi phí/doanh thu 98% kéo dài</p>
-<p class="text-xs text-slate-600 mt-1">Dấu hiệu đẩy khống chi phí đầu vào để triệt tiêu lợi nhuận tính thuế thu nhập doanh nghiệp.</p>
+<!-- Single Query Charts: Trend + Radar -->
+<div class="grid grid-cols-2 gap-6" id="single-charts-row" style="display:none;">
+<div class="bg-surface-container-lowest p-6 rounded-2xl border border-outline-variant/10">
+<h5 class="text-xs font-black uppercase tracking-widest text-primary-container mb-4 flex items-center gap-2">
+<span class="material-symbols-outlined text-[16px]">show_chart</span>
+Xu hướng Doanh thu – Chi phí (3 năm)
+</h5>
+<div id="chart-single-trend" style="height: 280px;"></div>
+</div>
+<div class="bg-surface-container-lowest p-6 rounded-2xl border border-outline-variant/10">
+<h5 class="text-xs font-black uppercase tracking-widest text-primary-container mb-4 flex items-center gap-2">
+<span class="material-symbols-outlined text-[16px]">radar</span>
+Hồ sơ Sức khỏe Doanh nghiệp
+</h5>
+<div id="chart-single-radar" style="height: 280px;"></div>
 </div>
 </div>
-<div class="group bg-error-container/20 p-5 rounded-xl border-l-4 border-error flex items-start gap-4 transition-all hover:translate-x-1">
-<span class="material-symbols-outlined text-error" style="font-variation-settings: 'FILL' 1;">link_off</span>
-<div>
-<p class="text-sm font-bold text-on-error-container">Giao dịch với DN đã khóa MST</p>
-<p class="text-xs text-slate-600 mt-1">Phát hiện 12 hóa đơn đầu vào từ các doanh nghiệp nằm trong danh sách đen 'Doanh nghiệp bỏ địa chỉ kinh doanh'.</p>
+<!-- Peer Comparison: Profit Margin vs Industry Average -->
+<div id="single-peer-row" style="display:none;">
+<div class="bg-surface-container-lowest p-6 rounded-2xl border border-outline-variant/10">
+<h5 class="text-xs font-black uppercase tracking-widest text-primary-container mb-4 flex items-center gap-2">
+<span class="material-symbols-outlined text-[16px]">balance</span>
+So sánh Biên Lợi nhuận với Trung bình Ngành
+</h5>
+<div id="chart-peer-comparison" style="height: 200px;"></div>
 </div>
 </div>
 </div>
-</div>
-</div>
-<!-- Risk Meter (Spans 4 columns) -->
+<!-- Risk Meter (4 cols) -->
 <div class="col-span-12 lg:col-span-4 sticky top-24">
 <div class="bg-white p-8 rounded-2xl shadow-[0_30px_60px_rgba(0,0,0,0.05)] border border-outline-variant/10 text-center space-y-6">
 <p class="text-[10px] font-black uppercase tracking-[0.3em] text-slate-400">Điểm số Tuân thủ Thuế</p>
@@ -273,38 +346,224 @@
 <span class="text-[10px] font-bold text-slate-400 uppercase">/ 100 ĐIỂM</span>
 </div>
 </div>
-<div class="py-2 px-4 bg-error text-white rounded-lg inline-block mx-auto text-xs font-black tracking-widest">
-                            RỦI RO RẤT CAO
-                        </div>
-<p class="text-xs text-slate-500 leading-relaxed px-4">
-                            Đề xuất đưa vào danh sách kiểm tra trọng điểm quý IV/2024 và yêu cầu giải trình số liệu hóa đơn đầu vào.
-                        </p>
+<div class="py-2 px-4 rounded-lg inline-block mx-auto text-xs font-black tracking-widest" id="risk-badge">
+---
+</div>
+<p class="text-xs text-slate-500 leading-relaxed px-4" id="risk-recommendation">
+Nhập MST và nhấn "Phân tích AI" để bắt đầu.
+</p>
 <div class="pt-6 border-t border-slate-100 grid grid-cols-2 gap-4">
 <div class="text-left">
-<p class="text-[10px] text-slate-400 font-bold uppercase">Độ tin cậy</p>
-<p class="text-sm font-bold text-primary-container"><span id="anim-confidence">0</span>% AI</p>
+<p class="text-[10px] text-slate-400 font-bold uppercase">Độ dị biệt</p>
+<p class="text-sm font-bold text-primary-container" id="anomaly-display">---</p>
 </div>
 <div class="text-right">
 <p class="text-[10px] text-slate-400 font-bold uppercase">Mức ưu tiên</p>
-<p class="text-sm font-bold text-error">Cấp độ 1</p>
+<p class="text-sm font-bold" id="risk-level-display">---</p>
 </div>
 </div>
 </div>
+<!-- SHAP Feature Importance -->
+<div class="mt-6 bg-surface-container-lowest p-6 rounded-2xl border border-outline-variant/10" id="shap-container" style="display:none;">
+<h5 class="text-xs font-black uppercase tracking-widest text-primary-container mb-4 flex items-center gap-2">
+<span class="material-symbols-outlined text-[16px]">neurology</span>
+Giải thích AI (SHAP)
+</h5>
+<div id="shap-bars" class="space-y-2">
+<!-- Dynamically populated -->
+</div>
+</div>
+<!-- Action buttons -->
 <div class="mt-6 p-6 bg-primary-container rounded-2xl text-white">
 <div class="flex items-center gap-3 mb-4">
 <span class="material-symbols-outlined text-white text-xl">gavel</span>
 <h5 class="text-xs font-black uppercase tracking-widest">Hành động Thanh tra</h5>
 </div>
 <div class="space-y-3">
-<button class="w-full py-3 bg-white/10 hover:bg-white/20 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all">Gửi thông báo giải trình</button>
-<button class="w-full py-3 bg-white/10 hover:bg-white/20 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all">Lập biên bản vi phạm</button>
+<button onclick="actionSendNotice()" class="w-full py-3 bg-white/10 hover:bg-white/20 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all">Gửi thông báo giải trình</button>
+<button onclick="actionCreateReport()" class="w-full py-3 bg-white/10 hover:bg-white/20 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all">Lập biên bản vi phạm</button>
 </div>
 </div>
 </div>
 </div>
 </div>
+</div>
+
+<!-- ================================================ -->
+<!-- TAB 2: PHÂN TÍCH LÔ (BATCH CSV DASHBOARD)       -->
+<!-- ================================================ -->
+<div class="tab-content" id="tab-batch">
+<!-- Upload zone -->
+<div id="batch-upload-zone" class="drop-zone bg-surface-container-lowest p-12 rounded-2xl text-center border border-outline-variant/10 mb-8 cursor-pointer"
+     ondragover="handleDragOver(event)" ondragleave="handleDragLeave(event)" ondrop="handleDrop(event)" onclick="document.getElementById('csv-file-input').click()">
+<input type="file" id="csv-file-input" accept=".csv" class="hidden" onchange="handleFileSelect(event)">
+<span class="material-symbols-outlined text-6xl text-slate-300 mb-4 block">cloud_upload</span>
+<p class="text-lg font-bold text-primary-container mb-2">Kéo thả file CSV hoặc nhấn để chọn</p>
+<p class="text-sm text-slate-400">Hỗ trợ file báo cáo tài chính (.csv) tối đa 200MB</p>
+<p class="text-xs text-slate-300 mt-2">Cần các cột: tax_code, company_name, industry, year, revenue, cost_of_goods, operating_expenses, total_expenses, net_profit, vat_input, vat_output, industry_avg_profit_margin</p>
+</div>
+
+<!-- Processing Progress -->
+<div id="batch-progress-section" class="hidden mb-8">
+<div class="bg-surface-container-lowest p-8 rounded-2xl border border-outline-variant/10">
+<div class="flex items-center justify-between mb-4">
+<div class="flex items-center gap-3">
+<div class="w-10 h-10 bg-primary-container/10 rounded-xl flex items-center justify-center">
+<span class="material-symbols-outlined text-primary-container animate-spin">autorenew</span>
+</div>
+<div>
+<p class="text-sm font-bold text-primary-container" id="progress-title">Đang xử lý...</p>
+<p class="text-xs text-slate-400" id="progress-subtitle">Hệ thống AI đang phân tích file</p>
+</div>
+</div>
+<span class="text-2xl font-black text-primary-container" id="progress-percent">0%</span>
+</div>
+<div class="w-full bg-slate-100 rounded-full h-3 overflow-hidden">
+<div class="progress-bar-fill h-full rounded-full" id="progress-bar" style="width: 0%"></div>
+</div>
+<p class="text-[10px] text-slate-400 mt-3" id="progress-detail">0 / 0 doanh nghiệp</p>
+</div>
+</div>
+
+<!-- Dashboard (shown when done) -->
+<div id="batch-dashboard" class="hidden space-y-8">
+<!-- Summary Cards -->
+<div class="grid grid-cols-5 gap-5" id="summary-cards">
+<div class="bg-surface-container-lowest p-6 rounded-2xl border border-outline-variant/10">
+<p class="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Tổng Bản Ghi TC</p>
+<p class="text-3xl font-black text-slate-500" id="stat-records">0</p>
+<p class="text-[9px] text-slate-300 mt-1">Dòng dữ liệu CSV</p>
+</div>
+<div class="bg-surface-container-lowest p-6 rounded-2xl border border-outline-variant/10">
+<p class="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Số DN Phân tích</p>
+<p class="text-3xl font-black text-primary-container" id="stat-total">0</p>
+<p class="text-[9px] text-slate-300 mt-1">Thực thể duy nhất</p>
+</div>
+<div class="bg-red-50 p-6 rounded-2xl border border-red-100">
+<p class="text-[10px] font-black text-red-400 uppercase tracking-widest mb-2">Rủi ro rất cao</p>
+<p class="text-3xl font-black text-red-600" id="stat-critical">0</p>
+</div>
+<div class="bg-orange-50 p-6 rounded-2xl border border-orange-100">
+<p class="text-[10px] font-black text-orange-400 uppercase tracking-widest mb-2">Rủi ro cao</p>
+<p class="text-3xl font-black text-orange-600" id="stat-high">0</p>
+</div>
+<div class="bg-emerald-50 p-6 rounded-2xl border border-emerald-100">
+<p class="text-[10px] font-black text-emerald-400 uppercase tracking-widest mb-2">Điểm TB</p>
+<p class="text-3xl font-black text-emerald-600" id="stat-avg">0</p>
+</div>
+</div>
+
+<!-- Charts Row 1: Scatter + Distribution -->
+<div class="grid grid-cols-12 gap-6">
+<div class="col-span-7 bg-surface-container-lowest p-6 rounded-2xl border border-outline-variant/10">
+<h4 class="text-xs font-black uppercase tracking-widest text-primary-container mb-4">Biểu đồ Phân tán: Quy mô DN vs Điểm Rủi ro</h4>
+<div id="chart-scatter" style="height: 400px;"></div>
+</div>
+<div class="col-span-5 bg-surface-container-lowest p-6 rounded-2xl border border-outline-variant/10">
+<h4 class="text-xs font-black uppercase tracking-widest text-primary-container mb-4">Phân phối Điểm Rủi ro</h4>
+<div id="chart-histogram" style="height: 400px;"></div>
+</div>
+</div>
+
+<!-- Charts Row 2: Radar (Fraud Profile) + Donut (Risk Distribution) -->
+<div class="grid grid-cols-12 gap-6">
+<div class="col-span-5 bg-surface-container-lowest p-6 rounded-2xl border border-outline-variant/10">
+<h4 class="text-xs font-black uppercase tracking-widest text-primary-container mb-4 flex items-center gap-2">
+<span class="material-symbols-outlined text-[16px]">radar</span>
+Hồ sơ Đặc trưng Vi phạm (Radar)
+</h4>
+<div id="chart-radar" style="height: 400px;"></div>
+</div>
+<div class="col-span-7 bg-surface-container-lowest p-6 rounded-2xl border border-outline-variant/10">
+<h4 class="text-xs font-black uppercase tracking-widest text-primary-container mb-4 flex items-center gap-2">
+<span class="material-symbols-outlined text-[16px]">donut_large</span>
+Cơ cấu Phân bổ Rủi ro
+</h4>
+<div class="grid grid-cols-2 gap-4 items-center">
+<div id="chart-donut" style="height: 350px;"></div>
+<div id="donut-legend" class="space-y-4"></div>
+</div>
+</div>
+</div>
+
+<!-- Charts Row 3: Industry + Correlation -->
+<div class="grid grid-cols-12 gap-6">
+<div class="col-span-6 bg-surface-container-lowest p-6 rounded-2xl border border-outline-variant/10">
+<h4 class="text-xs font-black uppercase tracking-widest text-primary-container mb-4">Điểm Rủi ro TB theo Ngành nghề</h4>
+<div id="chart-industry" style="height: 400px;"></div>
+</div>
+<div class="col-span-6 bg-surface-container-lowest p-6 rounded-2xl border border-outline-variant/10">
+<h4 class="text-xs font-black uppercase tracking-widest text-primary-container mb-4">Ma trận Tương quan Đặc trưng</h4>
+<div id="chart-correlation" style="height: 400px;"></div>
+</div>
+</div>
+
+<!-- Charts Row 4: Box Plot + Key Drivers -->
+<div class="grid grid-cols-12 gap-6">
+<div class="col-span-7 bg-surface-container-lowest p-6 rounded-2xl border border-outline-variant/10">
+<h4 class="text-xs font-black uppercase tracking-widest text-primary-container mb-4 flex items-center gap-2">
+<span class="material-symbols-outlined text-[16px]">candlestick_chart</span>
+Phân bổ Rủi ro theo Ngành (Box Plot)
+</h4>
+<div id="chart-boxplot" style="height: 420px;"></div>
+</div>
+<div class="col-span-5 bg-surface-container-lowest p-6 rounded-2xl border border-outline-variant/10">
+<h4 class="text-xs font-black uppercase tracking-widest text-primary-container mb-4 flex items-center gap-2">
+<span class="material-symbols-outlined text-[16px]">key</span>
+Động lực Rủi ro Chính (Key Drivers)
+</h4>
+<p class="text-[10px] text-slate-400 mb-4">Tỷ lệ DN rủi ro cao (≥60 điểm) vi phạm từng tiêu chí</p>
+<div id="chart-keydrivers" style="height: 340px;"></div>
+</div>
+</div>
+
+<!-- Data Table: Top 50 risky companies -->
+<div class="bg-surface-container-lowest rounded-2xl border border-outline-variant/10 overflow-hidden">
+<div class="p-6 border-b border-outline-variant/10 flex items-center justify-between">
+<h4 class="text-xs font-black uppercase tracking-widest text-primary-container flex items-center gap-2">
+<span class="material-symbols-outlined text-[16px]">table_chart</span>
+Danh sách Doanh nghiệp theo Điểm Rủi ro
+</h4>
+<div class="flex items-center gap-2">
+<input type="text" id="table-search" class="text-xs px-4 py-2 rounded-lg bg-surface-container border border-outline-variant/10 focus:ring-1 focus:ring-primary-container" placeholder="Tìm kiếm MST / Tên DN..." oninput="filterAndPaginate()">
+<select id="table-industry-filter" class="text-xs px-3 py-2 rounded-lg bg-surface-container border border-outline-variant/10" onchange="filterAndPaginate()">
+<option value="">Tất cả ngành</option>
+</select>
+</div>
+</div>
+<div class="overflow-x-auto">
+<table class="w-full text-xs">
+<thead class="bg-surface-container-low text-left">
+<tr>
+<th class="px-4 py-3 font-bold text-[10px] uppercase tracking-widest text-slate-400">#</th>
+<th class="px-4 py-3 font-bold text-[10px] uppercase tracking-widest text-slate-400 cursor-pointer" onclick="sortTable('tax_code')">MST ↕</th>
+<th class="px-4 py-3 font-bold text-[10px] uppercase tracking-widest text-slate-400">Tên DN</th>
+<th class="px-4 py-3 font-bold text-[10px] uppercase tracking-widest text-slate-400">Ngành</th>
+<th class="px-4 py-3 font-bold text-[10px] uppercase tracking-widest text-slate-400 cursor-pointer" onclick="sortTable('revenue')">Doanh thu ↕</th>
+<th class="px-4 py-3 font-bold text-[10px] uppercase tracking-widest text-slate-400 cursor-pointer" onclick="sortTable('risk_score')">Điểm Rủi Ro ↕</th>
+<th class="px-4 py-3 font-bold text-[10px] uppercase tracking-widest text-slate-400">Độ Dị Biệt</th>
+<th class="px-4 py-3 font-bold text-[10px] uppercase tracking-widest text-slate-400">Mức độ</th>
+</tr>
+</thead>
+<tbody id="results-table-body" class="divide-y divide-slate-100">
+<!-- Dynamically populated -->
+</tbody>
+</table>
+</div>
+<!-- Pagination -->
+<div class="px-6 py-4 border-t border-outline-variant/10 flex items-center justify-between">
+<p class="text-[10px] text-slate-400" id="pagination-info">Hiển thị 0 - 0 / 0 doanh nghiệp</p>
+<div class="flex items-center gap-1" id="pagination-controls">
+<!-- JS sẽ render các nút trang ở đây -->
+</div>
+</div>
+</div>
+</div>
+</div>
+
 </div></main>
-<!-- Footer (As per JSON) -->
+
+<!-- Footer -->
 <footer class="w-full py-4 ml-64 bg-slate-50 dark:bg-slate-950 flex justify-between items-center px-8 border-t border-slate-200 dark:border-slate-800 font-inter text-[10px] uppercase tracking-widest text-slate-500 min-h-[50px] max-w-[calc(100%-16rem)] relative z-10" style="margin-top: auto;">
 <div class="flex items-center gap-6">
 <span class="font-bold text-red-600">Vietnam TaxInspector</span>
@@ -322,8 +581,9 @@
 </div>
 </div>
 </footer>
+
 <script src="../js/api.js?v=3.2"></script>
-<script src="../js/fraud.js"></script>
+<script src="../js/fraud.js?v=2.0"></script>
 <script>
 document.addEventListener("DOMContentLoaded", function() {
     const currentPage = window.location.pathname.split("/").pop() || 'dashboard.html';
