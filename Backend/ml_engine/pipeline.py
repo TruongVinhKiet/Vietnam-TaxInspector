@@ -372,6 +372,7 @@ class TaxFraudPipeline:
         # Summary stats
         summary = {
             "total_companies": len(risk_scores),
+            "csv_total_rows": len(full_df) if full_df is not None else len(risk_scores),
             "avg_risk": round(float(np.mean(risk_scores)), 2),
             "median_risk": round(float(np.median(risk_scores)), 2),
             "critical_count": int(np.sum(risk_scores >= 80)),

@@ -155,6 +155,7 @@ async function checkFraudRisk() {
 
 
 function renderSingleResult(data) {
+    window._currentSingleData = data;
     const resultDiv = document.getElementById('fraud-result');
     resultDiv.classList.remove('hidden');
     resultDiv.animate([
@@ -237,21 +238,30 @@ function animateRiskScore(targetScore, data) {
     levelEl.className = `text-sm font-bold ${targetScore >= 60 ? 'text-error' : targetScore >= 40 ? 'text-yellow-600' : 'text-emerald-600'}`;
 
     scoreEl.textContent = '0';
-    circleEl.style.strokeDashoffset = '552.92';
-    void circleEl.offsetWidth;
+    // Disable CSS transition to fully control via JS
+    circleEl.style.transition = 'none';
 
     const durationMs = 2000;
     const startTime = performance.now();
-    const targetOffset = 552.92 - (552.92 * (targetScore / 100));
-    circleEl.style.strokeDashoffset = targetOffset;
 
     requestAnimationFrame(function animateNumbers(currentTime) {
         const elapsed = currentTime - startTime;
         const progress = Math.min(elapsed / durationMs, 1);
         const easeOut = 1 - Math.pow(1 - progress, 3);
+        
+        // Animate text
         scoreEl.textContent = Math.round(easeOut * targetScore);
+        
+        // Animate circle ring
+        const currentScore = easeOut * targetScore;
+        const currentOffset = 552.92 - (552.92 * (currentScore / 100));
+        circleEl.style.strokeDashoffset = currentOffset;
+
         if (progress < 1) requestAnimationFrame(animateNumbers);
-        else scoreEl.textContent = Math.round(targetScore);
+        else {
+            scoreEl.textContent = Math.round(targetScore);
+            circleEl.style.strokeDashoffset = 552.92 - (552.92 * (targetScore / 100));
+        }
     });
 }
 
@@ -447,7 +457,7 @@ function renderBatchDashboard(data) {
     const summary = stats.summary || {};
 
     // Summary cards with counting animation
-    animateNumber('stat-records', data.total_records || 0);
+    animateNumber('stat-records', summary.csv_total_rows || data.total_records || 0);
     animateNumber('stat-total', summary.total_companies || 0);
     animateNumber('stat-critical', summary.critical_count || 0);
     animateNumber('stat-high', summary.high_count || 0);
@@ -462,6 +472,7 @@ function renderBatchDashboard(data) {
     renderIndustryChart(stats.industry_stats || []);
     renderCorrelationMatrix(stats.correlation_matrix || {});
     renderBoxPlot(stats.box_plot_data || []);
+    renderMapChart(stats.province_stats || []);
     // Use AI global feature importance if available, fallback to rule-based
     if (stats.global_feature_importance && stats.global_feature_importance.length > 0) {
         renderGlobalFeatureImportance(stats.global_feature_importance);
@@ -1567,4 +1578,335 @@ function renderWhatIfResult(data) {
                 <span class="text-sm font-black ${deltaColor}">${deltaSign}${delta.toFixed(1)}</span>
             </div>
         </div>`;
+}
+
+// ===================================================================
+// VIETNAM GEOGRAPHIC RISK HEATMAP (ECharts Map)
+// ===================================================================
+
+// Province name mapping: mock data names -> GeoJSON names
+const PROVINCE_NAME_MAP = {
+    'TP.HCM': 'Hồ Chí Minh city',
+    'Hồ Chí Minh': 'Hồ Chí Minh city',
+    'Bà Rịa-VT': 'Bà Rịa - Vũng Tàu',
+    'Bà Rịa - Vũng Tàu': 'Bà Rịa - Vũng Tàu',
+    'Thừa Thiên Huế': 'Thừa Thiên - Huế',
+    'Đắk Lắk': 'Đắk Lắk',
+    'Đăk Nông': 'Đăk Nông',
+    'Hà Nội': 'Hà Nội',
+    'Đà Nẵng': 'Đà Nẵng',
+    'Hải Phòng': 'Hải Phòng',
+    'Cần Thơ': 'Cần Thơ',
+    'Bình Dương': 'Bình Dương',
+    'Đồng Nai': 'Đồng Nai',
+    'Bắc Ninh': 'Bắc Ninh',
+    'Quảng Ninh': 'Quảng Ninh',
+    'Khánh Hòa': 'Khánh Hòa',
+    'Long An': 'Long An',
+    'Lâm Đồng': 'Lâm Đồng',
+    'Nghệ An': 'Nghệ An',
+    'Thanh Hóa': 'Thanh Hóa',
+};
+
+let _vietnamGeoLoaded = false;
+
+async function renderMapChart(provinceStats) {
+    const container = document.getElementById('chart-geo-map');
+    if (!container) return;
+    const chart = safeInitChart(container);
+
+    if (!provinceStats || provinceStats.length === 0) {
+        chart.setOption({
+            title: { text: 'Không có dữ liệu tỉnh thành', left: 'center', top: 'center',
+                     textStyle: { color: '#999', fontSize: 14 } }
+        });
+        return;
+    }
+
+    // Load GeoJSON if not already loaded
+    if (!_vietnamGeoLoaded) {
+        try {
+            const resp = await fetch('../json/vietnam.json');
+            const geoData = await resp.json();
+            echarts.registerMap('vietnam', geoData);
+            _vietnamGeoLoaded = true;
+        } catch (err) {
+            console.error('[GeoMap] Failed to load vietnam.json:', err);
+            chart.setOption({
+                title: { text: 'Lỗi tải bản đồ GeoJSON', left: 'center', top: 'center',
+                         textStyle: { color: '#dc2626', fontSize: 14 } }
+            });
+            return;
+        }
+    }
+
+    // Map province stats -> GeoJSON-compatible data array
+    const mapData = provinceStats.map(p => {
+        const geoName = PROVINCE_NAME_MAP[p.province] || p.province;
+        return {
+            name: geoName,
+            value: Math.round(p.avg_risk * 100) / 100,
+            companyCount: p.company_count,
+            originalName: p.province,
+        };
+    });
+
+    const maxRisk = Math.max(...mapData.map(d => d.value), 60);
+
+    chart.setOption({
+        title: {
+            text: 'BẢN ĐỒ CẢNH BÁO RỦI RO THUẾ VIỆT NAM',
+            left: 'center',
+            top: 8,
+            textStyle: { color: '#002147', fontSize: 15, fontWeight: 900, letterSpacing: 2 },
+        },
+        tooltip: {
+            trigger: 'item',
+            backgroundColor: 'rgba(0,33,71,0.92)',
+            borderColor: '#465f88',
+            textStyle: { color: '#fff', fontSize: 12 },
+            formatter: params => {
+                if (!params.data || params.data.value === undefined) {
+                    return `<b>${params.name}</b><br/>Không có dữ liệu`;
+                }
+                const d = params.data;
+                const riskColor = d.value >= 60 ? '#ff6b6b' : d.value >= 40 ? '#ffd93d' : '#6bcb77';
+                return `<div style="min-width:180px">
+                    <b style="font-size:13px">${d.originalName || params.name}</b>
+                    <hr style="border-color:rgba(255,255,255,.2);margin:6px 0">
+                    <div style="display:flex;justify-content:space-between;margin-bottom:4px">
+                        <span>Điểm rủi ro TB</span>
+                        <b style="color:${riskColor}">${d.value.toFixed(1)}</b>
+                    </div>
+                    <div style="display:flex;justify-content:space-between">
+                        <span>Số doanh nghiệp</span>
+                        <b>${d.companyCount.toLocaleString()}</b>
+                    </div>
+                </div>`;
+            }
+        },
+        visualMap: {
+            min: 0,
+            max: maxRisk,
+            left: 16,
+            bottom: 20,
+            text: ['Rủi ro cao', 'Rủi ro thấp'],
+            textStyle: { color: '#44474e', fontSize: 10, fontWeight: 700 },
+            inRange: {
+                color: ['#e8f5e9', '#fff9c4', '#ffe0b2', '#ffab91', '#ef5350', '#b71c1c']
+            },
+            calculable: true,
+            orient: 'vertical',
+            itemWidth: 14,
+            itemHeight: 120,
+        },
+        series: [{
+            name: 'Rủi ro Thuế',
+            type: 'map',
+            map: 'vietnam',
+            roam: true,
+            zoom: 1.2,
+            center: [106.5, 16.5],
+            scaleLimit: { min: 0.8, max: 5 },
+            label: {
+                show: true,
+                fontSize: 7,
+                color: '#333',
+                formatter: p => {
+                    // Show abbreviated name for readability
+                    const short = p.name.replace(' city', '').replace('Thành phố ', '');
+                    return short.length > 8 ? short.substring(0, 7) + '…' : short;
+                }
+            },
+            emphasis: {
+                label: { show: true, fontSize: 12, fontWeight: 'bold', color: '#002147' },
+                itemStyle: { areaColor: '#aec7f6', shadowBlur: 20, shadowColor: 'rgba(0,33,71,0.4)', borderWidth: 2, borderColor: '#002147' }
+            },
+            select: {
+                label: { show: true, fontSize: 12, fontWeight: 'bold' },
+                itemStyle: { areaColor: '#d6e3ff' }
+            },
+            itemStyle: {
+                borderColor: '#fff',
+                borderWidth: 1,
+                areaColor: '#f5f5f5',
+            },
+            data: mapData,
+            animationDurationUpdate: 800,
+            animationEasingUpdate: 'cubicInOut',
+        }]
+    });
+}
+
+
+// ===================================================================
+// PDF / PRINT EXPORT
+// ===================================================================
+
+async function exportPDF() {
+    const data = window._currentSingleData;
+    const modal = document.getElementById('report-preview-modal');
+    const paper = document.getElementById('report-paper-content');
+
+    if (!data || !modal || !paper) {
+        showToast('Lỗi', 'Không tìm thấy dữ liệu để xuất báo cáo.', 'error');
+        return;
+    }
+
+    const btn = document.getElementById('btn-export-pdf');
+    const oldBtnContent = btn.innerHTML;
+    btn.innerHTML = 'Đang tạo báo cáo...';
+    btn.disabled = true;
+
+    // Small delay to allow UI to update button
+    await new Promise(r => setTimeout(r, 100));
+
+    try {
+        // Collect chart images
+        const chartImages = { radar: '', trend: '', shap: '' };
+        try {
+            const radarChart = echarts.getInstanceByDom(document.getElementById('chart-single-radar'));
+            if (radarChart) chartImages.radar = radarChart.getDataURL({ type: 'png', pixelRatio: 2, backgroundColor: '#fff' });
+            
+            const trendChart = echarts.getInstanceByDom(document.getElementById('chart-single-trend'));
+            if (trendChart) chartImages.trend = trendChart.getDataURL({ type: 'png', pixelRatio: 2, backgroundColor: '#fff' });
+            
+            const shapChart = echarts.getInstanceByDom(document.getElementById('chart-single-radar')); // Using radar as placeholder for visual if SHAP chart is not an echarts instance. But wait, SHAP is HTML bars.
+            // Since SHAP is standard HTML, we can just print the HTML or skip the image for SHAP. We will skip SHAP image and only show radar + trend.
+        } catch (err) {
+            console.error('Lỗi khi lấy ảnh biểu đồ', err);
+        }
+
+        // Prepare texts
+        const riskTextColor = data.risk_score >= 60 ? '#dc2626' : (data.risk_score >= 40 ? '#ea580c' : '#16a34a');
+        const anomalyPercent = ((data.anomaly_score || 0)*100).toFixed(1);
+        
+        let riskConclusion = 'Doanh nghiệp <b>chưa có dấu hiệu rủi ro rõ ràng</b>, đề xuất đưa vào diện <b>Theo Dõi Định Kỳ</b>.';
+        if (data.risk_score >= 80) {
+            riskConclusion = 'Doanh nghiệp thuộc nhóm <b>RỦI RO RẤT CAO</b>, cấu trúc tài chính có dấu hiệu gian lận nghiêm trọng. Kính đề xuất cấp thẩm quyền đưa vào diện <b>Thanh Tra Đột Xuất</b> và yêu cầu giải trình ngay lập tức.';
+        } else if (data.risk_score >= 60) {
+            riskConclusion = 'Doanh nghiệp thuộc nhóm <b>RỦI RO CAO</b>. Kính đề xuất <b>Kiểm Tra Hồ Sơ Chuyên Sâu</b> đối với các tờ khai VAT và báo cáo tài chính trong 3 năm gần nhất.';
+        } else if (data.risk_score >= 40) {
+            riskConclusion = 'Doanh nghiệp có dấu hiệu <b>RỦI RO BẬC TRUNG</b>. Đề xuất tiếp tục <b>Theo Dõi Chặt Chẽ</b> biến động dòng tiền trong năm tài chính tiếp theo.';
+        }
+
+        const flagsHtml = (data.red_flags || []).map(f => {
+            return `<li><b>Phát hiện bất thường về ${f.feature}:</b> ${f.reason} <i>(Chỉ số hiện tại ghi nhận: ${f.actual_value})</i>. Trí Tuệ Nhân Tạo (XGBoost) đánh giá đây là mắt xích trọng yếu có khả năng liên đới tới hành vi trục lợi thuế.</li>`;
+        }).join('');
+
+        const today = new Date();
+
+        const htmlTemplate = `
+            <div style="font-family: 'Times New Roman', Times, serif; font-size: 13pt; line-height: 1.5; color: #000;">
+                <!-- Header -->
+                <div style="display: flex; justify-content: space-between; margin-bottom: 20px;">
+                    <div style="text-align: center; width: 40%;">
+                        <div style="font-size: 12pt;">BỘ TÀI CHÍNH</div>
+                        <div style="font-weight: bold; font-size: 12pt; border-bottom: 1.5px solid #000; display: inline-block; padding-bottom: 2px;">TỔNG CỤC THUẾ</div>
+                        <div style="margin-top: 5px; font-size: 11pt;">Số: ${Math.floor(Math.random() * 900) + 100}/TB-TCT</div>
+                    </div>
+                    <div style="text-align: center; width: 60%;">
+                        <div style="font-weight: bold; font-size: 12pt;">CỘNG HOÀ XÃ HỘI CHỦ NGHĨA VIỆT NAM</div>
+                        <div style="font-weight: bold; font-size: 13pt; border-bottom: 1.5px solid #000; display: inline-block; padding-bottom: 2px;">Độc lập - Tự do - Hạnh phúc</div>
+                        <div style="margin-top: 5px; font-style: italic; font-size: 12pt;">Hà Nội, ngày ${today.getDate()} tháng ${today.getMonth() + 1} năm ${today.getFullYear()}</div>
+                    </div>
+                </div>
+
+                <!-- Title -->
+                <div style="text-align: center; margin-top: 40px; margin-bottom: 25px;">
+                    <div style="font-weight: bold; font-size: 14pt; margin-bottom: 5px;">THÔNG BÁO</div>
+                    <div style="font-weight: bold; font-size: 13pt;">Về việc cảnh báo rủi ro gian lận thuế và đề nghị giải trình<br>đối với hành vi kê khai tài chính bất thường</div>
+                </div>
+
+                <!-- Content -->
+                <div style="text-align: justify; text-indent: 30px; margin-bottom: 15px;">
+                    Triển khai chuyên đề giám sát trọng điểm đối với các rủi ro hoàn thuế, quản lý hóa đơn và chống thất thu ngân sách nhà nước, Tổng cục Thuế đã đưa vào vận hành Hệ thống Giám sát Tự động TaxInspector có ứng dụng Trí tuệ nhân tạo (Mô hình điểm dị biệt Isolation Forest và Phân lớp Gradient Boosting).
+                    Qua phân tích định kỳ bộ dữ liệu tài chính khai báo đến thời điểm hiện tại, Tổng cục Thuế thông báo kết quả giám định rà soát đối với doanh nghiệp có tên sau đây:
+                </div>
+
+                <div style="margin-left: 30px; margin-bottom: 15px;">
+                    - Ký danh: <b>${data.company_name || 'Không rõ'}</b><br>
+                    - Mã số doanh nghiệp (MST): <b>${data.tax_code || '---'}</b><br>
+                    - Ngành nghề kê khai: ${data.industry || '---'}<br>
+                    - Quy mô doanh thu/năm: ${data.revenue ? data.revenue.toLocaleString() + ' tỷ VNĐ' : '---'}<br>
+                    - Thống kê chi phí vận hành: ${data.total_expenses ? data.total_expenses.toLocaleString() + ' tỷ VNĐ' : '---'}
+                </div>
+
+                <div style="text-align: justify; text-indent: 30px; margin-bottom: 15px;">
+                    Căn cứ vào việc đối soát chuỗi chỉ số cơ bản của đối tượng với hàng nghìn thực thể khác trên cùng hệ sinh thái ngành, hệ thống đặc biệt đưa ra xếp loại rủi ro <b>${getRiskLabel(data.risk_level)}</b> (điểm tổng hợp: <b>${data.risk_score} / 100</b>). 
+                    Đồng thời, cấu trúc tài chính phát sinh mức phân tán <b>${anomalyPercent}%</b> so với biên độ an toàn cho phép. 
+                </div>
+
+                <div style="text-align: justify; text-indent: 30px; margin-bottom: 10px;">
+                    Các luận điểm chuyên sâu từ hệ thống máy học (Red Flags) ghi nhận được:
+                </div>
+                <ul style="margin-top: 0; padding-left: 60px; margin-bottom: 15px; text-align: justify;">
+                    ${flagsHtml || '<li>Mô hình tính toán không ghi nhận đặc trưng rủi ro nào ở mức cảnh báo cao.</li>'}
+                </ul>
+
+                <div style="text-align: justify; text-indent: 30px; margin-bottom: 15px;">
+                    ${riskConclusion} 
+                    Tổng cục Thuế đề nghị các Cơ quan thuế địa phương rà soát lại dữ liệu hóa đơn, hồ sơ khai thuế để kịp thời triển khai các biện pháp nghiệp vụ thanh tra theo đúng quy định pháp luật.
+                </div>
+                
+                <div style="text-align: justify; text-indent: 30px; margin-bottom: 15px;">
+                    Tổng cục Thuế thông báo để các cục nắm được và phối hợp thực hiện./.
+                </div>
+
+                <!-- Footer Signatures -->
+                <div style="display: flex; justify-content: space-between; margin-top: 30px; line-height: 1.2;">
+                    <div style="width: 50%;">
+                        <div style="font-weight: bold; font-style: italic; font-size: 11pt;">Nơi nhận:</div>
+                        <div style="font-size: 10pt; margin-left: -5px;">
+                            - PTCTrg Đặng Ngọc Minh (để b/c);<br>
+                            - Cục Thuế các Tỉnh/Thành phố trực thuộc TW;<br>
+                            - Lưu: VT, CNTT.
+                        </div>
+                    </div>
+                    <div style="width: 50%; text-align: center;">
+                        <div style="font-weight: bold; font-size: 12pt;">TL. TỔNG CỤC TRƯỞNG</div>
+                        <div style="font-weight: bold; font-size: 12pt;">CỤC TRƯỞNG CỤC CÔNG NGHỆ THÔNG TIN</div>
+                        <br><br><br><br><br>
+                        <div style="font-weight: bold; font-size: 13pt;">Phạm Quang Toàn</div>
+                    </div>
+                </div>
+
+                <!-- Page 2 Charts -->
+                <div style="page-break-before: always; padding-top: 20px;">
+                    <div style="font-weight: bold; font-size: 12pt; margin-bottom: 20px; text-decoration: underline;">PHỤ LỤC: BẰNG CHỨNG HÌNH ẢNH TRỰC QUAN MÔ HÌNH HÓA</div>
+                    <div style="display: flex; gap: 20px; justify-content: center; align-items: start;">
+                        ${chartImages.trend ? `
+                        <div style="flex: 1; text-align: center;">
+                            <img src="${chartImages.trend}" alt="Trend Chart" style="max-width: 100%; border: 1px solid #ccc;">
+                            <div style="font-style: italic; font-size: 11pt; margin-top: 8px;">Mô phỏng 1: Khẩu độ Doanh thu/Chi phí</div>
+                        </div>` : ''}
+                        ${chartImages.radar ? `
+                        <div style="flex: 1; text-align: center;">
+                            <img src="${chartImages.radar}" alt="Radar Chart" style="max-width: 100%; border: 1px solid #ccc;">
+                            <div style="font-style: italic; font-size: 11pt; margin-top: 8px;">Mô phỏng 2: Biểu đồ Radar đa góc</div>
+                        </div>` : ''}
+                    </div>
+                </div>
+            </div>
+        `;
+        
+        paper.innerHTML = htmlTemplate;
+        modal.classList.add('active');
+        document.body.style.overflow = 'hidden'; // prevent background scrolling
+
+    } catch (e) {
+        console.error("Lỗi xuất PDF", e);
+        showToast('Lỗi', 'Không thể tạo báo cáo PDF.', 'error');
+    } finally {
+        btn.innerHTML = oldBtnContent;
+        btn.disabled = false;
+    }
+}
+
+function closeReportModal() {
+    const modal = document.getElementById('report-preview-modal');
+    if (modal) {
+        modal.classList.remove('active');
+        document.body.style.overflow = '';
+    }
 }
