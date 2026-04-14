@@ -6,6 +6,12 @@ ai_analysis.py – API Router cho Hệ thống AI Chấm điểm Rủi ro
     2. POST /api/ai/batch-upload              – Upload CSV & bắt đầu phân tích lô
     3. GET  /api/ai/batch-status/{batch_id}   – Kiểm tra tiến độ batch
     4. GET  /api/ai/batch-results/{batch_id}  – Lấy kết quả đầy đủ batch
+    5. POST /api/ai/what-if/{tax_code}        – Mô phỏng What-If
+
+Enhancements:
+    - Single query tự lưu kết quả vào cache để What-If hoạt động ngay
+    - Stale-cache detection: tái phân tích khi dữ liệu tài chính mới hơn cache
+    - Hỗ trợ tra cứu bằng Tên doanh nghiệp ngoài Mã số thuế
 """
 
 import os
@@ -54,16 +60,35 @@ def single_query(tax_code: str, db: Session = Depends(get_db)):
     Chế độ 1: Tra cứu đơn lẻ.
     Tìm dữ liệu 3 năm gần nhất trong DB, chạy AI pipeline real-time.
     Nếu không có trong DB, trả về lỗi kèm gợi ý upload CSV.
+    Hỗ trợ tra cứu bằng Tên DN: nếu tax_code không phải là số thuần,
+    hệ thống sẽ tìm DN theo tên (ILIKE) rồi lấy MST.
     """
-    # Lookup company data
-    company = db.query(models.Company).filter(
-        models.Company.tax_code == tax_code
-    ).first()
+    resolved_tax_code = tax_code
+    company = None
+
+    # --- Hỗ trợ tra cứu bằng tên doanh nghiệp ---
+    if not tax_code.replace("-", "").isdigit():
+        # Treat input as company name search
+        company = db.query(models.Company).filter(
+            models.Company.name.ilike(f"%{tax_code}%")
+        ).first()
+        if company:
+            resolved_tax_code = company.tax_code
+        else:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Không tìm thấy doanh nghiệp tên '{tax_code}'. "
+                       "Hãy nhập MST chính xác hoặc upload CSV."
+            )
+    else:
+        company = db.query(models.Company).filter(
+            models.Company.tax_code == resolved_tax_code
+        ).first()
 
     # Check if we have tax returns for this company
     tax_returns = (
         db.query(models.TaxReturn)
-        .filter(models.TaxReturn.tax_code == tax_code)
+        .filter(models.TaxReturn.tax_code == resolved_tax_code)
         .order_by(models.TaxReturn.filing_date.desc())
         .limit(12)  # up to 3 years * 4 quarters
         .all()
@@ -72,15 +97,46 @@ def single_query(tax_code: str, db: Session = Depends(get_db)):
     # Check if we have a cached risk assessment
     cached_assessment = (
         db.query(models.AIRiskAssessment)
-        .filter(models.AIRiskAssessment.tax_code == tax_code)
+        .filter(models.AIRiskAssessment.tax_code == resolved_tax_code)
         .order_by(models.AIRiskAssessment.created_at.desc())
         .first()
     )
 
+    # --- Stale-cache detection ---
+    # Two conditions invalidate cache:
+    # 1) Newer financial data exists than cached assessment
+    # 2) Cache is older than 30 days (ensures periodic model re-evaluation)
+    cache_is_stale = False
     if cached_assessment:
-        # Build yearly history from tax_returns for trend chart
-        yearly_history = []
+        # Condition 1: newer filing data
         if tax_returns:
+            newest_filing = max(
+                (tr.filing_date for tr in tax_returns if tr.filing_date),
+                default=None,
+            )
+            if newest_filing and cached_assessment.created_at:
+                cache_created = cached_assessment.created_at
+                from datetime import date as date_type
+                filing_dt = datetime.combine(newest_filing, datetime.min.time()) \
+                    if isinstance(newest_filing, date_type) else newest_filing
+                cache_dt = cache_created.replace(tzinfo=None) \
+                    if hasattr(cache_created, 'tzinfo') and cache_created.tzinfo else cache_created
+                if filing_dt > cache_dt:
+                    cache_is_stale = True
+
+        # Condition 2: cache age > 30 days
+        if not cache_is_stale and cached_assessment.created_at:
+            from datetime import timedelta
+            cache_dt = cached_assessment.created_at.replace(tzinfo=None) \
+                if hasattr(cached_assessment.created_at, 'tzinfo') and cached_assessment.created_at.tzinfo \
+                else cached_assessment.created_at
+            if (datetime.utcnow() - cache_dt) > timedelta(days=30):
+                cache_is_stale = True
+
+    if cached_assessment and not cache_is_stale:
+        # Yearly history: prefer DB column (populated by batch), fallback to tax_returns
+        yearly_history = cached_assessment.yearly_history or []
+        if not yearly_history and tax_returns:
             yearly_agg = {}
             for tr in tax_returns:
                 y = tr.filing_date.year if tr.filing_date else 2024
@@ -89,6 +145,15 @@ def single_query(tax_code: str, db: Session = Depends(get_db)):
                 yearly_agg[y]["revenue"] += float(tr.revenue or 0)
                 yearly_agg[y]["total_expenses"] += float(tr.expenses or 0)
             yearly_history = sorted(yearly_agg.values(), key=lambda x: x["year"])
+
+        # Model confidence: read real value from DB column if available,
+        # fallback to approximation for legacy records without the column
+        if cached_assessment.model_confidence is not None:
+            cached_confidence = cached_assessment.model_confidence
+        else:
+            cached_risk = cached_assessment.risk_score or 0
+            fraud_prob_approx = cached_risk / 100.0
+            cached_confidence = round(max(fraud_prob_approx, 1 - fraud_prob_approx) * 100, 1)
 
         # Return cached result
         return {
@@ -103,7 +168,7 @@ def single_query(tax_code: str, db: Session = Depends(get_db)):
             "f3_vat_structure": cached_assessment.f3_vat_structure,
             "f4_peer_comparison": cached_assessment.f4_peer_comparison,
             "anomaly_score": cached_assessment.anomaly_score,
-            "model_confidence": round(max(cached_assessment.risk_score, 100 - cached_assessment.risk_score), 1),
+            "model_confidence": cached_confidence,
             "risk_score": cached_assessment.risk_score,
             "risk_level": cached_assessment.risk_level,
             "red_flags": cached_assessment.red_flags or [],
@@ -122,7 +187,7 @@ def single_query(tax_code: str, db: Session = Depends(get_db)):
             year = tr.filing_date.year if tr.filing_date else 2024
             if year not in yearly_data:
                 yearly_data[year] = {
-                    "tax_code": tax_code,
+                    "tax_code": resolved_tax_code,
                     "company_name": company.name if company else "",
                     "industry": company.industry if company else "",
                     "year": year,
@@ -149,12 +214,41 @@ def single_query(tax_code: str, db: Session = Depends(get_db)):
         result = pipeline.predict_single(company_data)
         result["source"] = "realtime"
 
-        # Attach yearly history for trend chart
-        yearly_history = sorted([
+        # Build yearly history for trend chart + cache persistence
+        yearly_history_for_cache = sorted([
             {"year": d["year"], "revenue": d["revenue"], "total_expenses": d["total_expenses"]}
             for d in company_data
         ], key=lambda x: x["year"])
-        result["yearly_history"] = yearly_history
+
+        # --- Save result into cache (AIRiskAssessment) so What-If works immediately ---
+        try:
+            new_assessment = models.AIRiskAssessment(
+                batch_id=None,
+                tax_code=result.get("tax_code", resolved_tax_code),
+                company_name=result.get("company_name"),
+                industry=result.get("industry"),
+                year=result.get("year"),
+                revenue=result.get("revenue"),
+                total_expenses=result.get("total_expenses"),
+                f1_divergence=result.get("f1_divergence"),
+                f2_ratio_limit=result.get("f2_ratio_limit"),
+                f3_vat_structure=result.get("f3_vat_structure"),
+                f4_peer_comparison=result.get("f4_peer_comparison"),
+                anomaly_score=result.get("anomaly_score"),
+                model_confidence=result.get("model_confidence"),
+                risk_score=result.get("risk_score", 0),
+                risk_level=result.get("risk_level", "low"),
+                red_flags=result.get("red_flags"),
+                shap_explanation=result.get("shap_explanation"),
+                yearly_history=yearly_history_for_cache,
+            )
+            db.add(new_assessment)
+            db.commit()
+        except Exception as cache_err:
+            db.rollback()
+            print(f"[WARN] Failed to cache realtime assessment: {cache_err}")
+
+        result["yearly_history"] = yearly_history_for_cache
 
         return result
 
@@ -162,14 +256,14 @@ def single_query(tax_code: str, db: Session = Depends(get_db)):
     if not company:
         raise HTTPException(
             status_code=404,
-            detail=f"Không tìm thấy doanh nghiệp MST {tax_code}. "
+            detail=f"Không tìm thấy doanh nghiệp MST {resolved_tax_code}. "
                    "Hãy upload file CSV để nhập dữ liệu tài chính."
         )
 
     # Company exists but no financial data
     raise HTTPException(
         status_code=404,
-        detail=f"DN {company.name} (MST: {tax_code}) chưa có dữ liệu tài chính. "
+        detail=f"DN {company.name} (MST: {resolved_tax_code}) chưa có dữ liệu tài chính. "
                "Hãy upload file CSV chứa báo cáo tài chính."
     )
 

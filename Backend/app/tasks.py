@@ -82,10 +82,12 @@ def _save_assessments(assessments: list):
                 f3_vat_structure=a.get("f3_vat_structure"),
                 f4_peer_comparison=a.get("f4_peer_comparison"),
                 anomaly_score=a.get("anomaly_score"),
+                model_confidence=a.get("model_confidence"),
                 risk_score=a.get("risk_score", 0),
                 risk_level=a.get("risk_level", "low"),
                 red_flags=a.get("red_flags"),
                 shap_explanation=a.get("shap_explanation"),
+                yearly_history=a.get("yearly_history"),
             )
             db.add(record)
         db.commit()
@@ -112,9 +114,11 @@ def run_batch_analysis(file_path: str, batch_id: int) -> dict:
 
         # Read CSV
         df = pd.read_csv(file_path)
-        total_rows = len(df)
+        # Use number of unique companies as total (not CSV row count)
+        # because progress_callback in pipeline counts per-company, not per-row
+        total_companies = df["tax_code"].nunique() if "tax_code" in df.columns else len(df)
 
-        _update_batch_status(batch_id, total_rows=total_rows)
+        _update_batch_status(batch_id, total_rows=total_companies)
 
         # Load and run pipeline
         pipeline = get_pipeline()
@@ -164,3 +168,35 @@ if CELERY_AVAILABLE and celery_app:
         Updates task state so Frontend can poll progress.
         """
         return run_batch_analysis(file_path, batch_id)
+
+
+# ---- Cache Cleanup: Remove stale single-query assessments > 30 days ----
+def cleanup_stale_assessments(max_age_days: int = 30) -> int:
+    """
+    Remove old AIRiskAssessment records from single-query cache (batch_id IS NULL)
+    that are older than max_age_days. Batch assessments are kept intact.
+
+    Returns:
+        Number of deleted records.
+    """
+    from app.models import AIRiskAssessment
+    from datetime import timedelta
+
+    db = SessionLocal()
+    deleted_count = 0
+    try:
+        cutoff = datetime.utcnow() - timedelta(days=max_age_days)
+        stale = db.query(AIRiskAssessment).filter(
+            AIRiskAssessment.batch_id.is_(None),
+            AIRiskAssessment.created_at < cutoff,
+        )
+        deleted_count = stale.count()
+        stale.delete(synchronize_session=False)
+        db.commit()
+        print(f"[CLEANUP] Deleted {deleted_count} stale single-query assessments older than {max_age_days} days")
+    except Exception as e:
+        db.rollback()
+        print(f"[ERROR] cleanup_stale_assessments: {e}")
+    finally:
+        db.close()
+    return deleted_count

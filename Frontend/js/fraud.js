@@ -48,6 +48,43 @@ function showToast(title, message, type = 'info', duration = 4000) {
 
 
 // ===================================================================
+// ECHARTS INSTANCE MANAGEMENT (prevents memory leaks)
+// ===================================================================
+
+// Registry of all active ECharts instances for proper lifecycle management
+const _chartInstances = new Map();
+
+/**
+ * Safely initialize an ECharts instance on a container.
+ * Disposes any existing instance on the same DOM element first,
+ * preventing memory leaks from repeated re-renders.
+ */
+function safeInitChart(container) {
+    if (!container) return null;
+    // Dispose existing instance on this DOM node
+    const existing = echarts.getInstanceByDom(container);
+    if (existing) {
+        existing.dispose();
+    }
+    const chart = echarts.init(container);
+    // Track in registry for bulk disposal if needed
+    _chartInstances.set(container.id || container, chart);
+    return chart;
+}
+
+// Centralized resize handler – runs once on window resize for ALL charts
+let _resizeRAF = null;
+window.addEventListener('resize', () => {
+    if (_resizeRAF) cancelAnimationFrame(_resizeRAF);
+    _resizeRAF = requestAnimationFrame(() => {
+        _chartInstances.forEach((chart) => {
+            if (chart && !chart.isDisposed()) chart.resize();
+        });
+    });
+});
+
+
+// ===================================================================
 // TAB SWITCHING
 // ===================================================================
 
@@ -259,16 +296,24 @@ function renderShapExplanation(shap) {
 
     container.style.display = 'block';
     barsDiv.innerHTML = '';
-    const maxImp = Math.max(...shap.map(s => Math.abs(s.importance)));
+    const maxImp = Math.max(...shap.map(s => Math.abs(s.importance || s.shap_value || 0)));
 
     shap.slice(0, 6).forEach(s => {
-        const pct = maxImp > 0 ? (Math.abs(s.importance) / maxImp * 100) : 0;
-        const barColor = s.importance > 0.1 ? 'bg-red-400' : 'bg-primary-container/40';
+        const imp = Math.abs(s.importance || s.shap_value || 0);
+        const pct = maxImp > 0 ? (imp / maxImp * 100) : 0;
+        const isRisk = s.direction === 'risk' || s.shap_value > 0;
+        const barColor = isRisk ? 'bg-red-400' : 'bg-emerald-400';
+        const dirLabel = isRisk ? '▲ Tăng rủi ro' : '▼ Giảm rủi ro';
+        const dirColor = isRisk ? 'text-red-500' : 'text-emerald-500';
+        const shapVal = s.shap_value !== undefined ? s.shap_value.toFixed(4) : imp.toFixed(4);
         const div = document.createElement('div');
         div.innerHTML = `
             <div class="flex justify-between items-center mb-1">
                 <span class="text-[10px] font-bold text-slate-500 uppercase tracking-wider">${formatFeatureName(s.feature)}</span>
-                <span class="text-[10px] font-mono text-slate-400">${s.importance.toFixed(4)}</span>
+                <div class="flex items-center gap-2">
+                    <span class="text-[9px] font-bold ${dirColor}">${dirLabel}</span>
+                    <span class="text-[10px] font-mono text-slate-400">${shapVal}</span>
+                </div>
             </div>
             <div class="w-full bg-slate-100 rounded-full h-2">
                 <div class="${barColor} h-full rounded-full transition-all duration-1000" style="width: ${pct}%"></div>
@@ -343,7 +388,7 @@ function startPolling(batchId) {
             const pct = status.progress_percent || 0;
             document.getElementById('progress-bar').style.width = `${pct}%`;
             document.getElementById('progress-percent').textContent = `${pct}%`;
-            document.getElementById('progress-detail').textContent = `Đã đọc ${status.processed_rows || 0} / ${status.total_rows || '?'} dòng dữ liệu CSV`;
+            document.getElementById('progress-detail').textContent = `Đã phân tích ${status.processed_rows || 0} / ${status.total_rows || '?'} doanh nghiệp`;
 
             if (status.status === 'done') {
                 clearInterval(pollingInterval); pollingInterval = null;
@@ -456,7 +501,7 @@ function animateNumber(elementId, target, isDecimal = false) {
 function renderScatterPlot(scatterData, contourData) {
     const container = document.getElementById('chart-scatter');
     if (!container || !scatterData || scatterData.length === 0) return;
-    const chart = echarts.init(container);
+    const chart = safeInitChart(container);
 
     const getColor = (score) => {
         if (score >= 80) return '#dc2626';
@@ -550,7 +595,6 @@ function renderScatterPlot(scatterData, contourData) {
     }
 
     chart.setOption(option);
-    window.addEventListener('resize', () => chart.resize());
 }
 
 
@@ -562,7 +606,7 @@ function renderBatchTrendChart(trendData) {
         return;
     }
 
-    const chart = echarts.init(container);
+    const chart = safeInitChart(container);
     const years = trendData.map(d => d.year);
     const avgRisks = trendData.map(d => d.avg_risk);
     const highRiskCounts = trendData.map(d => d.high_risk_count);
@@ -605,13 +649,12 @@ function renderBatchTrendChart(trendData) {
             }
         ],
     });
-    window.addEventListener('resize', () => chart.resize());
 }
 
 
 // ---- HISTOGRAM ----
 function renderHistogram(distribution) {
-    const chart = echarts.init(document.getElementById('chart-histogram'));
+    const chart = safeInitChart(document.getElementById('chart-histogram'));
     chart.setOption({
         tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
         grid: { left: '12%', right: '5%', top: '10%', bottom: '15%' },
@@ -627,13 +670,13 @@ function renderHistogram(distribution) {
             label: { show: true, position: 'top', fontSize: 10, color: '#44474e' },
         }],
     });
-    window.addEventListener('resize', () => chart.resize());
+
 }
 
 
 // ---- RADAR CHART (Fraud Profile) ----
 function renderRadarChart(stats, assessments) {
-    const chart = echarts.init(document.getElementById('chart-radar'));
+    const chart = safeInitChart(document.getElementById('chart-radar'));
 
     // Calculate averages for fraud vs normal groups
     const features = ['f1_divergence', 'f2_ratio_limit', 'f3_vat_structure', 'f4_peer_comparison'];
@@ -684,13 +727,13 @@ function renderRadarChart(stats, assessments) {
             ],
         }],
     });
-    window.addEventListener('resize', () => chart.resize());
+
 }
 
 
 // ---- DONUT CHART (Risk Distribution) ----
 function renderDonutChart(summary) {
-    const chart = echarts.init(document.getElementById('chart-donut'));
+    const chart = safeInitChart(document.getElementById('chart-donut'));
     const legendContainer = document.getElementById('donut-legend');
 
     const data = [
@@ -736,17 +779,20 @@ function renderDonutChart(summary) {
             </div>`;
     });
 
-    window.addEventListener('resize', () => chart.resize());
+
 }
 
 
 // ---- INDUSTRY BAR CHART ----
 function renderIndustryChart(industryStats) {
-    const chart = echarts.init(document.getElementById('chart-industry'));
+    const chart = safeInitChart(document.getElementById('chart-industry'));
     const sorted = [...industryStats].sort((a, b) => b.avg_risk - a.avg_risk);
 
     chart.setOption({
-        tooltip: { trigger: 'axis', formatter: p => `<b>${p[0].name}</b><br>Điểm TB: ${p[0].data.toFixed(1)}<br>Số DN: ${sorted[p[0].dataIndex].company_count}` },
+        tooltip: { trigger: 'axis', formatter: p => {
+            const val = p[0].value !== undefined ? p[0].value : (p[0].data && p[0].data.value ? p[0].data.value : 0);
+            return `<b>${p[0].name}</b><br>Điểm TB: ${val.toFixed(1)}<br>Số DN: ${sorted[p[0].dataIndex].company_count}`;
+        }},
         grid: { left: '35%', right: '10%', top: '5%', bottom: '5%' },
         xAxis: { type: 'value', max: 100 },
         yAxis: { type: 'category', data: sorted.map(d => d.industry), axisLabel: { fontSize: 10 }, inverse: true },
@@ -760,13 +806,13 @@ function renderIndustryChart(industryStats) {
             label: { show: true, position: 'right', fontSize: 10 },
         }],
     });
-    window.addEventListener('resize', () => chart.resize());
+
 }
 
 
 // ---- CORRELATION HEATMAP ----
 function renderCorrelationMatrix(corrData) {
-    const chart = echarts.init(document.getElementById('chart-correlation'));
+    const chart = safeInitChart(document.getElementById('chart-correlation'));
     if (!corrData.columns || !corrData.values) {
         chart.setOption({ title: { text: 'Không đủ dữ liệu', left: 'center', top: 'center', textStyle: { color: '#999', fontSize: 14 } } });
         return;
@@ -784,7 +830,7 @@ function renderCorrelationMatrix(corrData) {
         visualMap: { min: -1, max: 1, calculable: true, orient: 'vertical', right: 0, top: 'center', inRange: { color: ['#002147', '#f8f9fa', '#dc2626'] }, textStyle: { fontSize: 10 } },
         series: [{ type: 'heatmap', data, label: { show: true, fontSize: 9 }, emphasis: { itemStyle: { shadowBlur: 10, shadowColor: 'rgba(0,0,0,0.3)' } } }],
     });
-    window.addEventListener('resize', () => chart.resize());
+
 }
 
 
@@ -954,12 +1000,14 @@ function renderSingleTrendChart(yearlyHistory) {
     const container = document.getElementById('chart-single-trend');
     if (!container || !yearlyHistory || yearlyHistory.length === 0) return;
 
-    const chart = echarts.init(container);
+    const chart = safeInitChart(container);
     const years = yearlyHistory.map(d => String(d.year));
     const revenues = yearlyHistory.map(d => d.revenue);
     const expenses = yearlyHistory.map(d => d.total_expenses);
 
-    // Forecast 2025 using growth rate extrapolation
+    // Dynamic forecast: next year = max(years) + 1
+    const latestYear = Math.max(...years.map(y => parseInt(y)));
+    const forecastYear = latestYear + 1;
     let forecastRevenue = null, forecastExpense = null;
     if (revenues.length >= 2) {
         const rGrowth = revenues[revenues.length - 1] / Math.max(revenues[revenues.length - 2], 1);
@@ -976,7 +1024,7 @@ function renderSingleTrendChart(yearlyHistory) {
     const expForecast = new Array(years.length).fill(null);
 
     if (forecastRevenue !== null) {
-        allYears.push('2025 (Dự báo)');
+        allYears.push(`${forecastYear} (Dự báo)`);
         // Connect forecast line to last actual point
         revForecast[revenues.length - 1] = revenues[revenues.length - 1];
         expForecast[expenses.length - 1] = expenses[expenses.length - 1];
@@ -1002,7 +1050,7 @@ function renderSingleTrendChart(yearlyHistory) {
             }
         },
         legend: {
-            data: ['Doanh thu', 'Tổng Chi phí', 'DT Dự báo 2025', 'CP Dự báo 2025'],
+            data: ['Doanh thu', 'Tổng Chi phí', `DT Dự báo ${forecastYear}`, `CP Dự báo ${forecastYear}`],
             bottom: 0, textStyle: { fontSize: 9 }
         },
         grid: { left: '15%', right: '5%', top: '10%', bottom: '22%' },
@@ -1032,14 +1080,14 @@ function renderSingleTrendChart(yearlyHistory) {
                 connectNulls: false,
             },
             {
-                name: 'DT Dự báo 2025', type: 'line', data: revForecast,
+                name: `DT Dự báo ${forecastYear}`, type: 'line', data: revForecast,
                 smooth: true, symbol: 'emptyCircle', symbolSize: 10,
                 lineStyle: { width: 2, color: '#002147', type: 'dotted' },
                 itemStyle: { color: '#002147', borderWidth: 2 },
                 connectNulls: true,
             },
             {
-                name: 'CP Dự báo 2025', type: 'line', data: expForecast,
+                name: `CP Dự báo ${forecastYear}`, type: 'line', data: expForecast,
                 smooth: true, symbol: 'emptyDiamond', symbolSize: 10,
                 lineStyle: { width: 2, color: '#dc2626', type: 'dotted' },
                 itemStyle: { color: '#dc2626', borderWidth: 2 },
@@ -1047,7 +1095,7 @@ function renderSingleTrendChart(yearlyHistory) {
             },
         ],
     });
-    window.addEventListener('resize', () => chart.resize());
+
 }
 
 
@@ -1055,7 +1103,7 @@ function renderSingleRadarChart(data) {
     const container = document.getElementById('chart-single-radar');
     if (!container) return;
 
-    const chart = echarts.init(container);
+    const chart = safeInitChart(container);
 
     // Safe thresholds (values below these are "normal")
     const safeThresholds = {
@@ -1113,7 +1161,7 @@ function renderSingleRadarChart(data) {
             ],
         }],
     });
-    window.addEventListener('resize', () => chart.resize());
+
 }
 
 
@@ -1125,7 +1173,7 @@ function renderBoxPlot(boxPlotData) {
     const container = document.getElementById('chart-boxplot');
     if (!container || !boxPlotData || boxPlotData.length === 0) return;
 
-    const chart = echarts.init(container);
+    const chart = safeInitChart(container);
     const industries = boxPlotData.map(d => d.industry);
     const boxData = boxPlotData.map(d => [d.min, d.q1, d.median, d.q3, d.max]);
 
@@ -1176,7 +1224,7 @@ function renderBoxPlot(boxPlotData) {
             },
         ],
     });
-    window.addEventListener('resize', () => chart.resize());
+
 }
 
 
@@ -1185,7 +1233,7 @@ function renderGlobalFeatureImportance(featureData) {
     const container = document.getElementById('chart-keydrivers');
     if (!container || !featureData || featureData.length === 0) return;
 
-    const chart = echarts.init(container);
+    const chart = safeInitChart(container);
     const driverColors = ['#dc2626', '#ea580c', '#eab308', '#002147'];
 
     chart.setOption({
@@ -1225,7 +1273,7 @@ function renderGlobalFeatureImportance(featureData) {
             },
         }],
     });
-    window.addEventListener('resize', () => chart.resize());
+
 }
 
 // Fallback: rule-based key drivers (kept for backward compatibility)
@@ -1233,7 +1281,7 @@ function renderKeyDrivers(keyDrivers) {
     const container = document.getElementById('chart-keydrivers');
     if (!container || !keyDrivers || keyDrivers.length === 0) return;
 
-    const chart = echarts.init(container);
+    const chart = safeInitChart(container);
     const driverColors = ['#dc2626', '#ea580c', '#eab308', '#002147'];
 
     chart.setOption({
@@ -1272,7 +1320,7 @@ function renderKeyDrivers(keyDrivers) {
             },
         }],
     });
-    window.addEventListener('resize', () => chart.resize());
+
 }
 
 
@@ -1284,7 +1332,7 @@ function renderPeerComparison(data) {
     const container = document.getElementById('chart-peer-comparison');
     if (!container) return;
 
-    const chart = echarts.init(container);
+    const chart = safeInitChart(container);
 
     const profitMargin = data.revenue > 0
         ? ((data.revenue - data.total_expenses) / data.revenue * 100)
@@ -1346,7 +1394,7 @@ function renderPeerComparison(data) {
             },
         ],
     });
-    window.addEventListener('resize', () => chart.resize());
+
 }
 
 

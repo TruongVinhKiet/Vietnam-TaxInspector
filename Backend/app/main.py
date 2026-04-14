@@ -29,6 +29,44 @@ async def lifespan(app: FastAPI):
         print("[OK] Database tables verified / created.")
     except Exception as e:
         print(f"[WARN] Database not reachable, starting without DB: {e}")
+    # --- Auto-migration: add columns that may not exist yet ---
+    try:
+        from sqlalchemy import text
+        with engine.connect() as conn:
+            conn.execute(text(
+                "ALTER TABLE ai_risk_assessments "
+                "ADD COLUMN IF NOT EXISTS model_confidence FLOAT;"
+            ))
+            conn.execute(text(
+                "ALTER TABLE ai_risk_assessments "
+                "ADD COLUMN IF NOT EXISTS yearly_history JSON;"
+            ))
+            conn.commit()
+        print("[OK] Schema migration: model_confidence + yearly_history columns verified.")
+    except Exception as e:
+        print(f"[WARN] Schema migration skipped (table may not exist yet): {e}")
+
+    # --- Periodic cache cleanup scheduler (every 24 hours) ---
+    try:
+        import threading
+        import time as _time
+        from app.tasks import cleanup_stale_assessments
+
+        def _cache_cleanup_loop():
+            """Run cleanup immediately on startup, then every 24 hours."""
+            while True:
+                try:
+                    cleanup_stale_assessments(max_age_days=30)
+                except Exception as exc:
+                    print(f"[WARN] Periodic cache cleanup error: {exc}")
+                _time.sleep(86400)  # 24 hours
+
+        t = threading.Thread(target=_cache_cleanup_loop, daemon=True)
+        t.start()
+        print("[OK] Cache cleanup scheduler started (runs every 24h).")
+    except Exception as e:
+        print(f"[WARN] Cache cleanup scheduler failed to start: {e}")
+
     yield
 
 app = FastAPI(

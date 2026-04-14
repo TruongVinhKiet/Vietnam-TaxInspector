@@ -141,19 +141,28 @@ def main():
         bar = "#" * int(imp * 50)
         print(f"         {name:25s} {imp:.4f} {bar}")
 
-    # ---- 5. Save Models ----
+    # ---- 5. Save Models + SHAP Background Data ----
     print("\n[5/5] Saving models...")
     model_dir = data_dir / "models"
     model_dir.mkdir(parents=True, exist_ok=True)
 
     iso_path = model_dir / "isolation_forest.joblib"
     xgb_path = model_dir / "xgboost_model.joblib"
+    bg_path  = model_dir / "shap_background.joblib"
 
     joblib.dump(iso_forest, iso_path)
     joblib.dump(xgb_model, xgb_path)
 
+    # Save a small background sample for SHAP TreeExplainer (100 rows, stratified)
+    bg_size = min(100, len(X))
+    rng = np.random.RandomState(42)
+    bg_indices = rng.choice(len(X), size=bg_size, replace=False)
+    bg_data = X[bg_indices]
+    joblib.dump(bg_data, bg_path)
+
     print(f"       Saved: {iso_path}")
     print(f"       Saved: {xgb_path}")
+    print(f"       Saved: {bg_path} ({bg_size} samples)")
     print(f"       Iso Forest size: {os.path.getsize(iso_path)/1024:.1f} KB")
     print(f"       XGBoost size:    {os.path.getsize(xgb_path)/1024:.1f} KB")
 

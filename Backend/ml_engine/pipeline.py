@@ -3,7 +3,12 @@ pipeline.py – Hybrid AI Pipeline (Isolation Forest + XGBoost + SHAP)
 ======================================================================
 Lớp 1: Isolation Forest (Unsupervised Anomaly Detection)
 Lớp 2: XGBoost (Supervised Fraud Probability)
-Lớp 3: SHAP (Explainable AI – Red Flag Generation)
+Lớp 3: SHAP (Explainable AI – Local per-sample explanation)
+
+Hybrid Fusion Formula:
+    risk_score = 0.80 * XGBoost_Probability * 100
+               + 0.20 * IsolationForest_AnomalyScore * 100
+    (capped at 0–100)
 
 Pipeline có 2 chế độ:
     1. predict_single(features_dict) → dùng cho tra cứu real-time
@@ -26,6 +31,12 @@ try:
 except ImportError:
     PCA_AVAILABLE = False
 
+try:
+    import shap
+    SHAP_AVAILABLE = True
+except ImportError:
+    SHAP_AVAILABLE = False
+
 # Path to saved models
 MODEL_DIR = Path(__file__).resolve().parent.parent / "data" / "models"
 
@@ -36,11 +47,17 @@ class TaxFraudPipeline:
     Loads pre-trained models and runs inference.
     """
 
+    # Hybrid fusion weights – tunable
+    WEIGHT_XGB = 0.80
+    WEIGHT_ISO = 0.20
+
     def __init__(self, model_dir: Optional[str] = None):
         self.model_dir = Path(model_dir) if model_dir else MODEL_DIR
         self.feature_engineer = TaxFeatureEngineer()
         self.isolation_forest = None
         self.xgboost_model = None
+        self._shap_explainer = None  # Lazy-loaded SHAP TreeExplainer
+        self._shap_background = None  # Background data for SHAP
         self._loaded = False
 
     def load_models(self):
@@ -56,6 +73,13 @@ class TaxFraudPipeline:
 
         self.isolation_forest = joblib.load(iso_path)
         self.xgboost_model = joblib.load(xgb_path)
+
+        # Load SHAP background data if available
+        bg_path = self.model_dir / "shap_background.joblib"
+        if bg_path.exists():
+            self._shap_background = joblib.load(bg_path)
+            print(f"[OK] SHAP background loaded ({len(self._shap_background)} samples)")
+
         self._loaded = True
         print(f"[OK] Models loaded from {self.model_dir}")
 
@@ -98,27 +122,24 @@ class TaxFraudPipeline:
         # Layer 2: XGBoost fraud probability
         fraud_prob = float(self.xgboost_model.predict_proba(X)[0, 1])
 
-        # Combined risk score (0–100)
-        risk_score = round(fraud_prob * 100, 2)
+        # ── Hybrid Fusion: weighted combination of both models ──
+        risk_score = round(
+            min(100.0, self.WEIGHT_XGB * fraud_prob * 100
+                      + self.WEIGHT_ISO * anomaly_score * 100),
+            2,
+        )
 
         # Risk level classification
-        if risk_score >= 80:
-            risk_level = "critical"
-        elif risk_score >= 60:
-            risk_level = "high"
-        elif risk_score >= 40:
-            risk_level = "medium"
-        else:
-            risk_level = "low"
+        risk_level = self._classify_risk_level(risk_score)
 
         # Layer 3: Generate explanations
         row_with_anomaly = latest.copy()
         row_with_anomaly["anomaly_score"] = anomaly_score
         red_flags = self.feature_engineer.generate_red_flags(row_with_anomaly)
 
-        # SHAP explanation (simplified – feature importances)
+        # SHAP explanation (real local SHAP values per sample)
         feature_names = TaxFeatureEngineer.FEATURE_COLS
-        shap_values = self._compute_shap_simple(X, feature_names)
+        shap_values = self._compute_shap(X, feature_names)
 
         return {
             "tax_code": str(latest.get("tax_code", "")),
@@ -160,8 +181,17 @@ class TaxFraudPipeline:
         df = self.feature_engineer.compute_features(df)
 
         # Calculate risk score for all rows to build trend data
+        # IMPORTANT: Use the same Hybrid Fusion (80/20) as predict_single
+        # to ensure consistency between batch trend and individual scores
         X_all = self.feature_engineer.get_feature_matrix(df)
-        df["risk_score"] = np.round(self.xgboost_model.predict_proba(X_all)[:, 1] * 100, 2)
+        xgb_probs_all = self.xgboost_model.predict_proba(X_all)[:, 1]
+        iso_raw_all = self.isolation_forest.decision_function(X_all)
+        iso_scores_all = np.clip(0.5 - iso_raw_all, 0, 1)
+        df["risk_score"] = np.round(
+            np.minimum(100.0, self.WEIGHT_XGB * xgb_probs_all * 100
+                             + self.WEIGHT_ISO * iso_scores_all * 100),
+            2,
+        )
 
         # Group by tax_code, use latest year
         latest_df = df.sort_values("year").groupby("tax_code").last().reset_index()
@@ -176,7 +206,13 @@ class TaxFraudPipeline:
 
         # Layer 2: XGBoost (vectorized)
         fraud_probs = self.xgboost_model.predict_proba(X)[:, 1]
-        risk_scores = np.round(fraud_probs * 100, 2)
+
+        # ── Hybrid Fusion (vectorized) ──
+        risk_scores = np.round(
+            np.minimum(100.0, self.WEIGHT_XGB * fraud_probs * 100
+                             + self.WEIGHT_ISO * anomaly_scores * 100),
+            2,
+        )
 
         # Process each company
         for i in range(total):
@@ -184,22 +220,27 @@ class TaxFraudPipeline:
             risk_score = float(risk_scores[i])
             anomaly_score = float(anomaly_scores[i])
 
-            if risk_score >= 80:
-                risk_level = "critical"
-            elif risk_score >= 60:
-                risk_level = "high"
-            elif risk_score >= 40:
-                risk_level = "medium"
-            else:
-                risk_level = "low"
+            risk_level = self._classify_risk_level(risk_score)
 
             row_data = row.copy()
             row_data["anomaly_score"] = anomaly_score
             red_flags = self.feature_engineer.generate_red_flags(row_data)
 
+            # Extract multi-year history for this company from the full dataset
+            tc = str(row.get("tax_code", ""))
+            company_history = df[df["tax_code"] == tc].sort_values("year")
+            yearly_history = [
+                {
+                    "year": int(h["year"]),
+                    "revenue": round(float(h.get("revenue", 0)), 2),
+                    "total_expenses": round(float(h.get("total_expenses", 0)), 2),
+                }
+                for _, h in company_history.iterrows()
+            ]
+
             assessments.append({
                 "batch_id": batch_id,
-                "tax_code": str(row.get("tax_code", "")),
+                "tax_code": tc,
                 "company_name": str(row.get("company_name", "")),
                 "industry": str(row.get("industry", "")),
                 "year": int(row.get("year", 0)),
@@ -210,9 +251,11 @@ class TaxFraudPipeline:
                 "f3_vat_structure": round(float(row.get("f3_vat_structure", 0)), 4),
                 "f4_peer_comparison": round(float(row.get("f4_peer_comparison", 0)), 4),
                 "anomaly_score": round(anomaly_score, 4),
+                "model_confidence": round(float(max(fraud_probs[i], 1 - fraud_probs[i]) * 100), 1),
                 "risk_score": risk_score,
                 "risk_level": risk_level,
                 "red_flags": red_flags,
+                "yearly_history": yearly_history,
             })
 
             # Report progress
@@ -514,7 +557,7 @@ class TaxFraudPipeline:
         adjustment_details = []
 
         for field, pct_change in adjustments.items():
-            if field in simulated and simulated[field]:
+            if field in simulated and simulated[field] is not None:
                 original_val = float(simulated[field])
                 new_val = original_val * (1 + pct_change / 100)
                 simulated[field] = new_val
@@ -553,21 +596,95 @@ class TaxFraudPipeline:
             },
         }
 
-    def _compute_shap_simple(self, X: np.ndarray, feature_names: list) -> list[dict]:
+    # ── Helper: risk level classification ──
+    @staticmethod
+    def _classify_risk_level(score: float) -> str:
+        if score >= 80:
+            return "critical"
+        elif score >= 60:
+            return "high"
+        elif score >= 40:
+            return "medium"
+        return "low"
+
+    # ── SHAP: Real local explanation per sample ──
+    def _get_shap_explainer(self):
+        """Lazy-initialize SHAP TreeExplainer (cached after first call)."""
+        if self._shap_explainer is None and SHAP_AVAILABLE:
+            try:
+                booster = self.xgboost_model.get_booster()
+                # Monkey-patch: ensure base_score is a plain float
+                # (fixes serialization conflict between XGBoost >=2.0 and SHAP)
+                # Some XGBoost versions return base_score as "[0.5]" instead of "0.5"
+                try:
+                    raw_base = booster.attr('base_score')
+                    if raw_base is not None:
+                        import re
+                        cleaned = re.sub(r'[\[\]\s]', '', str(raw_base))
+                        booster.set_attr(base_score=str(float(cleaned)))
+                except Exception:
+                    pass  # Safe to ignore if attr not present
+
+                if self._shap_background is not None:
+                    self._shap_explainer = shap.TreeExplainer(
+                        booster,
+                        data=self._shap_background,
+                        feature_perturbation="interventional",
+                    )
+                    print("[OK] SHAP TreeExplainer initialized (interventional + background)")
+                else:
+                    self._shap_explainer = shap.TreeExplainer(booster)
+                    print("[OK] SHAP TreeExplainer initialized")
+            except Exception as e:
+                print(f"[WARN] SHAP TreeExplainer init failed: {e}")
+        return self._shap_explainer
+
+    def _compute_shap(self, X: np.ndarray, feature_names: list) -> list[dict]:
         """
-        Simplified SHAP-like explanation using tree feature importances.
-        For full SHAP, use: shap.TreeExplainer(self.xgboost_model).shap_values(X)
+        Compute real per-sample SHAP values using shap.TreeExplainer.
+        Falls back to global feature importances if SHAP is unavailable.
         """
+        try:
+            explainer = self._get_shap_explainer()
+            if explainer is not None:
+                # Real local SHAP values for this specific sample
+                sv = explainer.shap_values(X)
+                # For binary classification, shap_values may return a list
+                if isinstance(sv, list):
+                    sv = sv[1]  # class-1 (fraud) SHAP values
+                sample_shap = sv[0]  # first (only) row
+
+                explanations = []
+                for idx, name in enumerate(feature_names):
+                    explanations.append({
+                        "feature": name,
+                        "shap_value": round(float(sample_shap[idx]), 6),
+                        "importance": round(abs(float(sample_shap[idx])), 6),
+                        "direction": "risk" if sample_shap[idx] > 0 else "safe",
+                        "value": round(float(X[0][idx]), 4) if len(X) > 0 else 0,
+                    })
+                explanations.sort(key=lambda x: x["importance"], reverse=True)
+                return explanations
+        except Exception as e:
+            print(f"[WARN] SHAP computation failed, falling back to global: {e}")
+
+        # Fallback: global feature importances
+        return self._compute_shap_fallback(X, feature_names)
+
+    def _compute_shap_fallback(self, X: np.ndarray, feature_names: list) -> list[dict]:
+        """Fallback SHAP-like explanation using global tree feature importances."""
         try:
             importances = self.xgboost_model.feature_importances_
             explanations = []
-            for name, imp in zip(feature_names, importances):
+            for idx, (name, imp) in enumerate(zip(feature_names, importances)):
                 explanations.append({
                     "feature": name,
-                    "importance": round(float(imp), 4),
-                    "value": round(float(X[0][feature_names.index(name)]), 4) if len(X) > 0 else 0,
+                    "shap_value": round(float(imp), 6),
+                    "importance": round(float(imp), 6),
+                    "direction": "risk",
+                    "value": round(float(X[0][idx]), 4) if len(X) > 0 else 0,
                 })
-            explanations.sort(key=lambda x: abs(x["importance"]), reverse=True)
+            explanations.sort(key=lambda x: x["importance"], reverse=True)
             return explanations
         except Exception:
             return []
