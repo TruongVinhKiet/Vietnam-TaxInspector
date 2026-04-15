@@ -49,4 +49,5 @@ try:
 except ImportError:
     celery_app = None
     CELERY_AVAILABLE = False
-    print("[WARN] Celery not installed – batch processing will run synchronously")
+    # Đã ẩn cảnh báo Celery vì hệ thống tự động fallback an toàn bằng luồng ngầm (threading)
+    # print("[WARN] Celery not installed – batch processing will run synchronously")

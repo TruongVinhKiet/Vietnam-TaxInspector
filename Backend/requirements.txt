@@ -26,4 +26,7 @@ cryptography
 # Image processing (signature comparison)
 Pillow
 imagehash
+torch==2.5.1
+torch_geometric==2.6.1
+geopy==2.4.1
 
