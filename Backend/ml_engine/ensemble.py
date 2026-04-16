@@ -50,16 +50,16 @@ class HeuristicRuleScorer:
         """Score a single company node. Returns [0, 1]."""
         score = 0.0
 
-        # Rule 1: Company age < 1 year → +0.25
+        # Rule 1: Company age tiers (newer companies are riskier)
         reg = company.get("registration_date")
         if reg:
             if isinstance(reg, str):
                 reg = date.fromisoformat(reg)
             age_days = (date.today() - reg).days
-            if age_days < 365:
-                score += 0.25
-            elif age_days < 180:
+            if age_days < 180:
                 score += 0.35
+            elif age_days < 365:
+                score += 0.25
 
         # Rule 2: In a detected cycle → +0.30
         if company["tax_code"] in cycle_nodes:

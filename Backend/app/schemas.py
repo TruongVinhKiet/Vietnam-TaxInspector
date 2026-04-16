@@ -1,5 +1,5 @@
 from pydantic import BaseModel, ConfigDict, Field
-from typing import Optional, List, Literal
+from typing import Optional, List, Literal, Dict, Any
 from datetime import date, datetime
 
 
@@ -186,4 +186,56 @@ class RiskAssessmentDetail(BaseModel):
     risk_level: str = "low"
     red_flags: List[dict] = []
     shap_explanation: Optional[List[dict]] = None
+
+
+# --- Graph Model Quality Schemas ---
+class GraphServingQuality(BaseModel):
+    available: bool = False
+    overall_pass: Optional[bool] = None
+    node_f1: Optional[float] = None
+    edge_f1: Optional[float] = None
+    node_pr_auc_delta: Optional[float] = None
+    edge_pr_auc_delta: Optional[float] = None
+    criteria: Dict[str, Any] = Field(default_factory=dict)
+    updated_at: Optional[str] = None
+
+
+class GraphStressQuality(BaseModel):
+    available: bool = False
+    overall_pass: Optional[bool] = None
+    worst_node_f1_delta: Optional[float] = None
+    unseen_node_generalization_gap: Optional[float] = None
+    temporal_plus3m_edge_f1_drop: Optional[float] = None
+    temporal_plus3m_edge_prauc_drop: Optional[float] = None
+    criteria: Dict[str, Any] = Field(default_factory=dict)
+    updated_at: Optional[str] = None
+
+
+class GraphDriftQuality(BaseModel):
+    detected: bool = False
+    severity: str = "insufficient_data"
+    drifted_features: List[str] = Field(default_factory=list)
+    recommendation: str = ""
+
+
+class GraphModelInfoSummary(BaseModel):
+    model_version: Optional[str] = None
+    amount_feature_mode: Optional[str] = None
+    updated_at: Optional[str] = None
+
+
+class GraphGateSummary(BaseModel):
+    serving_pass: Optional[bool] = None
+    stress_pass: Optional[bool] = None
+    all_pass: bool = False
+
+
+class GraphQualityResponse(BaseModel):
+    status: Literal["healthy", "warning", "degraded", "unknown"] = "unknown"
+    generated_at: str
+    model_info: GraphModelInfoSummary
+    gate_summary: GraphGateSummary
+    serving: GraphServingQuality
+    stress: GraphStressQuality
+    drift: GraphDriftQuality
 

@@ -89,6 +89,11 @@
             font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
         }
 
+        :where(button, [role="tab"], input, a):focus-visible {
+            outline: 2px solid rgba(70, 95, 136, 0.75);
+            outline-offset: 2px;
+        }
+
         /* ── Graph Canvas Styles ── */
         #graph-canvas {
             background:
@@ -99,19 +104,7 @@
         .graph-svg { cursor: grab; }
         .graph-svg:active { cursor: grabbing; }
 
-        /* Pulse animation for node rings */
-        @keyframes nodeGlow {
-            0%, 100% { opacity: 0.3; r: 32; }
-            50% { opacity: 0.08; r: 40; }
-        }
-
-        /* Edge dash animation */
-        @keyframes dashFlow {
-            to { stroke-dashoffset: -24; }
-        }
-        .edge-path.circular {
-            animation: dashFlow 1.8s linear infinite;
-        }
+        /* Animations removed for static flat UI performance */
 
         /* Log entry animation */
         @keyframes fadeSlideIn {
@@ -137,6 +130,303 @@
 
         /* Search dropdown */
         #search-dropdown { max-height: 260px; overflow-y: auto; }
+
+        /* Model intelligence strip */
+        .model-metric-chip {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.35rem;
+            padding: 0.35rem 0.55rem;
+            border-radius: 0.55rem;
+            border: 1px solid rgba(15, 23, 42, 0.08);
+            background: rgba(255, 255, 255, 0.85);
+            font-size: 10px;
+            line-height: 1;
+            font-weight: 800;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            color: #64748b;
+        }
+        .model-metric-chip .value {
+            color: #002147;
+            font-size: 11px;
+            letter-spacing: 0.02em;
+            text-transform: none;
+        }
+
+        /* Quality pills */
+        .quality-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.35rem;
+            padding: 0.25rem 0.5rem;
+            border-radius: 999px;
+            border: 1px solid rgba(148, 163, 184, 0.35);
+            font-size: 9px;
+            font-weight: 900;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            color: #475569;
+            background: #f8fafc;
+        }
+        .quality-pill::before {
+            content: "";
+            width: 6px;
+            height: 6px;
+            border-radius: 999px;
+            background: #94a3b8;
+            box-shadow: 0 0 0 3px rgba(148, 163, 184, 0.15);
+        }
+        .quality-pill[data-state="healthy"] {
+            color: #166534;
+            border-color: rgba(22, 163, 74, 0.4);
+            background: #f0fdf4;
+        }
+        .quality-pill[data-state="healthy"]::before {
+            background: #16a34a;
+            box-shadow: 0 0 0 3px rgba(22, 163, 74, 0.15);
+        }
+        .quality-pill[data-state="warning"] {
+            color: #b45309;
+            border-color: rgba(245, 158, 11, 0.45);
+            background: #fffbeb;
+        }
+        .quality-pill[data-state="warning"]::before {
+            background: #f59e0b;
+            box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.15);
+        }
+        .quality-pill[data-state="degraded"] {
+            color: #b91c1c;
+            border-color: rgba(220, 38, 38, 0.45);
+            background: #fef2f2;
+        }
+        .quality-pill[data-state="degraded"]::before {
+            background: #dc2626;
+            box-shadow: 0 0 0 3px rgba(220, 38, 38, 0.15);
+        }
+        .quality-pill[data-state="unknown"] {
+            color: #475569;
+            border-color: rgba(148, 163, 184, 0.35);
+            background: #f8fafc;
+        }
+
+        /* Forensic tab transition */
+        @keyframes forensicPaneEnter {
+            from { opacity: 0; transform: translateY(8px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .forensic-pane-enter {
+            animation: forensicPaneEnter 0.28s ease both;
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+            .log-entry,
+            .forensic-pane-enter,
+            .graph-loader-ring {
+                animation: none !important;
+            }
+            * {
+                scroll-behavior: auto !important;
+                transition-duration: 0ms !important;
+            }
+        }
+
+        /* Workbench tabs */
+        .workbench-tab {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.4rem;
+            padding: 0.48rem 0.72rem;
+            border-radius: 0.65rem;
+            border: 1px solid transparent;
+            font-size: 10px;
+            font-weight: 900;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            color: #64748b;
+            transition: all 0.2s ease;
+        }
+        .workbench-tab:hover {
+            color: #0f172a;
+            background: rgba(148, 163, 184, 0.09);
+        }
+        .workbench-tab[aria-selected="true"] {
+            color: #002147;
+            border-color: rgba(70, 95, 136, 0.24);
+            background: rgba(214, 227, 255, 0.55);
+            box-shadow: inset 0 0 0 1px rgba(70, 95, 136, 0.08);
+        }
+
+        .graph-canvas-control-btn {
+            width: 2rem;
+            height: 2rem;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 0.5rem;
+            border: 1px solid rgba(255, 255, 255, 0.16);
+            background: rgba(15, 23, 42, 0.38);
+            color: #e2e8f0;
+            transition: all 0.2s ease;
+        }
+        .graph-canvas-control-btn:hover {
+            background: rgba(30, 41, 59, 0.7);
+            border-color: rgba(174, 199, 246, 0.45);
+            color: #ffffff;
+        }
+
+        .investigation-summary-card {
+            border: 1px solid rgba(15, 23, 42, 0.08);
+            background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+            border-radius: 0.8rem;
+            padding: 0.75rem 0.9rem;
+            min-width: 11rem;
+        }
+        .investigation-summary-card .label {
+            font-size: 9px;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            font-weight: 800;
+            color: #64748b;
+        }
+        .investigation-summary-card .value {
+            margin-top: 0.3rem;
+            font-size: 1.05rem;
+            line-height: 1;
+            font-weight: 900;
+            letter-spacing: -0.02em;
+            color: #0f172a;
+        }
+        .investigation-summary-card .hint {
+            margin-top: 0.3rem;
+            font-size: 10px;
+            color: #64748b;
+            font-weight: 600;
+        }
+
+        #timeline-month-range {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 100%;
+            height: 4px;
+            border-radius: 999px;
+            background: linear-gradient(90deg, rgba(174, 199, 246, 0.8) 0%, rgba(51, 65, 85, 0.2) 100%);
+            outline: none;
+        }
+        #timeline-month-range::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 14px;
+            height: 14px;
+            border-radius: 999px;
+            border: 2px solid #ffffff;
+            background: #aec7f6;
+            box-shadow: 0 0 0 4px rgba(174, 199, 246, 0.2);
+            cursor: pointer;
+        }
+        #timeline-month-range::-moz-range-thumb {
+            width: 14px;
+            height: 14px;
+            border-radius: 999px;
+            border: 2px solid #ffffff;
+            background: #aec7f6;
+            box-shadow: 0 0 0 4px rgba(174, 199, 246, 0.2);
+            cursor: pointer;
+        }
+
+        #graph-toast-region {
+            position: fixed;
+            right: 1.5rem;
+            bottom: 1.5rem;
+            display: flex;
+            flex-direction: column;
+            gap: 0.6rem;
+            z-index: 120;
+            pointer-events: none;
+        }
+        .graph-toast {
+            min-width: 240px;
+            max-width: 360px;
+            border-radius: 0.75rem;
+            border: 1px solid rgba(148, 163, 184, 0.25);
+            background: rgba(255, 255, 255, 0.98);
+            color: #0f172a;
+            box-shadow: 0 18px 45px rgba(15, 23, 42, 0.16);
+            padding: 0.7rem 0.85rem;
+            pointer-events: auto;
+            animation: toastEnter 0.24s ease both;
+        }
+        .graph-toast[data-tone="success"] {
+            border-color: rgba(34, 197, 94, 0.35);
+            background: rgba(240, 253, 244, 0.98);
+        }
+        .graph-toast[data-tone="warning"] {
+            border-color: rgba(245, 158, 11, 0.35);
+            background: rgba(255, 251, 235, 0.98);
+        }
+        .graph-toast[data-tone="info"] {
+            border-color: rgba(70, 95, 136, 0.35);
+            background: rgba(239, 246, 255, 0.98);
+        }
+        @keyframes toastEnter {
+            from { opacity: 0; transform: translateY(12px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        @keyframes toastExit {
+            from { opacity: 1; transform: translateY(0); }
+            to { opacity: 0; transform: translateY(10px); }
+        }
+        .graph-toast.toast-exit {
+            animation: toastExit 0.24s ease forwards;
+        }
+
+        #investigation-section.workbench-forensic-mode {
+            height: auto !important;
+            min-height: 750px;
+        }
+        #investigation-section.workbench-forensic-mode #graph-canvas-panel {
+            display: none;
+        }
+        #investigation-section.workbench-forensic-mode #forensic-side-panel {
+            width: calc(100% - 5rem);
+            margin-left: 2.5rem;
+            margin-right: 2.5rem;
+        }
+
+        @media (max-width: 1536px) {
+            #investigation-section {
+                flex-direction: column;
+                height: auto !important;
+            }
+            #graph-canvas-panel {
+                margin-right: 2.5rem;
+                min-height: 520px;
+            }
+            #forensic-side-panel {
+                width: auto;
+                margin-left: 2.5rem;
+                margin-top: 0;
+            }
+            #investigation-section.workbench-forensic-mode #forensic-side-panel {
+                width: auto;
+                margin-left: 2.5rem;
+                margin-right: 2.5rem;
+            }
+        }
+
+        @media (max-width: 1100px) {
+            #graph-workbench-tabs {
+                width: 100%;
+                overflow-x: auto;
+            }
+            #graph-workbench-tabs::-webkit-scrollbar {
+                height: 4px;
+            }
+            #graph-workbench-tabs::-webkit-scrollbar-thumb {
+                background: #cbd5e1;
+                border-radius: 999px;
+            }
+        }
     </style>
     <link rel="stylesheet" href="../css/global.css">
     <link rel="icon" type="image/png" href="../assets/logo.png">
@@ -216,14 +506,14 @@
                     class="flex items-center gap-3 bg-surface-container-low px-4 py-1.5 rounded-full border border-outline-variant/10">
                     <span class="material-symbols-outlined text-slate-400 text-lg">search</span>
                     <input class="bg-transparent border-none focus:ring-0 text-xs w-48 text-on-surface"
-                        placeholder="Tra cứu nhanh..." type="text" />
+                        placeholder="Tra cứu nhanh..." type="text" aria-label="Tra cứu nhanh trên trang" />
                 </div>
                 <div class="flex items-center gap-4 border-l border-slate-200 pl-4">
-                    <button class="relative p-1 text-slate-500 hover:text-primary-container transition-colors">
+                    <button class="relative p-1 text-slate-500 hover:text-primary-container transition-colors" aria-label="Mở thông báo">
                         <span class="material-symbols-outlined">notifications</span>
                         <span class="absolute top-0 right-0 w-2 h-2 bg-error rounded-full"></span>
                     </button>
-                    <button class="p-1 text-slate-500 hover:text-primary-container transition-colors">
+                    <button class="p-1 text-slate-500 hover:text-primary-container transition-colors" aria-label="Mở cài đặt nhanh">
                         <span class="material-symbols-outlined">settings</span>
                     </button>
                 </div>
@@ -245,11 +535,13 @@
                         by Graph Attention Network (GAT)</p>
                 </div>
                 <div class="flex gap-2">
-                    <button
+                    <button id="export-report-btn"
+                        aria-label="Xuất báo cáo mạng lưới VAT"
                         class="px-4 py-2 bg-surface-container-high text-on-surface text-xs font-bold rounded-lg uppercase tracking-wider flex items-center gap-2 hover:bg-surface-container-highest transition-colors">
                         <span class="material-symbols-outlined text-sm">download</span> Xuất Báo Cáo
                     </button>
-                    <button
+                    <button id="flag-case-btn"
+                        aria-label="Đánh dấu hồ sơ điều tra"
                         class="px-4 py-2 bg-primary-container text-white text-xs font-bold rounded-lg uppercase tracking-wider flex items-center gap-2 shadow-lg shadow-primary-container/20 hover:bg-[#003366] transition-colors">
                         <span class="material-symbols-outlined text-sm">flag</span> Đánh dấu
                     </button>
@@ -262,8 +554,10 @@
                     <span class="material-symbols-outlined text-slate-400 ml-2">search</span>
                     <input type="text" id="graph-search-input"
                         placeholder="Nhập Mã số thuế để dựng sơ đồ mạng lưới..."
-                        class="flex-1 bg-transparent border-none focus:ring-0 text-sm font-medium">
+                        class="flex-1 bg-transparent border-none focus:ring-0 text-sm font-medium"
+                        aria-label="Nhập mã số thuế để truy vết đồ thị VAT">
                     <button id="graph-search-btn"
+                        aria-label="Truy vết theo mã số thuế"
                         class="px-6 py-2 bg-primary text-white text-xs font-bold rounded-lg uppercase tracking-widest shadow-md hover:bg-primary-container transition-colors">TRUY
                         VẾT</button>
                 </div>
@@ -272,12 +566,68 @@
                     class="hidden absolute top-full left-0 mt-1 w-full max-w-xl bg-white rounded-xl shadow-2xl border border-slate-200 z-50 overflow-hidden">
                 </div>
             </div>
+
+            <div id="graph-intelligence-strip"
+                class="mt-4 w-full max-w-5xl rounded-xl border border-outline-variant/20 bg-slate-50/70 px-3 py-2 flex flex-wrap items-center gap-2">
+                <div class="model-metric-chip">Mode <span id="model-mode-label" class="value">--</span></div>
+                <div class="model-metric-chip">Node Threshold <span id="node-threshold-value" class="value">--</span></div>
+                <div class="model-metric-chip">Edge Threshold <span id="edge-threshold-value" class="value">--</span></div>
+                <div class="model-metric-chip">Attention <span id="attention-count-value" class="value">--</span></div>
+                <div class="model-metric-chip">Policy <span id="policy-summary" class="value">--</span></div>
+                <div class="model-metric-chip">Depth <span id="query-depth-value" class="value">--</span></div>
+            </div>
+
+            <div id="graph-workbench-tabs" role="tablist" aria-label="Không gian làm việc VAT Graph" class="mt-4 max-w-5xl bg-surface-container-low rounded-xl border border-outline-variant/20 px-2 py-2 flex items-center gap-1.5">
+                <button id="workbench-tab-graph" class="workbench-tab" role="tab" aria-selected="false" aria-controls="investigation-section" tabindex="-1" data-mode="graph" aria-label="Chuyển sang không gian bản đồ đồ thị">
+                    <span class="material-symbols-outlined text-[14px]">hub</span>
+                    Bản đồ
+                </button>
+                <button id="workbench-tab-forensic" class="workbench-tab" role="tab" aria-selected="false" aria-controls="forensic-side-panel" tabindex="-1" data-mode="forensic" aria-label="Chuyển sang không gian forensic">
+                    <span class="material-symbols-outlined text-[14px]">policy</span>
+                    Forensic
+                </button>
+                <button id="workbench-tab-companies" class="workbench-tab" role="tab" aria-selected="false" aria-controls="companies-section" tabindex="-1" data-mode="companies" aria-label="Chuyển sang bảng doanh nghiệp">
+                    <span class="material-symbols-outlined text-[14px]">corporate_fare</span>
+                    Doanh nghiệp
+                </button>
+            </div>
+            <p id="workbench-shortcut-hint" class="mt-2 text-[10px] font-semibold text-slate-500 tracking-wide">
+                Phím tắt: <span class="font-black text-primary-container">G</span> Bản đồ,
+                <span class="font-black text-primary-container">F</span> Forensic,
+                <span class="font-black text-primary-container">C</span> Doanh nghiệp,
+                <span class="font-black text-primary-container">Esc</span> xóa focus.
+            </p>
+
+            <div id="investigation-summary" aria-live="polite" class="mt-4 w-full max-w-5xl hidden">
+                <div class="grid grid-cols-2 lg:grid-cols-4 gap-2">
+                    <div class="investigation-summary-card">
+                        <p class="label">Doanh nghiệp trong cụm</p>
+                        <p id="summary-company-count" class="value">--</p>
+                        <p class="hint">Nút trong subgraph hiện tại</p>
+                    </div>
+                    <div class="investigation-summary-card">
+                        <p class="label">Chủ thể vỏ bọc</p>
+                        <p id="summary-shell-count" class="value text-error">--</p>
+                        <p class="hint">Ước lượng theo ngưỡng model</p>
+                    </div>
+                    <div class="investigation-summary-card">
+                        <p class="label">Chuỗi luân chuyển</p>
+                        <p id="summary-cycle-count" class="value text-amber-700">--</p>
+                        <p class="hint">Số cạnh nghi vấn circular</p>
+                    </div>
+                    <div class="investigation-summary-card">
+                        <p class="label">Mức độ điều tra</p>
+                        <p id="summary-risk-level" class="value">--</p>
+                        <p id="summary-risk-hint" class="hint">Đang chờ phân tích</p>
+                    </div>
+                </div>
+            </div>
         </div>
 
         <!-- Investigation Canvas Section -->
-        <div id="investigation-section" class="w-full flex transition-all duration-500 opacity-0 hidden" style="height: 750px;">
+        <div id="investigation-section" role="region" aria-label="Không gian phân tích đồ thị VAT" class="w-full flex transition-all duration-500 opacity-0 hidden" style="height: 750px;">
             <!-- Graph Canvas -->
-            <div class="flex-1 relative bg-slate-950 flex flex-col rounded-xl overflow-hidden shadow-2xl border border-outline-variant/30 ml-10 mb-6 mt-6">
+            <div id="graph-canvas-panel" class="flex-1 relative bg-slate-950 flex flex-col rounded-xl overflow-hidden shadow-2xl border border-outline-variant/30 ml-10 mb-6 mt-6">
                 <!-- D3.js Graph Container -->
                 <div id="graph-canvas" class="flex-1 relative overflow-hidden"></div>
 
@@ -298,7 +648,7 @@
                     style="display: none;">
                     <div class="text-center">
                         <span class="material-symbols-outlined text-5xl text-slate-700 mb-4">hub</span>
-                        <p class="text-sm text-slate-500 font-bold">Nhập mã số thuế để bắt đầu phân tích</p>
+                        <p id="graph-empty-message" class="text-sm text-slate-500 font-bold">Nhập mã số thuế để bắt đầu phân tích</p>
                     </div>
                 </div>
 
@@ -325,6 +675,18 @@
                     <span class="text-[10px] text-slate-300 font-bold">Đang tải Model...</span>
                 </div>
 
+                <div id="graph-canvas-controls" class="absolute top-6 right-6 px-2 py-2 bg-white/10 backdrop-blur-md rounded-lg border border-white/10 flex items-center gap-1.5 z-30">
+                    <button id="graph-fit-btn" class="graph-canvas-control-btn" title="Fit graph vào khung" aria-label="Fit graph vào khung">
+                        <span class="material-symbols-outlined text-[16px]">fit_screen</span>
+                    </button>
+                    <button id="graph-reset-btn" class="graph-canvas-control-btn" title="Reset zoom" aria-label="Reset zoom">
+                        <span class="material-symbols-outlined text-[16px]">restart_alt</span>
+                    </button>
+                    <button id="graph-clear-focus-btn" class="graph-canvas-control-btn" title="Xóa highlight" aria-label="Xóa highlight">
+                        <span class="material-symbols-outlined text-[16px]">visibility</span>
+                    </button>
+                </div>
+
                 <!-- Legend Overlay -->
                 <div class="absolute bottom-28 left-6 space-y-2 z-30">
                     <div class="flex items-center gap-2 text-[10px] text-slate-400 font-bold uppercase">
@@ -343,14 +705,14 @@
                 </div>
 
                 <!-- Time-Slider Filter -->
-                <div class="h-24 bg-slate-900 border-t border-white/5 pl-8 pr-[400px] flex items-center gap-8">
+                <div class="h-24 bg-slate-900 border-t border-white/5 px-6 flex items-center gap-8">
                     <div class="flex flex-col">
                         <span class="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-1">Trục Thời
                             Gian</span>
                         <div class="flex items-center gap-4">
-                            <button id="timeline-play-btn" class="p-1 hover:bg-white/5 rounded"><span
+                                <button id="timeline-play-btn" class="p-1 hover:bg-white/5 rounded" aria-label="Phát dòng thời gian" aria-pressed="false"><span
                                     class="material-symbols-outlined text-white text-lg">play_arrow</span></button>
-                            <span class="text-xs text-white font-mono">2023 Q3 - 2024 Q1</span>
+                            <span id="timeline-window-text" class="text-xs text-white font-mono">2023 Q3 - 2024 Q1</span>
                         </div>
                     </div>
                     <div class="flex-1 relative px-4">
@@ -419,51 +781,68 @@
                                 <span class="text-[8px] text-slate-600 font-bold uppercase">T12</span>
                             </div>
                         </div>
+
+                        <div class="mt-4 flex items-center gap-3">
+                            <input id="timeline-month-range" type="range" min="1" max="12" value="12" aria-label="Bộ lọc thời gian theo tháng" />
+                            <span id="timeline-month-label" class="text-[10px] font-black text-primary-fixed-dim min-w-[44px] text-right">T12</span>
+                        </div>
                     </div>
                 </div>
             </div>
 
             <!-- Right Forensic Panel -->
             <aside
+                id="forensic-side-panel"
                 class="w-96 bg-white border border-surface-container flex flex-col shadow-xl shrink-0 rounded-xl overflow-hidden ml-6 mr-10 mb-6 mt-6 z-30">
                 <div class="px-6 py-4 border-b border-surface-container">
                     <p class="text-[10px] font-black uppercase text-slate-400 tracking-widest mb-1">PHÂN TÍCH GIAO DỊCH
                     </p>
                 </div>
+                <div class="px-6 py-3 border-b border-surface-container bg-surface-container-low/30">
+                    <div class="flex flex-wrap items-center gap-1.5">
+                        <span id="quality-overall-pill" class="quality-pill" data-state="unknown">MODEL: --</span>
+                        <span id="quality-serving-pill" class="quality-pill" data-state="unknown">SERVING</span>
+                        <span id="quality-stress-pill" class="quality-pill" data-state="unknown">STRESS</span>
+                        <span id="quality-drift-pill" class="quality-pill" data-state="unknown">DRIFT</span>
+                    </div>
+                    <p id="quality-updated-at" aria-live="polite" class="mt-2 text-[10px] text-slate-400 font-medium">Quality snapshot chưa sẵn sàng</p>
+                </div>
                 <div class="p-6 text-center border-b border-surface-container bg-surface-container-low">
                     <div class="flex justify-between items-center mb-2">
                         <span class="text-[10px] font-black uppercase text-error tracking-widest">TỔNG GIÁ TRỊ NGHI
                             VẤN</span>
-                        <span id="severity-badge"
+                        <span id="severity-badge" aria-live="polite"
                             class="bg-slate-300 text-white text-[10px] font-black px-2 py-0.5 rounded uppercase">ĐANG TẢI...</span>
                     </div>
                     <h3 id="total-suspicious-amount" class="text-2xl font-black tracking-tighter text-error">-- VNĐ</h3>
                     <p id="suspicious-invoice-count" class="text-xs text-error font-medium italic mt-2">Đang phân tích
                         dữ liệu mạng lưới...</p>
                 </div>
-                <div class="px-6 border-b border-surface-container flex gap-6 bg-white pt-2">
-                    <button id="tab-logs" class="py-2 text-[10px] font-black uppercase text-primary-container border-b-2 border-primary-container tracking-widest transition-colors">NHẬT KÝ TRUY VẾT</button>
-                    <button id="tab-paths" class="py-2 text-[10px] font-black uppercase text-slate-400 border-b-2 border-transparent hover:text-primary-container tracking-widest transition-colors">CHUỖI BẰNG CHỨNG
+                <div class="px-6 border-b border-surface-container flex gap-6 bg-white pt-2" role="tablist" aria-label="Chế độ forensic panel">
+                    <button id="tab-logs" role="tab" aria-selected="true" aria-controls="investigation-logs" tabindex="0" class="py-2 text-[10px] font-black uppercase text-primary-container border-b-2 border-primary-container tracking-widest transition-colors">NHẬT KÝ TRUY VẾT</button>
+                    <button id="tab-paths" role="tab" aria-selected="false" aria-controls="evidence-paths-container" tabindex="-1" class="py-2 text-[10px] font-black uppercase text-slate-400 border-b-2 border-transparent hover:text-primary-container tracking-widest transition-colors">CHUỖI BẰNG CHỨNG
                          <span id="path-badge" class="ml-1 bg-error text-white px-1.5 py-0.5 rounded-full text-[8px] hidden">0</span>
                     </button>
                 </div>
                 
                 <!-- Logs Container -->
-                <div id="investigation-logs" class="flex-1 overflow-y-auto px-6 py-4 space-y-4 bg-white forensic-scroll block">
+                <div id="investigation-logs" role="tabpanel" aria-labelledby="tab-logs" class="flex-1 overflow-y-auto px-6 py-4 space-y-4 bg-white forensic-scroll block">
                     <div class="flex items-center justify-center h-32">
                         <p class="text-xs text-slate-400 italic">Nhập mã số thuế để xem nhật ký...</p>
                     </div>
                 </div>
 
                 <!-- Evidence Paths Container -->
-                <div id="evidence-paths-container" class="flex-1 overflow-y-auto px-6 py-4 space-y-4 bg-white forensic-scroll hidden">
+                <div id="evidence-paths-container" role="tabpanel" aria-labelledby="tab-paths" class="flex-1 overflow-y-auto px-6 py-4 space-y-4 bg-white forensic-scroll hidden">
                     <!-- Path items will be rendered here -->
                 </div>
                 <div class="p-4 bg-white border-t border-surface-container flex gap-2">
-                    <button
+                    <button id="request-explain-btn"
+                        aria-label="Yêu cầu giải trình hồ sơ hiện tại"
                         class="flex-1 py-3 bg-surface-container border border-outline-variant/30 rounded-lg text-xs font-black uppercase tracking-widest text-[#002147] transition-all hover:bg-surface-container-high active:scale-[0.98]">YÊU
                         CẦU GIẢI TRÌNH</button>
-                    <button
+                    <button id="seal-case-btn"
+                        aria-label="Niêm phong hồ sơ điều tra"
                         class="flex-1 py-3 bg-[#000a1e] text-white rounded-lg text-xs font-black uppercase tracking-widest transition-all hover:bg-primary-container shadow-lg active:scale-[0.98]">NIÊM
                         PHONG HỒ SƠ</button>
                 </div>
@@ -471,7 +850,7 @@
         </div>
 
         <!-- Enterprise List Section -->
-        <div class="px-10 pb-10 flex-1 flex flex-col justify-end mt-4">
+        <div id="companies-section" class="px-10 pb-10 flex-1 flex flex-col justify-end mt-4">
             <div class="bg-surface-container-lowest rounded-2xl border border-outline-variant/10 shadow-sm overflow-hidden">
                 <div class="p-6 border-b border-outline-variant/10 flex items-center justify-between bg-white">
                     <div>
@@ -484,7 +863,7 @@
                     <div class="flex items-center gap-3">
                         <div class="flex items-center gap-2 bg-surface-container-low px-3 py-1.5 rounded-lg border border-outline-variant/20">
                             <span class="material-symbols-outlined text-slate-400 text-sm">search</span>
-                            <input type="text" id="table-search" class="text-xs bg-transparent border-none focus:ring-0 w-48" placeholder="Tìm kiếm MST / Tên DN..." oninput="filterAndPaginateCompanies()">
+                            <input type="text" id="table-search" class="text-xs bg-transparent border-none focus:ring-0 w-48" placeholder="Tìm kiếm MST / Tên DN..." oninput="filterAndPaginateCompanies()" aria-label="Tìm kiếm doanh nghiệp theo mã số thuế hoặc tên">
                         </div>
                     </div>
                 </div>
@@ -518,7 +897,7 @@
 
     <!-- Scripts -->
     <script src="../js/api.js?v=3.2"></script>
-    <script src="../js/graph.js?v=4.0"></script>
+    <script src="../js/graph.js?v=4.5"></script>
     <script>
         document.addEventListener("DOMContentLoaded", function () {
             const currentPage = window.location.pathname.split("/").pop() || 'dashboard.html';
@@ -549,6 +928,8 @@
             }
         });
     </script>
+
+    <div id="graph-toast-region" aria-live="polite" aria-atomic="false"></div>
 </body>
 
 </html>

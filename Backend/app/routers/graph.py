@@ -9,12 +9,14 @@ Endpoints:
 from fastapi import APIRouter, Depends, Query, HTTPException
 from sqlalchemy.orm import Session
 from sqlalchemy import text
-from typing import Optional
-import traceback
+from sqlalchemy.exc import SQLAlchemyError
+from typing import Optional, Any
 
 from ..database import get_db
+from ..observability import get_structured_logger, log_event
 
 router = APIRouter(prefix="/api", tags=["VAT Invoice Graph (GNN)"])
+logger = get_structured_logger("taxinspector.graph")
 
 # Lazy-loaded GNN inference engine
 _gnn_engine = None
@@ -24,16 +26,163 @@ def _get_gnn_engine():
     """Lazy-load the GNN inference engine (singleton)."""
     global _gnn_engine
     if _gnn_engine is None:
+        from ml_engine.gnn_model import GNNInference
+        _gnn_engine = GNNInference()
         try:
-            from ml_engine.gnn_model import GNNInference
-            _gnn_engine = GNNInference()
             _gnn_engine.load()
-        except Exception as e:
-            print(f"[WARN] GNN engine failed to load: {e}")
-            from ml_engine.gnn_model import GNNInference
-            _gnn_engine = GNNInference()
+            if _gnn_engine._loaded:
+                _gnn_engine._load_error = None
+                log_event(logger, "info", "graph_gnn_engine_ready", model_loaded=True)
+            else:
+                _gnn_engine._load_error = "model_artifacts_missing"
+                log_event(
+                    logger,
+                    "warning",
+                    "graph_gnn_engine_fallback",
+                    reason="model_artifacts_missing",
+                )
+        except (FileNotFoundError, OSError) as e:
             _gnn_engine._loaded = False
+            _gnn_engine._load_error = "artifact_io_error"
+            log_event(
+                logger,
+                "error",
+                "graph_gnn_engine_load_failed",
+                error_type=type(e).__name__,
+                reason="artifact_io_error",
+                error=str(e),
+            )
+        except RuntimeError as e:
+            _gnn_engine._loaded = False
+            _gnn_engine._load_error = "runtime_error"
+            log_event(
+                logger,
+                "error",
+                "graph_gnn_engine_load_failed",
+                error_type=type(e).__name__,
+                reason="runtime_error",
+                error=str(e),
+            )
+        except Exception as e:
+            _gnn_engine._loaded = False
+            _gnn_engine._load_error = "initialization_error"
+            log_event(
+                logger,
+                "error",
+                "graph_gnn_engine_load_failed",
+                error_type=type(e).__name__,
+                reason="initialization_error",
+                error=str(e),
+            )
     return _gnn_engine
+
+
+def _to_float(value: Any, default: float = 0.0) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return float(default)
+
+
+def _sanitize_policy(policy: Any) -> dict:
+    if not isinstance(policy, dict):
+        return {}
+    return {
+        "cold_start_degree_threshold": int(_to_float(policy.get("cold_start_degree_threshold", 0), 0)),
+        "cold_start_threshold_delta": round(_to_float(policy.get("cold_start_threshold_delta", 0.0), 0.0), 4),
+        "node_blend_alpha_gnn": round(_to_float(policy.get("node_blend_alpha_gnn", 0.0), 0.0), 4),
+    }
+
+
+def _enrich_graph_result(result: dict, engine: Any, tax_code: Optional[str], depth: int) -> dict:
+    model_loaded = bool(result.get("model_loaded", getattr(engine, "_loaded", False)))
+    ensemble_active = bool(result.get("ensemble_active", False))
+    fallback_active = bool(result.get("fallback_active", not model_loaded))
+    if fallback_active and not result.get("fallback_reason"):
+        result["fallback_reason"] = getattr(engine, "_load_error", "model_unavailable")
+
+    thresholds_raw = result.get("decision_thresholds")
+    if isinstance(thresholds_raw, dict):
+        node_threshold = _to_float(thresholds_raw.get("node", 0.5), 0.5)
+        edge_threshold = _to_float(thresholds_raw.get("edge", 0.5), 0.5)
+        policy = _sanitize_policy(thresholds_raw.get("policy"))
+    else:
+        node_threshold = 0.5
+        edge_threshold = 0.5
+        policy = {}
+
+    decision_thresholds = {
+        "node": round(node_threshold, 4),
+        "edge": round(edge_threshold, 4),
+        "policy": policy,
+    }
+    result["decision_thresholds"] = decision_thresholds
+
+    nodes = result.get("nodes")
+    if isinstance(nodes, list):
+        for node in nodes:
+            if not isinstance(node, dict):
+                continue
+            shell_probability = _to_float(
+                node.get("shell_probability"),
+                _to_float(node.get("risk_score", 0.0), 0.0) / 100.0,
+            )
+            node_threshold_local = _to_float(node.get("decision_threshold", node_threshold), node_threshold)
+            node["shell_probability"] = round(shell_probability, 4)
+            node["decision_threshold"] = round(node_threshold_local, 4)
+            node["threshold_margin"] = round(shell_probability - node_threshold_local, 4)
+
+    edges = result.get("edges")
+    if isinstance(edges, list):
+        for edge in edges:
+            if not isinstance(edge, dict):
+                continue
+            circular_probability = _to_float(edge.get("circular_probability"), 0.0)
+            edge["circular_probability"] = round(circular_probability, 4)
+            edge["decision_threshold"] = round(edge_threshold, 4)
+            edge["threshold_margin"] = round(circular_probability - edge_threshold, 4)
+
+    attention_weights = result.get("attention_weights")
+    attention_top = []
+    if isinstance(attention_weights, list):
+        normalized_attention = []
+        for item in attention_weights:
+            if not isinstance(item, dict):
+                continue
+            normalized_attention.append(
+                {
+                    "from": str(item.get("from", "")),
+                    "to": str(item.get("to", "")),
+                    "weight": round(_to_float(item.get("weight", 0.0), 0.0), 4),
+                }
+            )
+        attention_top = sorted(normalized_attention, key=lambda row: row["weight"], reverse=True)[:5]
+        attention_count = len(normalized_attention)
+    else:
+        attention_count = 0
+
+    result["attention_summary"] = {
+        "count": attention_count,
+        "top_edges": attention_top,
+    }
+
+    result["query_context"] = {
+        "tax_code": tax_code,
+        "depth": int(depth),
+    }
+
+    result["contract_version"] = "graph-intelligence-v1"
+    result["model_info"] = {
+        "contract_version": "graph-intelligence-v1",
+        "inference_mode": "gnn_ensemble" if model_loaded else "heuristic_fallback",
+        "model_loaded": model_loaded,
+        "ensemble_active": ensemble_active,
+        "fallback_active": fallback_active,
+        "fallback_reason": result.get("fallback_reason"),
+        "decision_thresholds": decision_thresholds,
+    }
+
+    return result
 
 
 @router.get("/graph")
@@ -53,21 +202,82 @@ def get_vat_invoice_graph(
             companies, invoices = _extract_subgraph(db, tax_code, depth)
         else:
             companies, invoices = _extract_full_graph(db, limit=200)
-
-        if not companies:
-            raise HTTPException(status_code=404, detail="Không tìm thấy dữ liệu cho mã số thuế này.")
-
-        # Run GNN inference
-        engine = _get_gnn_engine()
-        result = engine.predict(companies, invoices)
-
-        return result
-
-    except HTTPException:
-        raise
+    except SQLAlchemyError as e:
+        log_event(
+            logger,
+            "error",
+            "graph_data_extraction_failed",
+            error_type=type(e).__name__,
+            tax_code=tax_code,
+            depth=depth,
+        )
+        raise HTTPException(status_code=500, detail="Lỗi truy vấn dữ liệu đồ thị.")
     except Exception as e:
-        traceback.print_exc()
+        log_event(
+            logger,
+            "error",
+            "graph_data_extraction_unexpected_error",
+            error_type=type(e).__name__,
+            tax_code=tax_code,
+            depth=depth,
+        )
+        raise HTTPException(status_code=500, detail=f"Lỗi dựng subgraph: {str(e)}")
+
+    if not companies:
+        raise HTTPException(status_code=404, detail="Không tìm thấy dữ liệu cho mã số thuế này.")
+
+    # Run GNN inference
+    try:
+        engine = _get_gnn_engine()
+    except (ImportError, ModuleNotFoundError) as e:
+        log_event(
+            logger,
+            "error",
+            "graph_gnn_dependency_error",
+            error_type=type(e).__name__,
+            error=str(e),
+        )
+        raise HTTPException(status_code=500, detail="Không thể khởi tạo GNN engine do lỗi phụ thuộc.")
+
+    try:
+        result = engine.predict(companies, invoices)
+    except RuntimeError as e:
+        log_event(
+            logger,
+            "error",
+            "graph_gnn_inference_runtime_error",
+            error_type=type(e).__name__,
+            error=str(e),
+            tax_code=tax_code,
+        )
+        raise HTTPException(status_code=500, detail="Lỗi runtime khi suy luận GNN.")
+    except Exception as e:
+        log_event(
+            logger,
+            "error",
+            "graph_gnn_inference_error",
+            error_type=type(e).__name__,
+            error=str(e),
+            tax_code=tax_code,
+        )
         raise HTTPException(status_code=500, detail=f"Lỗi phân tích đồ thị: {str(e)}")
+
+    if isinstance(result, dict):
+        fallback_active = not bool(getattr(engine, "_loaded", False))
+        result.setdefault("fallback_active", fallback_active)
+        if fallback_active:
+            result.setdefault("fallback_reason", getattr(engine, "_load_error", "model_unavailable"))
+            log_event(
+                logger,
+                "warning",
+                "graph_response_fallback_active",
+                tax_code=tax_code,
+                reason=result.get("fallback_reason"),
+            )
+
+        result = _enrich_graph_result(result, engine=engine, tax_code=tax_code, depth=depth)
+
+    return result
 
 
 @router.get("/graph/search")
@@ -97,7 +307,23 @@ def search_companies_for_graph(
                 for r in rows
             ]
         }
+    except SQLAlchemyError as e:
+        log_event(
+            logger,
+            "error",
+            "graph_company_search_failed",
+            error_type=type(e).__name__,
+            query=q,
+        )
+        raise HTTPException(status_code=500, detail="Lỗi truy vấn tìm kiếm doanh nghiệp.")
     except Exception as e:
+        log_event(
+            logger,
+            "error",
+            "graph_company_search_unexpected_error",
+            error_type=type(e).__name__,
+            query=q,
+        )
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -125,7 +351,21 @@ def get_all_companies(db: Session = Depends(get_db)):
                 for r in rows
             ]
         }
+    except SQLAlchemyError as e:
+        log_event(
+            logger,
+            "error",
+            "graph_companies_list_failed",
+            error_type=type(e).__name__,
+        )
+        raise HTTPException(status_code=500, detail="Lỗi truy vấn danh sách doanh nghiệp.")
     except Exception as e:
+        log_event(
+            logger,
+            "error",
+            "graph_companies_list_unexpected_error",
+            error_type=type(e).__name__,
+        )
         raise HTTPException(status_code=500, detail=str(e))
 
 

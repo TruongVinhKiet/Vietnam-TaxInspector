@@ -145,8 +145,56 @@ class GraphConstructor:
     }
     NUM_INDUSTRIES = 10
 
-    def __init__(self):
+    def __init__(self, amount_feature_mode: str = "legacy"):
         self.tax_code_to_idx = {}
+        mode = str(amount_feature_mode or "legacy").strip().lower()
+        if mode not in {"legacy", "robust"}:
+            mode = "legacy"
+        self.amount_feature_mode = mode
+        self.amount_stats = {
+            "mode": self.amount_feature_mode,
+            "median_log_amount": 0.0,
+            "iqr_log_amount": 1.0,
+            "clip": 3.0,
+        }
+
+    @staticmethod
+    def _compute_amount_stats(invoices: list[dict]) -> dict:
+        logs = []
+        for inv in invoices:
+            try:
+                logs.append(math.log1p(float(inv.get("amount", 0.0))))
+            except (TypeError, ValueError):
+                continue
+
+        if not logs:
+            return {
+                "median_log_amount": 0.0,
+                "iqr_log_amount": 1.0,
+                "clip": 3.0,
+            }
+
+        arr = np.asarray(logs, dtype=float)
+        q1 = float(np.quantile(arr, 0.25))
+        q3 = float(np.quantile(arr, 0.75))
+        iqr = max(1e-6, q3 - q1)
+        return {
+            "median_log_amount": float(np.median(arr)),
+            "iqr_log_amount": float(iqr),
+            "clip": 3.0,
+        }
+
+    def _normalize_amount_feature(self, amount: float) -> float:
+        amount = max(0.0, float(amount))
+        if self.amount_feature_mode == "robust":
+            log_amount = math.log1p(amount)
+            median = float(self.amount_stats.get("median_log_amount", 0.0))
+            iqr = max(1e-6, float(self.amount_stats.get("iqr_log_amount", 1.0)))
+            clip = max(0.5, float(self.amount_stats.get("clip", 3.0)))
+            z = (log_amount - median) / iqr
+            z = max(-clip, min(clip, z))
+            return (z + clip) / (2.0 * clip)
+        return math.log1p(amount) / 25.0
 
     def build_graph(self, companies: list[dict], invoices: list[dict]) -> "Data":
         """
@@ -219,9 +267,25 @@ class GraphConstructor:
         src_list, dst_list = [], []
         edge_features = []
 
+        # Sort invoices by invoice_number for deterministic edge ordering
+        sorted_invoices = sorted(invoices, key=lambda inv: inv.get("invoice_number", ""))
+
+        # Keep only invoices that become graph edges.
+        graph_invoices = [
+            inv for inv in sorted_invoices
+            if inv.get("seller_tax_code") in self.tax_code_to_idx and inv.get("buyer_tax_code") in self.tax_code_to_idx
+        ]
+
+        # Compute robust amount statistics from the active graph only.
+        amount_stats = self._compute_amount_stats(graph_invoices)
+        self.amount_stats = {
+            "mode": self.amount_feature_mode,
+            **amount_stats,
+        }
+
         # Find earliest invoice date for normalization
         all_dates = []
-        for inv in invoices:
+        for inv in graph_invoices:
             d = inv["date"]
             if isinstance(d, str):
                 d = date.fromisoformat(d)
@@ -229,13 +293,10 @@ class GraphConstructor:
         base_date = min(all_dates) if all_dates else today
         date_span_days = max(1, (max(all_dates) - base_date).days) if all_dates else 365
 
-        # Sort invoices by invoice_number for deterministic edge ordering
-        sorted_invoices = sorted(invoices, key=lambda inv: inv.get("invoice_number", ""))
-
         # ── Pre-compute temporal lookup structures ──
         # 1. Reciprocal time gap: for each (A,B) edge, find nearest (B,A) invoice date
         pair_dates = {}  # (seller, buyer) -> sorted list of dates
-        for inv in sorted_invoices:
+        for inv in graph_invoices:
             s, b = inv["seller_tax_code"], inv["buyer_tax_code"]
             d = inv["date"]
             if isinstance(d, str):
@@ -245,7 +306,7 @@ class GraphConstructor:
         # 2. Seller/buyer activity windows for velocity scoring
         seller_dates = {}  # tax_code -> sorted list of (date, amount)
         buyer_dates = {}
-        for inv in sorted_invoices:
+        for inv in graph_invoices:
             s, b = inv["seller_tax_code"], inv["buyer_tax_code"]
             d = inv["date"]
             if isinstance(d, str):
@@ -291,14 +352,8 @@ class GraphConstructor:
         # ── Build edge features with temporal signals ──
         import bisect
 
-        # Track only invoices that actually become graph edges
-        graph_invoices = []
-        for inv in sorted_invoices:
+        for inv in graph_invoices:
             s, b = inv["seller_tax_code"], inv["buyer_tax_code"]
-            if s not in self.tax_code_to_idx or b not in self.tax_code_to_idx:
-                continue
-
-            graph_invoices.append(inv)
             src_list.append(self.tax_code_to_idx[s])
             dst_list.append(self.tax_code_to_idx[b])
 
@@ -342,7 +397,7 @@ class GraphConstructor:
             seller_vel = (right - left) / max(1, len(s_dates))  # normalized
 
             edge_features.append([
-                math.log1p(float(inv["amount"])) / 25.0,   # [0] normalized amount
+                self._normalize_amount_feature(float(inv["amount"])),  # [0] normalized amount
                 float(inv.get("vat_rate", 10.0)) / 100.0,  # [1] normalized vat
                 days_since / max(1, date_span_days),        # [2] normalized time position
                 is_recip,                                    # [3] reciprocal flag
@@ -394,9 +449,10 @@ class GraphConstructor:
 class GNNTrainer:
     """Train and save the GAT model."""
 
-    def __init__(self, node_feat_dim: int = 18, edge_feat_dim: int = 4):
+    def __init__(self, node_feat_dim: int = 18, edge_feat_dim: int = 4, amount_feature_mode: str = "legacy"):
         self.node_feat_dim = node_feat_dim
         self.edge_feat_dim = edge_feat_dim
+        self.amount_feature_mode = str(amount_feature_mode or "legacy").strip().lower()
         self.model = TaxFraudGAT(node_feat_dim, edge_feat_dim)
         self.optimizer = torch.optim.Adam(self.model.parameters(), lr=0.005, weight_decay=5e-4)
 
@@ -491,6 +547,7 @@ class GNNTrainer:
         config = {
             "node_feat_dim": self.node_feat_dim,
             "edge_feat_dim": self.edge_feat_dim,
+            "amount_feature_mode": self.amount_feature_mode,
         }
         with open(save_path / "gat_config.json", "w") as f:
             json.dump(config, f)
@@ -507,7 +564,8 @@ class GNNInference:
     def __init__(self, model_dir: Optional[str] = None):
         self.model_dir = Path(model_dir) if model_dir else MODEL_DIR
         self.model = None
-        self.graph_constructor = GraphConstructor()
+        default_amount_mode = os.getenv("GNN_AMOUNT_FEATURE_MODE", "legacy")
+        self.graph_constructor = GraphConstructor(amount_feature_mode=default_amount_mode)
         self.calibrator = None
         self._loaded = False
 
@@ -526,6 +584,9 @@ class GNNInference:
         self.model = TaxFraudGAT(
             node_feat_dim=config["node_feat_dim"],
             edge_feat_dim=config["edge_feat_dim"],
+        )
+        self.graph_constructor = GraphConstructor(
+            amount_feature_mode=config.get("amount_feature_mode", "legacy")
         )
         self.model.load_state_dict(torch.load(model_path, map_location="cpu", weights_only=True))
         self.model.eval()  # CRITICAL: inference always in eval mode
@@ -629,6 +690,18 @@ class GNNInference:
 
         # ── Build output nodes (with ensemble scoring) ──
         result_nodes = []
+        node_decision_threshold = 0.5
+        edge_decision_threshold = 0.5
+        cold_start_degree_threshold = 2
+        cold_start_threshold_delta = 0.0
+        node_blend_alpha_gnn = 0.0
+        if self.calibrator is not None:
+            node_decision_threshold = float(getattr(self.calibrator, "node_threshold", 0.5))
+            edge_decision_threshold = float(getattr(self.calibrator, "edge_threshold", 0.5))
+            threshold_meta = getattr(self.calibrator, "threshold_meta", {}) or {}
+            cold_start_degree_threshold = int(threshold_meta.get("cold_start_degree_threshold", 2))
+            cold_start_threshold_delta = float(threshold_meta.get("cold_start_threshold_delta", 0.0))
+            node_blend_alpha_gnn = float(threshold_meta.get("node_blend_alpha_gnn", 0.0))
         
         # Pre-compute aggregates for rule scorer
         in_amount_map = {}
@@ -672,20 +745,37 @@ class GNNInference:
                 if reg:
                     if isinstance(reg, str):
                         reg = date.fromisoformat(reg)
-                    if (date.today() - reg).days < 365:
-                        rule_score += 0.3
+                    age_days = (date.today() - reg).days
+                    if age_days < 180:
+                        rule_score += 0.35
+                    elif age_days < 365:
+                        rule_score += 0.25
 
             anomaly_score = node_anomaly.get(tc, 0.5)
 
-            # Ensemble final score
+            # Ensemble branch score
             if self.ensemble_model and self._loaded:
-                combined_shell = self.ensemble_model.predict_node(gnn_score, rule_score, anomaly_score)
+                ensemble_shell = self.ensemble_model.predict_node(gnn_score, rule_score, anomaly_score)
             elif self._loaded:
-                combined_shell = min(1.0, gnn_score * 0.5 + rule_score * 0.3 + anomaly_score * 0.2)
+                ensemble_shell = min(1.0, gnn_score * 0.5 + rule_score * 0.3 + anomaly_score * 0.2)
             else:
-                combined_shell = rule_score
+                ensemble_shell = rule_score
 
-            is_shell = combined_shell > 0.5
+            # Final node score can blend calibrated GNN ranking with ensemble robustness.
+            if self._loaded:
+                combined_shell = (
+                    node_blend_alpha_gnn * gnn_score
+                    + (1.0 - node_blend_alpha_gnn) * ensemble_shell
+                )
+            else:
+                combined_shell = ensemble_shell
+
+            tc_degree = int(degree_map.get(tc, 0))
+            adaptive_threshold = node_decision_threshold
+            if tc_degree <= cold_start_degree_threshold and cold_start_threshold_delta > 0:
+                adaptive_threshold = max(0.05, node_decision_threshold - cold_start_threshold_delta)
+
+            is_shell = combined_shell >= adaptive_threshold
             node_risk = round(combined_shell * 100, 1)
 
             result_nodes.append({
@@ -699,6 +789,8 @@ class GNNInference:
                 "risk_score": node_risk,
                 "is_shell": is_shell,
                 "shell_probability": round(combined_shell, 4),
+                "node_degree": tc_degree,
+                "decision_threshold": round(float(adaptive_threshold), 4),
                 "group": "shell" if is_shell else ("suspicious" if tc in cycle_nodes else "normal"),
             })
 
@@ -744,7 +836,7 @@ class GNNInference:
             else:
                 combined_circ = rule_score
 
-            is_circular = combined_circ > 0.5
+            is_circular = combined_circ >= edge_decision_threshold
             amount = float(inv["amount"])
             if is_circular:
                 total_suspicious_amount += amount
@@ -784,6 +876,15 @@ class GNNInference:
             "attention_weights": attention_data[:50],
             "model_loaded": self._loaded,
             "ensemble_active": self.ensemble_model is not None,
+            "decision_thresholds": {
+                "node": round(node_decision_threshold, 4),
+                "edge": round(edge_decision_threshold, 4),
+                "policy": {
+                    "cold_start_degree_threshold": int(cold_start_degree_threshold),
+                    "cold_start_threshold_delta": round(float(cold_start_threshold_delta), 4),
+                    "node_blend_alpha_gnn": round(float(node_blend_alpha_gnn), 4),
+                },
+            },
         }
 
     def _generate_logs(self, nodes, edges, cycles, total_amount) -> list[dict]:
