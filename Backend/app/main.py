@@ -41,8 +41,12 @@ async def lifespan(app: FastAPI):
                 "ALTER TABLE ai_risk_assessments "
                 "ADD COLUMN IF NOT EXISTS yearly_history JSON;"
             ))
+            conn.execute(text(
+                "ALTER TABLE ai_risk_assessments "
+                "ADD COLUMN IF NOT EXISTS model_version VARCHAR(80);"
+            ))
             conn.commit()
-        print("[OK] Schema migration: model_confidence + yearly_history columns verified.")
+        print("[OK] Schema migration: model_confidence + yearly_history + model_version columns verified.")
     except Exception as e:
         print(f"[WARN] Schema migration skipped (table may not exist yet): {e}")
 

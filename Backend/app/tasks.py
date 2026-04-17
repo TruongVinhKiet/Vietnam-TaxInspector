@@ -83,6 +83,7 @@ def _save_assessments(assessments: list):
                 f4_peer_comparison=a.get("f4_peer_comparison"),
                 anomaly_score=a.get("anomaly_score"),
                 model_confidence=a.get("model_confidence"),
+                model_version=a.get("model_version"),
                 risk_score=a.get("risk_score", 0),
                 risk_level=a.get("risk_level", "low"),
                 red_flags=a.get("red_flags"),
@@ -112,8 +113,14 @@ def run_batch_analysis(file_path: str, batch_id: int) -> dict:
             started_at=datetime.utcnow(),
         )
 
-        # Read CSV
-        df = pd.read_csv(file_path)
+        # Read CSV with tax_code as string to preserve leading-zero MST values.
+        df = pd.read_csv(file_path, dtype={"tax_code": "string"}, low_memory=False)
+        if "tax_code" in df.columns:
+            df["tax_code"] = (
+                df["tax_code"]
+                .astype("string")
+                .str.strip()
+            )
         # Use number of unique companies as total (not CSV row count)
         # because progress_callback in pipeline counts per-company, not per-row
         total_companies = df["tax_code"].nunique() if "tax_code" in df.columns else len(df)

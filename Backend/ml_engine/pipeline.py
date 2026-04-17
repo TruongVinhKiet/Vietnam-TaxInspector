@@ -39,6 +39,8 @@ except ImportError:
 
 # Path to saved models
 MODEL_DIR = Path(__file__).resolve().parent.parent / "data" / "models"
+FRAUD_CALIBRATOR_FILENAME = "fraud_calibrator.joblib"
+FRAUD_MANIFEST_FILENAME = "fraud_model_manifest.json"
 
 
 class TaxFraudPipeline:
@@ -51,11 +53,31 @@ class TaxFraudPipeline:
     WEIGHT_XGB = 0.80
     WEIGHT_ISO = 0.20
 
+    # Minimal raw contract for model serving.
+    HARD_REQUIRED_COLUMNS = (
+        "tax_code",
+        "year",
+        "revenue",
+        "total_expenses",
+        "net_profit",
+        "vat_input",
+        "vat_output",
+    )
+
+    DEFAULT_RAW_COLUMNS = {
+        "company_name": "",
+        "industry": "Unknown",
+        "industry_avg_profit_margin": 0.08,
+    }
+
     def __init__(self, model_dir: Optional[str] = None):
         self.model_dir = Path(model_dir) if model_dir else MODEL_DIR
         self.feature_engineer = TaxFeatureEngineer()
         self.isolation_forest = None
         self.xgboost_model = None
+        self.fraud_calibrator = None
+        self.calibration_meta = {}
+        self.model_manifest = {}
         self._shap_explainer = None  # Lazy-loaded SHAP TreeExplainer
         self._shap_background = None  # Background data for SHAP
         self._loaded = False
@@ -80,12 +102,165 @@ class TaxFraudPipeline:
             self._shap_background = joblib.load(bg_path)
             print(f"[OK] SHAP background loaded ({len(self._shap_background)} samples)")
 
+        self._load_model_manifest()
+        self._load_fraud_calibrator()
+
         self._loaded = True
         print(f"[OK] Models loaded from {self.model_dir}")
 
     def ensure_loaded(self):
         if not self._loaded:
             self.load_models()
+
+    def _load_model_manifest(self):
+        manifest_path = self.model_dir / FRAUD_MANIFEST_FILENAME
+        if not manifest_path.exists():
+            self.model_manifest = {}
+            return
+
+        try:
+            with open(manifest_path, "r", encoding="utf-8") as handle:
+                payload = json.load(handle)
+                self.model_manifest = payload if isinstance(payload, dict) else {}
+            print(f"[OK] Fraud model manifest loaded from {manifest_path}")
+        except Exception as exc:
+            self.model_manifest = {}
+            print(f"[WARN] Failed to load fraud model manifest: {exc}")
+
+    def get_serving_metadata(self) -> dict:
+        self.ensure_loaded()
+
+        model_version = self.model_manifest.get("model_version") if isinstance(self.model_manifest, dict) else None
+        if not model_version:
+            model_version = self.calibration_meta.get("model_version")
+        if not model_version:
+            model_version = "fraud-hybrid-legacy"
+
+        feature_contract = self.model_manifest.get("feature_contract", {}) if isinstance(self.model_manifest, dict) else {}
+        return {
+            "model_version": model_version,
+            "manifest_version": self.model_manifest.get("manifest_version") if isinstance(self.model_manifest, dict) else None,
+            "feature_set": feature_contract.get("feature_set") if isinstance(feature_contract, dict) else None,
+            "calibration_method": self.calibration_meta.get("method", "identity"),
+            "calibrator_available": bool(self.calibration_meta.get("available", False)),
+        }
+
+    def _load_fraud_calibrator(self):
+        """Load optional fraud probability calibrator for better risk probability reliability."""
+        cal_path = self.model_dir / FRAUD_CALIBRATOR_FILENAME
+        if not cal_path.exists():
+            self.fraud_calibrator = None
+            self.calibration_meta = {
+                "available": False,
+                "method": "identity",
+            }
+            return
+
+        try:
+            payload = joblib.load(cal_path)
+            if isinstance(payload, dict):
+                self.fraud_calibrator = payload.get("calibrator")
+                self.calibration_meta = {
+                    "available": self.fraud_calibrator is not None,
+                    "method": str(payload.get("method", "isotonic")),
+                    "trained_at": payload.get("trained_at"),
+                    "model_version": payload.get("model_version"),
+                }
+            else:
+                self.fraud_calibrator = payload
+                self.calibration_meta = {
+                    "available": True,
+                    "method": "isotonic",
+                    "trained_at": None,
+                }
+            print(f"[OK] Fraud calibrator loaded from {cal_path}")
+        except Exception as exc:
+            self.fraud_calibrator = None
+            self.calibration_meta = {
+                "available": False,
+                "method": "identity",
+                "error": str(exc),
+            }
+            print(f"[WARN] Failed to load fraud calibrator: {exc}")
+
+    def _calibrate_fraud_probs(self, raw_probs: np.ndarray) -> np.ndarray:
+        """Apply calibrator when available; otherwise use raw probabilities."""
+        probs = np.asarray(raw_probs, dtype=float)
+        if self.fraud_calibrator is None:
+            return np.clip(probs, 0.0, 1.0)
+
+        try:
+            calibrated = self.fraud_calibrator.predict(probs)
+            return np.clip(np.asarray(calibrated, dtype=float), 0.0, 1.0)
+        except Exception as exc:
+            print(f"[WARN] Calibrator inference failed, fallback to raw probabilities: {exc}")
+            return np.clip(probs, 0.0, 1.0)
+
+    def _coerce_raw_input_dataframe(self, frame: pd.DataFrame, context: str) -> pd.DataFrame:
+        if frame is None or frame.empty:
+            raise ValueError(f"{context}: input payload is empty")
+
+        data = frame.copy()
+        missing = [col for col in self.HARD_REQUIRED_COLUMNS if col not in data.columns]
+        if missing:
+            joined = ", ".join(sorted(missing))
+            raise ValueError(f"{context}: missing required columns: {joined}")
+
+        for col, default_value in self.DEFAULT_RAW_COLUMNS.items():
+            if col not in data.columns:
+                data[col] = default_value
+
+        # Canonicalize tax_code to a trimmed string key used consistently across grouping/filtering.
+        tax_code_series = data["tax_code"].astype(str).str.strip()
+        tax_code_series = tax_code_series.str.replace(r"^(\d+)\.0+$", r"\1", regex=True)
+        tax_code_series = tax_code_series.replace({"": np.nan, "nan": np.nan, "None": np.nan, "<NA>": np.nan})
+        data["tax_code"] = tax_code_series
+
+        if "cost_of_goods" not in data.columns:
+            data["cost_of_goods"] = pd.to_numeric(data["total_expenses"], errors="coerce") * 0.75
+        if "operating_expenses" not in data.columns:
+            data["operating_expenses"] = pd.to_numeric(data["total_expenses"], errors="coerce") * 0.25
+
+        numeric_cols = (
+            "year",
+            "revenue",
+            "cost_of_goods",
+            "operating_expenses",
+            "total_expenses",
+            "net_profit",
+            "vat_input",
+            "vat_output",
+            "industry_avg_profit_margin",
+        )
+        for col in numeric_cols:
+            data[col] = pd.to_numeric(data[col], errors="coerce")
+
+        data = data.replace([np.inf, -np.inf], np.nan)
+
+        if data["tax_code"].isna().all() or (data["tax_code"].astype(str).str.strip() == "").all():
+            raise ValueError(f"{context}: tax_code must contain at least one non-empty value")
+
+        if data["year"].isna().any() or (data["year"] <= 0).any():
+            raise ValueError(f"{context}: year must be a positive number for all records")
+
+        data["year"] = data["year"].astype(int)
+
+        non_nullable = ("revenue", "total_expenses", "net_profit", "vat_input", "vat_output")
+        for col in non_nullable:
+            if data[col].isna().any():
+                raise ValueError(f"{context}: {col} contains invalid numeric values")
+
+        return data
+
+    def _validate_feature_frame(self, frame: pd.DataFrame, context: str) -> None:
+        missing_features = [col for col in TaxFeatureEngineer.FEATURE_COLS if col not in frame.columns]
+        if missing_features:
+            joined = ", ".join(sorted(missing_features))
+            raise ValueError(f"{context}: missing engineered features: {joined}")
+
+        feature_values = frame[TaxFeatureEngineer.FEATURE_COLS].to_numpy(dtype=float)
+        if not np.isfinite(feature_values).all():
+            raise ValueError(f"{context}: engineered features contain non-finite values")
 
     def predict_single(self, company_data: dict) -> dict:
         """
@@ -106,12 +281,56 @@ class TaxFraudPipeline:
         else:
             df = pd.DataFrame([company_data])
 
+        df = self._coerce_raw_input_dataframe(df, context="single_inference")
+
         # Feature engineering
         df = self.feature_engineer.compute_features(df)
+        self._validate_feature_frame(df, context="single_inference")
 
-        # Use the most recent year for scoring
-        latest = df.sort_values("year", ascending=False).iloc[0]
-        X = self.feature_engineer.get_feature_matrix(df.tail(1))
+        # Keep one snapshot per year to support temporal single-query charts.
+        yearly_feature_frame = (
+            df.sort_values(["year"])
+            .groupby("year", as_index=False)
+            .last()
+            .sort_values("year")
+            .reset_index(drop=True)
+        )
+
+        # Use the most recent year for primary scoring.
+        latest_frame = yearly_feature_frame.sort_values("year", ascending=False).head(1)
+        latest = latest_frame.iloc[0]
+        X = self.feature_engineer.get_feature_matrix(latest_frame)
+
+        # Build yearly feature/risk progression for single-query advanced charts.
+        X_yearly = self.feature_engineer.get_feature_matrix(yearly_feature_frame)
+        yearly_raw_anomaly = self.isolation_forest.decision_function(X_yearly)
+        yearly_anomaly_scores = np.clip(0.5 - yearly_raw_anomaly, 0, 1)
+        yearly_raw_probs = self.xgboost_model.predict_proba(X_yearly)[:, 1]
+        yearly_fraud_probs = self._calibrate_fraud_probs(yearly_raw_probs)
+        yearly_risk_scores = np.round(
+            np.minimum(100.0, self.WEIGHT_XGB * yearly_fraud_probs * 100
+                             + self.WEIGHT_ISO * yearly_anomaly_scores * 100),
+            2,
+        )
+
+        yearly_feature_scores = []
+        for idx, row in yearly_feature_frame.iterrows():
+            yearly_feature_scores.append({
+                "year": int(row.get("year", 0)),
+                "risk_score": round(float(yearly_risk_scores[idx]), 2),
+                "f1_divergence": round(float(row.get("f1_divergence", 0)), 4),
+                "f2_ratio_limit": round(float(row.get("f2_ratio_limit", 0)), 4),
+                "f3_vat_structure": round(float(row.get("f3_vat_structure", 0)), 4),
+                "f4_peer_comparison": round(float(row.get("f4_peer_comparison", 0)), 4),
+            })
+
+        previous_year_features = yearly_feature_scores[-2] if len(yearly_feature_scores) >= 2 else None
+        feature_deltas = {}
+        if previous_year_features:
+            for key in ("f1_divergence", "f2_ratio_limit", "f3_vat_structure", "f4_peer_comparison"):
+                current_val = float(latest.get(key, 0))
+                previous_val = float(previous_year_features.get(key, 0))
+                feature_deltas[key] = round(current_val - previous_val, 4)
 
         # Layer 1: Isolation Forest anomaly score
         # decision_function: lower = more anomalous
@@ -120,7 +339,8 @@ class TaxFraudPipeline:
         anomaly_score = float(max(0, min(1, 0.5 - raw_anomaly)))
 
         # Layer 2: XGBoost fraud probability
-        fraud_prob = float(self.xgboost_model.predict_proba(X)[0, 1])
+        raw_fraud_prob = float(self.xgboost_model.predict_proba(X)[0, 1])
+        fraud_prob = float(self._calibrate_fraud_probs(np.array([raw_fraud_prob], dtype=float))[0])
 
         # ── Hybrid Fusion: weighted combination of both models ──
         risk_score = round(
@@ -140,6 +360,7 @@ class TaxFraudPipeline:
         # SHAP explanation (real local SHAP values per sample)
         feature_names = TaxFeatureEngineer.FEATURE_COLS
         shap_values = self._compute_shap(X, feature_names)
+        serving_meta = self.get_serving_metadata()
 
         return {
             "tax_code": str(latest.get("tax_code", "")),
@@ -158,6 +379,11 @@ class TaxFraudPipeline:
             "risk_level": risk_level,
             "red_flags": red_flags,
             "shap_explanation": shap_values,
+            "yearly_feature_scores": yearly_feature_scores,
+            "previous_year_features": previous_year_features,
+            "feature_deltas": feature_deltas,
+            "model_version": serving_meta.get("model_version"),
+            "calibration_method": serving_meta.get("calibration_method"),
         }
 
     def predict_batch(self, df: pd.DataFrame, batch_id: Optional[int] = None,
@@ -177,14 +403,18 @@ class TaxFraudPipeline:
         """
         self.ensure_loaded()
 
+        df = self._coerce_raw_input_dataframe(df, context="batch_inference")
+
         # Feature engineering on full dataset
         df = self.feature_engineer.compute_features(df)
+        self._validate_feature_frame(df, context="batch_inference")
 
         # Calculate risk score for all rows to build trend data
         # IMPORTANT: Use the same Hybrid Fusion (80/20) as predict_single
         # to ensure consistency between batch trend and individual scores
         X_all = self.feature_engineer.get_feature_matrix(df)
-        xgb_probs_all = self.xgboost_model.predict_proba(X_all)[:, 1]
+        xgb_probs_all_raw = self.xgboost_model.predict_proba(X_all)[:, 1]
+        xgb_probs_all = self._calibrate_fraud_probs(xgb_probs_all_raw)
         iso_raw_all = self.isolation_forest.decision_function(X_all)
         iso_scores_all = np.clip(0.5 - iso_raw_all, 0, 1)
         df["risk_score"] = np.round(
@@ -197,6 +427,12 @@ class TaxFraudPipeline:
         latest_df = df.sort_values("year").groupby("tax_code").last().reset_index()
         X = self.feature_engineer.get_feature_matrix(latest_df)
 
+        # Pre-index full history to avoid dtype mismatches and repeated O(n) filters in loop.
+        history_by_tax_code = {
+            key: group.sort_values("year")
+            for key, group in df.groupby("tax_code", sort=False)
+        }
+
         total = len(latest_df)
         assessments = []
 
@@ -205,7 +441,8 @@ class TaxFraudPipeline:
         anomaly_scores = np.clip(0.5 - raw_anomaly_scores, 0, 1)
 
         # Layer 2: XGBoost (vectorized)
-        fraud_probs = self.xgboost_model.predict_proba(X)[:, 1]
+        raw_fraud_probs = self.xgboost_model.predict_proba(X)[:, 1]
+        fraud_probs = self._calibrate_fraud_probs(raw_fraud_probs)
 
         # ── Hybrid Fusion (vectorized) ──
         risk_scores = np.round(
@@ -215,6 +452,7 @@ class TaxFraudPipeline:
         )
 
         # Process each company
+        serving_meta = self.get_serving_metadata()
         for i in range(total):
             row = latest_df.iloc[i]
             risk_score = float(risk_scores[i])
@@ -226,9 +464,14 @@ class TaxFraudPipeline:
             row_data["anomaly_score"] = anomaly_score
             red_flags = self.feature_engineer.generate_red_flags(row_data)
 
-            # Extract multi-year history for this company from the full dataset
-            tc = str(row.get("tax_code", ""))
-            company_history = df[df["tax_code"] == tc].sort_values("year")
+            # Extract multi-year history for this company from the full dataset.
+            row_tax_code = row.get("tax_code", "")
+            tc = str(row_tax_code).strip()
+            company_history = history_by_tax_code.get(row_tax_code)
+            if company_history is None or company_history.empty:
+                company_history = history_by_tax_code.get(tc)
+            if company_history is None:
+                company_history = pd.DataFrame(columns=df.columns)
             yearly_history = [
                 {
                     "year": int(h["year"]),
@@ -256,6 +499,8 @@ class TaxFraudPipeline:
                 "risk_level": risk_level,
                 "red_flags": red_flags,
                 "yearly_history": yearly_history,
+                "model_version": serving_meta.get("model_version"),
+                "calibration_method": serving_meta.get("calibration_method"),
             })
 
             # Report progress
@@ -381,6 +626,24 @@ class TaxFraudPipeline:
             "low_count": int(np.sum(risk_scores < 40)),
         }
 
+        # ---- Revenue vs Risk (business-friendly scatter) ----
+        revenue_risk_scatter = []
+        for i in range(len(df_stats)):
+            row = df_stats.iloc[i]
+            revenue = float(row.get("revenue", 0) or 0)
+            total_expenses = float(row.get("total_expenses", 0) or 0)
+            expense_ratio = (total_expenses / max(revenue, 1.0)) if revenue > 0 else 0.0
+            row_risk = float(row.get("risk_score", risk_scores[i]))
+            revenue_risk_scatter.append({
+                "tax_code": str(row.get("tax_code", "")),
+                "company_name": str(row.get("company_name", "")),
+                "industry": str(row.get("industry", "")),
+                "revenue": revenue,
+                "total_expenses": total_expenses,
+                "expense_ratio": round(expense_ratio, 4),
+                "risk_score": round(row_risk, 2),
+            })
+
         # ---- Box Plot Data (risk score distribution per industry) ----
         box_plot_data = []
         for industry, group in df_stats.groupby("industry"):
@@ -450,6 +713,189 @@ class TaxFraudPipeline:
                     "total_revenue_bn": round(total_rev, 2)
                 })
             year_trend_data.sort(key=lambda x: x["year"])
+
+        # ---- Cohort Transition Sankey (risk tier migration by year) ----
+        cohort_transition_sankey = {
+            "nodes": [],
+            "links": [],
+        }
+
+        def _risk_tier_from_score(score: float) -> str:
+            if score >= 80:
+                return "critical"
+            if score >= 60:
+                return "high"
+            if score >= 40:
+                return "medium"
+            return "low"
+
+        if full_df is not None and {
+            "tax_code", "year", "risk_score"
+        }.issubset(set(full_df.columns)):
+            cohort_df = full_df[["tax_code", "year", "risk_score"]].copy()
+            cohort_df = cohort_df.dropna(subset=["tax_code", "year", "risk_score"])
+
+            if not cohort_df.empty:
+                cohort_df["tax_code"] = cohort_df["tax_code"].astype(str)
+                cohort_df["year"] = cohort_df["year"].astype(int)
+                cohort_df["risk_score"] = cohort_df["risk_score"].astype(float)
+                cohort_df = cohort_df.sort_values(["tax_code", "year"])
+
+                edge_counter = {}
+                for _, company_rows in cohort_df.groupby("tax_code"):
+                    by_year = (
+                        company_rows.groupby("year", as_index=False)["risk_score"]
+                        .mean()
+                        .sort_values("year")
+                    )
+                    by_year["risk_tier"] = by_year["risk_score"].apply(_risk_tier_from_score)
+                    records = by_year[["year", "risk_tier"]].to_dict("records")
+
+                    for idx in range(len(records) - 1):
+                        src = f"{int(records[idx]['year'])}:{records[idx]['risk_tier']}"
+                        tgt = f"{int(records[idx + 1]['year'])}:{records[idx + 1]['risk_tier']}"
+                        edge_counter[(src, tgt)] = edge_counter.get((src, tgt), 0) + 1
+
+                if edge_counter:
+                    node_names = set()
+                    for src, tgt in edge_counter.keys():
+                        node_names.add(src)
+                        node_names.add(tgt)
+
+                    tier_order = {"low": 0, "medium": 1, "high": 2, "critical": 3}
+
+                    def _node_sort_key(name: str) -> tuple:
+                        parts = name.split(":", 1)
+                        if len(parts) != 2:
+                            return (9999, 9999, name)
+                        year_raw, tier_raw = parts
+                        try:
+                            year_val = int(year_raw)
+                        except Exception:
+                            year_val = 9999
+                        return (year_val, tier_order.get(tier_raw, 99), name)
+
+                    sorted_nodes = sorted(node_names, key=_node_sort_key)
+                    cohort_transition_sankey["nodes"] = [
+                        {
+                            "name": node,
+                            "year": int(node.split(":", 1)[0]),
+                            "tier": node.split(":", 1)[1],
+                        }
+                        for node in sorted_nodes
+                    ]
+                    cohort_transition_sankey["links"] = [
+                        {
+                            "source": src,
+                            "target": tgt,
+                            "value": int(value),
+                        }
+                        for (src, tgt), value in sorted(edge_counter.items())
+                    ]
+
+        # ---- VAT anomaly heatmap (industry x year, based on F3 threshold) ----
+        vat_threshold = 0.90
+        vat_anomaly_heatmap = {
+            "years": [],
+            "industries": [],
+            "values": [],
+            "counts": [],
+            "threshold": vat_threshold,
+        }
+        if full_df is not None and {
+            "industry", "year", "f3_vat_structure"
+        }.issubset(set(full_df.columns)):
+            vat_df = full_df[["industry", "year", "f3_vat_structure"]].copy()
+            vat_df = vat_df.dropna(subset=["industry", "year", "f3_vat_structure"])
+
+            if not vat_df.empty:
+                vat_df["industry"] = vat_df["industry"].astype(str)
+                vat_df["year"] = vat_df["year"].astype(int)
+                vat_df["f3_vat_structure"] = vat_df["f3_vat_structure"].astype(float)
+                vat_df["is_anomaly"] = vat_df["f3_vat_structure"] > vat_threshold
+
+                agg = (
+                    vat_df.groupby(["industry", "year"], as_index=False)
+                    .agg(
+                        total_count=("f3_vat_structure", "size"),
+                        anomaly_count=("is_anomaly", "sum"),
+                    )
+                )
+                agg["anomaly_rate_pct"] = np.where(
+                    agg["total_count"] > 0,
+                    agg["anomaly_count"] / agg["total_count"] * 100,
+                    0,
+                )
+
+                industries = (
+                    agg.groupby("industry")["anomaly_count"]
+                    .sum()
+                    .sort_values(ascending=False)
+                    .index.tolist()
+                )
+                years = sorted(agg["year"].unique().tolist())
+                industry_to_idx = {name: idx for idx, name in enumerate(industries)}
+                year_to_idx = {year: idx for idx, year in enumerate(years)}
+
+                values = []
+                counts = []
+                for row in agg.itertuples(index=False):
+                    xi = year_to_idx.get(int(row.year))
+                    yi = industry_to_idx.get(str(row.industry))
+                    if xi is None or yi is None:
+                        continue
+                    values.append([xi, yi, round(float(row.anomaly_rate_pct), 2)])
+                    counts.append([xi, yi, int(row.anomaly_count), int(row.total_count)])
+
+                vat_anomaly_heatmap = {
+                    "years": [str(y) for y in years],
+                    "industries": industries,
+                    "values": values,
+                    "counts": counts,
+                    "threshold": vat_threshold,
+                }
+
+        # ---- Cumulative risk curve (Lorenz-style concentration) ----
+        cumulative_risk_curve = {
+            "points": [],
+            "total_companies": int(len(risk_scores)),
+            "total_risk": 0.0,
+            "top_10pct_risk_share": 0.0,
+            "top_20pct_risk_share": 0.0,
+        }
+        if len(risk_scores) > 0:
+            sorted_scores = np.sort(risk_scores)[::-1]
+            cumulative_scores = np.cumsum(sorted_scores)
+            total_risk = float(cumulative_scores[-1]) if cumulative_scores.size > 0 else 0.0
+            safe_total_risk = total_risk if total_risk > 0 else 1.0
+            company_count = len(sorted_scores)
+
+            step = max(1, company_count // 120)
+            points = []
+            for idx in range(0, company_count, step):
+                points.append({
+                    "company_count": int(idx + 1),
+                    "percent_companies": round((idx + 1) / company_count * 100, 2),
+                    "percent_risk": round(float(cumulative_scores[idx]) / safe_total_risk * 100, 2),
+                })
+
+            if not points or points[-1]["company_count"] != company_count:
+                points.append({
+                    "company_count": int(company_count),
+                    "percent_companies": 100.0,
+                    "percent_risk": 100.0,
+                })
+
+            top_10_count = max(1, int(np.ceil(company_count * 0.10)))
+            top_20_count = max(1, int(np.ceil(company_count * 0.20)))
+
+            cumulative_risk_curve = {
+                "points": points,
+                "total_companies": int(company_count),
+                "total_risk": round(total_risk, 2),
+                "top_10pct_risk_share": round(float(cumulative_scores[top_10_count - 1]) / safe_total_risk * 100, 2),
+                "top_20pct_risk_share": round(float(cumulative_scores[top_20_count - 1]) / safe_total_risk * 100, 2),
+            }
 
         # ---- Global XGBoost Feature Importance (AI-native) ----
         global_feature_importance = []
@@ -529,11 +975,15 @@ class TaxFraudPipeline:
             "industry_stats": industry_stats,
             "province_stats": province_stats,
             "scatter_data": scatter_data,
+            "revenue_risk_scatter": revenue_risk_scatter,
             "correlation_matrix": corr_matrix,
             "top_50_risky": top_50,
             "box_plot_data": box_plot_data,
             "key_drivers": key_drivers,
             "year_trend": year_trend_data,
+            "cohort_transition_sankey": cohort_transition_sankey,
+            "vat_anomaly_heatmap": vat_anomaly_heatmap,
+            "cumulative_risk_curve": cumulative_risk_curve,
             "global_feature_importance": global_feature_importance,
             "contour_data": contour_data,
         }

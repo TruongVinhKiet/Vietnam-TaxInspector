@@ -14,11 +14,377 @@
 
 // ===================================================================
 // TOAST NOTIFICATION SYSTEM
+
+
+// ===================================================================
+// SINGLE QUERY: STRATEGIC CHARTS
+// ===================================================================
+
+function renderSingleRiskTierSankey(sankeyData) {
+    const container = document.getElementById('chart-single-risk-tier-sankey');
+    if (!container) return;
+
+    const nodes = Array.isArray(sankeyData.nodes) ? sankeyData.nodes : [];
+    const links = Array.isArray(sankeyData.links) ? sankeyData.links : [];
+
+    if (nodes.length < 2 || !links.length) {
+        renderSingleTrendChartMessage(container, 'Cần tối thiểu 2 năm dữ liệu để hiển thị luồng chuyển nhóm rủi ro.');
+        return;
+    }
+
+    const chart = safeInitChart(container);
+    const tierLabel = {
+        low: 'An toàn',
+        medium: 'Trung bình',
+        high: 'Rủi ro cao',
+        critical: 'Rất cao',
+    };
+    const tierColor = {
+        low: '#16a34a',
+        medium: '#eab308',
+        high: '#ea580c',
+        critical: '#dc2626',
+    };
+
+    const formattedNodes = nodes.map((node) => {
+        const nodeName = String(node.name || `${node.year || '-'}:${node.tier || 'low'}`);
+        const [rawYear, rawTier] = nodeName.split(':');
+        const year = Number(node.year || rawYear) || rawYear || '-';
+        const tier = String(node.tier || rawTier || 'low');
+
+        return {
+            name: nodeName,
+            itemStyle: { color: tierColor[tier] || '#64748b' },
+            label: {
+                formatter: `${year}\n${tierLabel[tier] || tier}`,
+                fontSize: 9,
+                color: '#334155',
+            },
+        };
+    });
+
+    const formattedLinks = links
+        .filter((link) => Number(link.value || 0) > 0)
+        .map((link) => ({
+            source: String(link.source || ''),
+            target: String(link.target || ''),
+            value: Number(link.value || 0),
+        }));
+
+    chart.setOption({
+        animationDuration: MOTION_DURATION_CHART,
+        tooltip: {
+            trigger: 'item',
+            formatter: (params) => {
+                if (params.dataType === 'edge') {
+                    return `${params.data.source} -> ${params.data.target}<br><b>${params.data.value} kỳ</b>`;
+                }
+                return `${params.name}`;
+            },
+        },
+        series: [
+            {
+                type: 'sankey',
+                data: formattedNodes,
+                links: formattedLinks,
+                nodeWidth: 18,
+                nodeGap: 14,
+                orient: 'horizontal',
+                lineStyle: {
+                    color: 'source',
+                    curveness: 0.42,
+                    opacity: 0.45,
+                },
+                emphasis: {
+                    focus: 'adjacency',
+                },
+            },
+        ],
+    });
+}
+
+
+function renderSingleCumulativeRiskCurve(curveData) {
+    const container = document.getElementById('chart-single-cumulative-risk');
+    if (!container) return;
+
+    const points = Array.isArray(curveData.points) ? [...curveData.points] : [];
+    if (!points.length) {
+        renderSingleTrendChartMessage(container, 'Chưa có dữ liệu lũy kế rủi ro theo chuỗi năm.');
+        return;
+    }
+
+    points.sort((a, b) => Number(a.period_count || 0) - Number(b.period_count || 0));
+    const seriesData = points.map((p) => [
+        Number(p.percent_periods ?? p.percent_companies ?? 0),
+        Number(p.percent_risk || 0),
+    ]);
+    const diagonal = [[0, 0], [100, 100]];
+
+    const chart = safeInitChart(container);
+
+    chart.setOption({
+        animationDuration: MOTION_DURATION_CHART,
+        tooltip: {
+            trigger: 'axis',
+            formatter: (params) => {
+                const point = params[0] && params[0].data ? params[0].data : [0, 0];
+                return `Top <b>${Number(point[0]).toFixed(1)}%</b> giai đoạn đang chứa <b>${Number(point[1]).toFixed(1)}%</b> tổng rủi ro`;
+            },
+        },
+        legend: {
+            data: ['Lũy kế rủi ro', 'Đường cân bằng'],
+            bottom: 0,
+            textStyle: { fontSize: 9 },
+        },
+        grid: { left: '12%', right: '6%', top: '8%', bottom: '18%' },
+        xAxis: {
+            type: 'value',
+            min: 0,
+            max: 100,
+            name: '% Giai đoạn',
+            axisLabel: { formatter: '{value}%' },
+        },
+        yAxis: {
+            type: 'value',
+            min: 0,
+            max: 100,
+            name: '% Tổng rủi ro',
+            axisLabel: { formatter: '{value}%' },
+        },
+        series: [
+            {
+                name: 'Lũy kế rủi ro',
+                type: 'line',
+                smooth: true,
+                data: seriesData,
+                lineStyle: { width: 3, color: '#dc2626' },
+                itemStyle: { color: '#dc2626' },
+                areaStyle: { color: 'rgba(220,38,38,0.12)' },
+                markPoint: {
+                    symbolSize: 44,
+                    data: [
+                        {
+                            name: 'Top 10%',
+                            coord: [10, Number(curveData.top_10pct_risk_share || 0)],
+                            value: `${Number(curveData.top_10pct_risk_share || 0).toFixed(1)}%`,
+                        },
+                        {
+                            name: 'Top 20%',
+                            coord: [20, Number(curveData.top_20pct_risk_share || 0)],
+                            value: `${Number(curveData.top_20pct_risk_share || 0).toFixed(1)}%`,
+                        },
+                    ],
+                    label: { fontSize: 8, color: '#334155' },
+                },
+            },
+            {
+                name: 'Đường cân bằng',
+                type: 'line',
+                data: diagonal,
+                lineStyle: { width: 2, color: '#64748b', type: 'dashed' },
+                showSymbol: false,
+                tooltip: { show: false },
+            },
+        ],
+    });
+}
+
+
+function renderSingleMarginDistribution(distributionData) {
+    const container = document.getElementById('chart-single-margin-distribution');
+    if (!container) return;
+
+    const summaryEl = document.getElementById('single-margin-distribution-summary');
+    const bins = Array.isArray(distributionData.bins) ? distributionData.bins : [];
+    if (!bins.length) {
+        renderSingleTrendChartMessage(container, 'Chưa có dữ liệu phân phối biên lợi nhuận theo ngành.');
+        if (summaryEl) {
+            summaryEl.textContent = 'Dữ liệu tham chiếu ngành chưa đủ để tính percentile biên lợi nhuận.';
+        }
+        return;
+    }
+
+    const labels = bins.map((b) => String(b.label || `${b.start || 0}% đến ${b.end || 0}%`));
+    const counts = bins.map((b) => Number(b.count || 0));
+    const companyMargin = Number(distributionData.company_margin);
+    const percentile = Number(distributionData.percentile);
+    const sampleSize = Number(distributionData.sample_size || 0);
+    const companyBinIndex = Number.isInteger(distributionData.company_bin_index)
+        ? Number(distributionData.company_bin_index)
+        : -1;
+
+    if (summaryEl) {
+        const marginLabel = Number.isFinite(companyMargin) ? `${companyMargin.toFixed(2)}%` : 'N/A';
+        const percentileLabel = Number.isFinite(percentile) ? `${percentile.toFixed(1)}%` : 'N/A';
+        summaryEl.textContent = `Biên lợi nhuận DN: ${marginLabel} | Percentile: ${percentileLabel} | Mẫu so sánh: ${sampleSize.toLocaleString()} DN`;
+    }
+
+    const chart = safeInitChart(container);
+    const barData = counts.map((count, idx) => ({
+        value: count,
+        itemStyle: {
+            color: idx === companyBinIndex ? '#dc2626' : '#1d4ed8',
+            borderRadius: [4, 4, 0, 0],
+        },
+    }));
+
+    const scatterSeries = companyBinIndex >= 0 && companyBinIndex < counts.length
+        ? [{
+            name: 'Vị trí DN',
+            type: 'scatter',
+            data: [[companyBinIndex, counts[companyBinIndex]]],
+            symbolSize: 16,
+            itemStyle: { color: '#dc2626' },
+            tooltip: {
+                formatter: () => {
+                    const marginLabel = Number.isFinite(companyMargin) ? `${companyMargin.toFixed(2)}%` : 'N/A';
+                    const percentileLabel = Number.isFinite(percentile) ? `${percentile.toFixed(1)}%` : 'N/A';
+                    return `<b>Biên lợi nhuận DN</b><br>${marginLabel}<br>Percentile: ${percentileLabel}`;
+                },
+            },
+        }]
+        : [];
+
+    chart.setOption({
+        animationDuration: MOTION_DURATION_CHART,
+        tooltip: {
+            trigger: 'item',
+            formatter: (params) => {
+                if (params.seriesType === 'scatter') {
+                    const marginLabel = Number.isFinite(companyMargin) ? `${companyMargin.toFixed(2)}%` : 'N/A';
+                    const percentileLabel = Number.isFinite(percentile) ? `${percentile.toFixed(1)}%` : 'N/A';
+                    return `<b>Biên lợi nhuận DN</b><br>${marginLabel}<br>Percentile: ${percentileLabel}`;
+                }
+                const idx = Number(params.dataIndex || 0);
+                const label = labels[idx] || 'N/A';
+                const count = Number(counts[idx] || 0);
+                return `<b>${escapeHtml(label)}</b><br>Số DN: <b>${count.toLocaleString()}</b>`;
+            },
+        },
+        grid: { left: '8%', right: '4%', top: '8%', bottom: '22%' },
+        xAxis: {
+            type: 'category',
+            data: labels,
+            axisLabel: {
+                interval: 0,
+                rotate: 26,
+                fontSize: 9,
+            },
+        },
+        yAxis: {
+            type: 'value',
+            name: 'Số DN',
+            axisLabel: { fontSize: 10 },
+        },
+        series: [
+            {
+                name: 'Phân phối ngành',
+                type: 'bar',
+                data: barData,
+                barWidth: '72%',
+            },
+            ...scatterSeries,
+        ],
+    });
+}
+
+
+function renderSingleRedFlagsTimeline(timelineData) {
+    const container = document.getElementById('chart-single-redflags-timeline');
+    if (!container) return;
+
+    const yearPoints = Array.isArray(timelineData.year_points) ? timelineData.year_points : [];
+    if (!yearPoints.length) {
+        renderSingleTrendChartMessage(container, 'Chưa có dữ liệu timeline red flags theo năm.');
+        return;
+    }
+
+    const years = yearPoints.map((p) => String(p.year || '---'));
+    const counts = yearPoints.map((p) => Number(p.flag_count || 0));
+    const flagByYear = yearPoints.map((p) => Array.isArray(p.flag_ids) ? p.flag_ids : []);
+
+    const chart = safeInitChart(container);
+    chart.setOption({
+        animationDuration: MOTION_DURATION_CHART,
+        tooltip: {
+            trigger: 'axis',
+            formatter: (params) => {
+                const idx = params[0] ? Number(params[0].dataIndex || 0) : 0;
+                const flags = flagByYear[idx] || [];
+                const list = flags.length ? flags.map((f) => `• ${escapeHtml(String(f))}`).join('<br>') : 'Không có';
+                return `Năm <b>${escapeHtml(years[idx] || '---')}</b><br>Số cờ đỏ: <b>${Number(counts[idx] || 0)}</b><br><br>${list}`;
+            },
+        },
+        grid: { left: '8%', right: '4%', top: '10%', bottom: '12%' },
+        xAxis: {
+            type: 'category',
+            data: years,
+            axisLabel: { fontSize: 10, fontWeight: 600 },
+        },
+        yAxis: {
+            type: 'value',
+            minInterval: 1,
+            name: 'Số cờ đỏ',
+            axisLabel: { fontSize: 10 },
+        },
+        series: [
+            {
+                name: 'Red flags theo năm',
+                type: 'bar',
+                data: counts,
+                barWidth: '48%',
+                itemStyle: {
+                    color: '#f97316',
+                    borderRadius: [6, 6, 0, 0],
+                },
+                label: {
+                    show: true,
+                    position: 'top',
+                    fontSize: 10,
+                    fontWeight: 'bold',
+                },
+            },
+            {
+                name: 'Xu hướng',
+                type: 'line',
+                data: counts,
+                smooth: true,
+                symbolSize: 7,
+                lineStyle: { width: 2, color: '#dc2626' },
+                itemStyle: { color: '#dc2626' },
+            },
+        ],
+    });
+}
 // ===================================================================
 
 const TOAST_ICONS = {
     success: 'check_circle', error: 'error', warning: 'warning', info: 'info'
 };
+const PREFERS_REDUCED_MOTION = !!(
+    window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches
+);
+const MOTION_DURATION_CHART = PREFERS_REDUCED_MOTION ? 0 : 900;
+
+let _fraudPageBindingsInitialized = false;
+let _modalLastFocusedElement = null;
+let _modalKeydownListener = null;
+let _pollingRequestToken = 0;
+let _pollingWatchdog = null;
+let _singleResultVisibleBeforeLoading = false;
+const WHATIF_HEATMAP_DEFAULT_REVENUE_STEPS = [-30, -20, -10, 0, 10, 20, 30];
+const WHATIF_HEATMAP_DEFAULT_EXPENSE_STEPS = [30, 20, 10, 0, -10, -20, -30];
+let _singleSensitivityHeatmapRequestToken = 0;
+const _singleSensitivityHeatmapCache = new Map();
+
+function dismissToast(toast) {
+    if (!toast || !toast.parentElement) return;
+    toast.classList.add('hide');
+    setTimeout(() => {
+        if (toast.parentElement) toast.remove();
+    }, 400);
+}
 
 function showToast(title, message, type = 'info', duration = 4000) {
     const container = document.getElementById('toast-container');
@@ -26,24 +392,59 @@ function showToast(title, message, type = 'info', duration = 4000) {
 
     const toast = document.createElement('div');
     toast.className = `toast toast-${type}`;
-    toast.innerHTML = `
-        <span class="material-symbols-outlined text-xl" style="font-variation-settings:'FILL' 1;">${TOAST_ICONS[type] || 'info'}</span>
-        <div class="flex-1">
-            <p class="text-sm font-bold">${title}</p>
-            <p class="text-xs opacity-80 mt-0.5">${message}</p>
-        </div>
-        <button onclick="this.parentElement.classList.add('hide');setTimeout(()=>this.parentElement.remove(),400)" class="opacity-60 hover:opacity-100 transition-opacity">
-            <span class="material-symbols-outlined text-lg">close</span>
-        </button>`;
+    toast.setAttribute('role', type === 'error' ? 'alert' : 'status');
+    toast.setAttribute('aria-live', type === 'error' ? 'assertive' : 'polite');
+
+    const icon = document.createElement('span');
+    icon.className = 'material-symbols-outlined text-xl';
+    icon.style.fontVariationSettings = "'FILL' 1";
+    icon.textContent = TOAST_ICONS[type] || 'info';
+
+    const content = document.createElement('div');
+    content.className = 'flex-1';
+
+    const titleEl = document.createElement('p');
+    titleEl.className = 'text-sm font-bold';
+    titleEl.textContent = title || '';
+
+    const messageEl = document.createElement('p');
+    messageEl.className = 'text-xs opacity-80 mt-0.5';
+    messageEl.textContent = message || '';
+
+    content.appendChild(titleEl);
+    content.appendChild(messageEl);
+
+    const closeBtn = document.createElement('button');
+    closeBtn.type = 'button';
+    closeBtn.className = 'opacity-60 hover:opacity-100 transition-opacity';
+    closeBtn.setAttribute('aria-label', 'Đóng thông báo');
+
+    const closeIcon = document.createElement('span');
+    closeIcon.className = 'material-symbols-outlined text-lg';
+    closeIcon.textContent = 'close';
+    closeBtn.appendChild(closeIcon);
+    closeBtn.addEventListener('click', () => dismissToast(toast));
+
+    toast.appendChild(icon);
+    toast.appendChild(content);
+    toast.appendChild(closeBtn);
     container.appendChild(toast);
 
     // Auto-dismiss
     setTimeout(() => {
-        if (toast.parentElement) {
-            toast.classList.add('hide');
-            setTimeout(() => toast.remove(), 400);
-        }
+        dismissToast(toast);
     }, duration);
+}
+
+
+function escapeHtml(value) {
+    const str = value === null || value === undefined ? '' : String(value);
+    return str
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
 }
 
 
@@ -66,6 +467,7 @@ function safeInitChart(container) {
     if (existing) {
         existing.dispose();
     }
+    container.innerHTML = '';
     const chart = echarts.init(container);
     // Track in registry for bulk disposal if needed
     _chartInstances.set(container.id || container, chart);
@@ -90,9 +492,20 @@ window.addEventListener('resize', () => {
 
 function switchTab(tab) {
     document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
-    document.getElementById(`tab-${tab}-btn`).classList.add('active');
+    const tabBtn = document.getElementById(`tab-${tab}-btn`);
+    if (tabBtn) {
+        tabBtn.classList.add('active');
+    }
     document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
-    document.getElementById(`tab-${tab}`).classList.add('active');
+    const tabContent = document.getElementById(`tab-${tab}`);
+    if (tabContent) {
+        tabContent.classList.add('active');
+    }
+
+    // Lazy-load company directory only when opening the dedicated CSDL tab.
+    if (tab === 'directory') {
+        initSingleCompanyDirectory();
+    }
 }
 
 
@@ -121,12 +534,42 @@ function getRiskBadgeClass(level) {
 // MODE 1: SINGLE QUERY (Real-time)
 // ===================================================================
 
+function showSingleResultSkeleton() {
+    const skeleton = document.getElementById('single-result-skeleton');
+    const resultDiv = document.getElementById('fraud-result');
+    if (!skeleton || !resultDiv) return;
+
+    _singleResultVisibleBeforeLoading = !resultDiv.classList.contains('hidden');
+    resultDiv.classList.add('hidden');
+    skeleton.classList.remove('hidden');
+    skeleton.setAttribute('aria-busy', 'true');
+}
+
+
+function hideSingleResultSkeleton({ restorePrevious = false } = {}) {
+    const skeleton = document.getElementById('single-result-skeleton');
+    const resultDiv = document.getElementById('fraud-result');
+
+    if (skeleton) {
+        skeleton.classList.add('hidden');
+        skeleton.setAttribute('aria-busy', 'false');
+    }
+
+    if (restorePrevious && resultDiv && _singleResultVisibleBeforeLoading) {
+        resultDiv.classList.remove('hidden');
+    }
+
+    _singleResultVisibleBeforeLoading = false;
+}
+
 async function checkFraudRisk() {
     const taxCode = document.getElementById('fraud-mst').value.trim();
     if (!taxCode) {
         showToast('Thiếu thông tin', 'Vui lòng nhập Mã số thuế hoặc Tên doanh nghiệp.', 'warning');
         return;
     }
+
+    showSingleResultSkeleton();
 
     const btn = document.getElementById('fraud-btn');
     btn.innerHTML = '<div class="loader" style="width:20px;height:20px;border-width:2px"></div> Đang phân tích...';
@@ -146,6 +589,7 @@ async function checkFraudRisk() {
 
     } catch (error) {
         console.error(error);
+        hideSingleResultSkeleton({ restorePrevious: true });
         showToast('Lỗi phân tích', error.message || 'Có lỗi xảy ra khi gọi API AI.', 'error');
     } finally {
         btn.innerHTML = '<span class="material-symbols-outlined text-[18px]">psychology</span> Phân tích AI';
@@ -155,13 +599,17 @@ async function checkFraudRisk() {
 
 
 function renderSingleResult(data) {
+    hideSingleResultSkeleton();
+
     window._currentSingleData = data;
     const resultDiv = document.getElementById('fraud-result');
     resultDiv.classList.remove('hidden');
-    resultDiv.animate([
-        { opacity: 0, transform: 'translateY(40px)' },
-        { opacity: 1, transform: 'translateY(0)' }
-    ], { duration: 800, easing: 'cubic-bezier(0.16, 1, 0.3, 1)', fill: 'both' });
+    if (!PREFERS_REDUCED_MOTION) {
+        resultDiv.animate([
+            { opacity: 0, transform: 'translateY(40px)' },
+            { opacity: 1, transform: 'translateY(0)' }
+        ], { duration: 600, easing: 'cubic-bezier(0.16, 1, 0.3, 1)', fill: 'both' });
+    }
 
     document.getElementById('result-company-name').textContent = data.company_name || 'Không rõ';
     document.getElementById('result-meta').textContent = `MST: ${data.tax_code} • Ngành: ${data.industry || '---'}`;
@@ -177,7 +625,10 @@ function renderSingleResult(data) {
     const chartsRow = document.getElementById('single-charts-row');
     if (chartsRow) {
         chartsRow.style.display = 'grid';
-        renderSingleTrendChart(data.yearly_history || []);
+        renderSingleTrendChart(data.yearly_history || [], {
+            historySource: data.history_source || 'unavailable',
+            historyYearCount: Number(data.history_year_count) || 0,
+        });
         renderSingleRadarChart(data);
     }
 
@@ -186,6 +637,63 @@ function renderSingleResult(data) {
     if (peerRow) {
         peerRow.style.display = 'block';
         renderPeerComparison(data);
+    }
+
+    // Advanced Single Charts (Feature timeline + Waterfall deltas)
+    const advancedRow = document.getElementById('single-advanced-row');
+    if (advancedRow) {
+        const hasFeatureSnapshot = ['risk_score', 'f1_divergence', 'f2_ratio_limit', 'f3_vat_structure', 'f4_peer_comparison']
+            .some((key) => Number.isFinite(Number(data[key])));
+        const hasAdvancedData = (
+            (Array.isArray(data.yearly_feature_scores) && data.yearly_feature_scores.length > 0)
+            || (data.previous_year_features && typeof data.previous_year_features === 'object')
+            || (data.feature_deltas && typeof data.feature_deltas === 'object' && Object.keys(data.feature_deltas).length > 0)
+            || hasFeatureSnapshot
+        );
+
+        if (hasAdvancedData) {
+            advancedRow.style.display = 'grid';
+            renderSingleFeatureTrendChart(data.yearly_feature_scores || []);
+            renderSingleFeatureDeltaWaterfall(data);
+            renderSingleFeaturePercentileBullet(data);
+            renderSingleSensitivityHeatmap(data);
+        } else {
+            advancedRow.style.display = 'none';
+        }
+    }
+
+    // Strategic Single Charts (Sankey/Cumulative/Distribution/Timeline)
+    const strategicRow = document.getElementById('single-strategic-row');
+    if (strategicRow) {
+        const sankeyData = (data.single_risk_tier_sankey && typeof data.single_risk_tier_sankey === 'object')
+            ? data.single_risk_tier_sankey
+            : {};
+        const cumulativeData = (data.single_cumulative_risk_curve && typeof data.single_cumulative_risk_curve === 'object')
+            ? data.single_cumulative_risk_curve
+            : {};
+        const marginDistribution = (data.single_margin_distribution && typeof data.single_margin_distribution === 'object')
+            ? data.single_margin_distribution
+            : {};
+        const redFlagTimeline = (data.single_red_flags_timeline && typeof data.single_red_flags_timeline === 'object')
+            ? data.single_red_flags_timeline
+            : {};
+
+        const hasStrategicData = (
+            (Array.isArray(sankeyData.nodes) && sankeyData.nodes.length > 0)
+            || (Array.isArray(cumulativeData.points) && cumulativeData.points.length > 0)
+            || (Array.isArray(marginDistribution.bins) && marginDistribution.bins.length > 0)
+            || (Array.isArray(redFlagTimeline.year_points) && redFlagTimeline.year_points.length > 0)
+        );
+
+        if (hasStrategicData) {
+            strategicRow.style.display = 'grid';
+            renderSingleRiskTierSankey(sankeyData);
+            renderSingleCumulativeRiskCurve(cumulativeData);
+            renderSingleMarginDistribution(marginDistribution);
+            renderSingleRedFlagsTimeline(redFlagTimeline);
+        } else {
+            strategicRow.style.display = 'none';
+        }
     }
 
     // Model Confidence Badge
@@ -241,7 +749,14 @@ function animateRiskScore(targetScore, data) {
     // Disable CSS transition to fully control via JS
     circleEl.style.transition = 'none';
 
-    const durationMs = 2000;
+    const finalOffset = 552.92 - (552.92 * (targetScore / 100));
+    if (PREFERS_REDUCED_MOTION) {
+        scoreEl.textContent = Math.round(targetScore);
+        circleEl.style.strokeDashoffset = finalOffset;
+        return;
+    }
+
+    const durationMs = 850;
     const startTime = performance.now();
 
     requestAnimationFrame(function animateNumbers(currentTime) {
@@ -260,11 +775,10 @@ function animateRiskScore(targetScore, data) {
         if (progress < 1) requestAnimationFrame(animateNumbers);
         else {
             scoreEl.textContent = Math.round(targetScore);
-            circleEl.style.strokeDashoffset = 552.92 - (552.92 * (targetScore / 100));
+            circleEl.style.strokeDashoffset = finalOffset;
         }
     });
 }
-
 
 function renderRedFlags(flags) {
     const container = document.getElementById('red-flags-list');
@@ -285,15 +799,33 @@ function renderRedFlags(flags) {
     }
 
     flags.forEach((flag, i) => {
+        const safeIcon = /^[a-z0-9_]+$/i.test(String(flag.icon || '')) ? String(flag.icon) : 'warning';
+        const safeTitle = flag.title ? String(flag.title) : 'Dấu hiệu bất thường';
+        const safeDescription = flag.description ? String(flag.description) : '';
+
         const div = document.createElement('div');
-        div.className = 'group bg-error-container/20 p-5 rounded-xl border-l-4 border-error flex items-start gap-4 transition-all hover:translate-x-1';
+        div.className = 'red-flag-item group bg-error-container/20 p-5 rounded-xl border-l-4 border-error flex items-start gap-4 transition-all hover:translate-x-1';
         div.style.animationDelay = `${i * 0.1}s`;
-        div.innerHTML = `
-            <span class="material-symbols-outlined text-error" style="font-variation-settings:'FILL' 1;">${flag.icon || 'warning'}</span>
-            <div>
-                <p class="text-sm font-bold text-on-error-container">${flag.title}</p>
-                <p class="text-xs text-slate-600 mt-1">${flag.description || ''}</p>
-            </div>`;
+
+        const icon = document.createElement('span');
+        icon.className = 'material-symbols-outlined text-error';
+        icon.style.fontVariationSettings = "'FILL' 1";
+        icon.textContent = safeIcon;
+
+        const textWrap = document.createElement('div');
+
+        const titleEl = document.createElement('p');
+        titleEl.className = 'text-sm font-bold text-on-error-container';
+        titleEl.textContent = safeTitle;
+
+        const descEl = document.createElement('p');
+        descEl.className = 'text-xs text-slate-600 mt-1';
+        descEl.textContent = safeDescription;
+
+        textWrap.appendChild(titleEl);
+        textWrap.appendChild(descEl);
+        div.appendChild(icon);
+        div.appendChild(textWrap);
         container.appendChild(div);
     });
 }
@@ -316,13 +848,16 @@ function renderShapExplanation(shap) {
         const dirLabel = isRisk ? '▲ Tăng rủi ro' : '▼ Giảm rủi ro';
         const dirColor = isRisk ? 'text-red-500' : 'text-emerald-500';
         const shapVal = s.shap_value !== undefined ? s.shap_value.toFixed(4) : imp.toFixed(4);
+        const featureLabel = escapeHtml(formatFeatureName(s.feature));
+        const safeDirLabel = escapeHtml(dirLabel);
+        const safeShapVal = escapeHtml(shapVal);
         const div = document.createElement('div');
         div.innerHTML = `
             <div class="flex justify-between items-center mb-1">
-                <span class="text-[10px] font-bold text-slate-500 uppercase tracking-wider">${formatFeatureName(s.feature)}</span>
+                <span class="text-[10px] font-bold text-slate-500 uppercase tracking-wider">${featureLabel}</span>
                 <div class="flex items-center gap-2">
-                    <span class="text-[9px] font-bold ${dirColor}">${dirLabel}</span>
-                    <span class="text-[10px] font-mono text-slate-400">${shapVal}</span>
+                    <span class="text-[9px] font-bold ${dirColor}">${safeDirLabel}</span>
+                    <span class="text-[10px] font-mono text-slate-400">${safeShapVal}</span>
                 </div>
             </div>
             <div class="w-full bg-slate-100 rounded-full h-2">
@@ -370,7 +905,10 @@ async function uploadCSV(file) {
 
     try {
         const response = await secureFetch(`${API_BASE}/ai/batch-upload`, { method: 'POST', body: formData });
-        if (!response.ok) { const err = await response.json(); throw new Error(err.detail || 'Upload thất bại'); }
+        if (!response.ok) {
+            const err = await response.json();
+            throw new Error(err.detail || 'Upload thất bại');
+        }
 
         const data = await response.json();
         currentBatchId = data.batch_id;
@@ -378,7 +916,6 @@ async function uploadCSV(file) {
         document.getElementById('progress-subtitle').textContent = `Lô #${data.batch_id} • ${file.name}`;
         showToast('Upload thành công', `File ${file.name} đã được nhận. Đang phân tích...`, 'info');
         startPolling(data.batch_id);
-
     } catch (error) {
         console.error(error);
         showToast('Lỗi upload', error.message || 'Có lỗi xảy ra khi upload file.', 'error');
@@ -394,18 +931,34 @@ function startPolling(batchId) {
             const response = await secureFetch(`${API_BASE}/ai/batch-status/${batchId}`);
             if (!response.ok) return;
             const status = await response.json();
+            if (!status) return;
+        
+
 
             const pct = status.progress_percent || 0;
             document.getElementById('progress-bar').style.width = `${pct}%`;
             document.getElementById('progress-percent').textContent = `${pct}%`;
             document.getElementById('progress-detail').textContent = `Đã phân tích ${status.processed_rows || 0} / ${status.total_rows || '?'} doanh nghiệp`;
+            const progressTrack = document.getElementById('progress-track');
+            if (progressTrack) {
+                progressTrack.setAttribute('aria-valuenow', String(pct));
+                progressTrack.setAttribute('aria-valuetext', `${pct}%`);
+            }
 
             if (status.status === 'done') {
                 clearInterval(pollingInterval); pollingInterval = null;
+                if (_pollingWatchdog) {
+                    clearTimeout(_pollingWatchdog);
+                    _pollingWatchdog = null;
+                }
                 showToast('Phân tích hoàn tất!', `Đã xử lý thành công ${status.processed_rows} doanh nghiệp.`, 'success', 6000);
                 loadBatchResults(batchId);
             } else if (status.status === 'failed') {
                 clearInterval(pollingInterval); pollingInterval = null;
+                if (_pollingWatchdog) {
+                    clearTimeout(_pollingWatchdog);
+                    _pollingWatchdog = null;
+                }
                 showToast('Phân tích thất bại', status.error_message || 'Lỗi không xác định', 'error', 8000);
                 resetBatchUI();
             }
@@ -436,7 +989,14 @@ function resetBatchUI() {
     document.getElementById('batch-dashboard').classList.add('hidden');
     document.getElementById('progress-bar').style.width = '0%';
     document.getElementById('progress-percent').textContent = '0%';
+    const progressTrack = document.getElementById('progress-track');
+    if (progressTrack) {
+        progressTrack.setAttribute('aria-valuenow', '0');
+        progressTrack.setAttribute('aria-valuetext', '0%');
+    }
+    _pollingRequestToken += 1;
     if (pollingInterval) { clearInterval(pollingInterval); pollingInterval = null; }
+    if (_pollingWatchdog) { clearTimeout(_pollingWatchdog); _pollingWatchdog = null; }
 }
 
 
@@ -450,6 +1010,13 @@ let sortAsc = false;
 let currentPage = 1;
 const ROWS_PER_PAGE = 10;
 let filteredAssessments = [];
+
+let singleCompanyMode = 'all';
+let singleCompanyPage = 1;
+let singleCompanyTotal = 0;
+const SINGLE_COMPANY_PAGE_SIZE = 10;
+let singleCompanyRows = [];
+let singleCompanySearchDebounce = null;
 
 function renderBatchDashboard(data) {
     batchData = data;
@@ -466,6 +1033,7 @@ function renderBatchDashboard(data) {
     // All charts + new features
     if (stats.year_trend) renderBatchTrendChart(stats.year_trend);
     renderScatterPlot(stats.scatter_data || [], stats.contour_data || null);
+    renderRevenueRiskScatter(stats.revenue_risk_scatter || stats.scatter_data || [], data.assessments || []);
     renderHistogram(stats.risk_distribution || []);
     renderRadarChart(stats, data.assessments || []);
     renderDonutChart(summary);
@@ -473,6 +1041,9 @@ function renderBatchDashboard(data) {
     renderCorrelationMatrix(stats.correlation_matrix || {});
     renderBoxPlot(stats.box_plot_data || []);
     renderMapChart(stats.province_stats || []);
+    renderCohortRiskFunnel(stats.cohort_transition_sankey || {});
+    renderVatAnomalyHeatmap(stats.vat_anomaly_heatmap || {});
+    renderCumulativeRiskCurve(stats.cumulative_risk_curve || {});
     // Use AI global feature importance if available, fallback to rule-based
     if (stats.global_feature_importance && stats.global_feature_importance.length > 0) {
         renderGlobalFeatureImportance(stats.global_feature_importance);
@@ -564,7 +1135,7 @@ function renderScatterPlot(scatterData, contourData) {
     });
 
     const option = {
-        animationDuration: 2000,
+        animationDuration: MOTION_DURATION_CHART,
         animationEasing: 'cubicOut',
         tooltip: {
             trigger: 'item',
@@ -609,6 +1180,116 @@ function renderScatterPlot(scatterData, contourData) {
 }
 
 
+// ---- REVENUE vs RISK SCATTER (Business-friendly view) ----
+function renderRevenueRiskScatter(revenueRiskData, assessments = []) {
+    const container = document.getElementById('chart-revenue-risk');
+    if (!container) return;
+
+    const source = Array.isArray(revenueRiskData) && revenueRiskData.length
+        ? revenueRiskData
+        : (Array.isArray(assessments) ? assessments : []);
+
+    const normalized = source
+        .map((row) => {
+            const revenue = Number(row.revenue || 0);
+            const totalExpenses = Number(row.total_expenses || 0);
+            const ratio = Number(row.expense_ratio);
+            const expenseRatio = Number.isFinite(ratio)
+                ? ratio
+                : (revenue > 0 ? totalExpenses / Math.max(revenue, 1) : 0);
+
+            return {
+                tax_code: String(row.tax_code || ''),
+                company_name: String(row.company_name || ''),
+                industry: String(row.industry || 'Khác'),
+                revenue,
+                risk_score: Number(row.risk_score || 0),
+                expense_ratio: Number.isFinite(expenseRatio) ? expenseRatio : 0,
+                log_revenue: Math.log10(Math.max(0, revenue) + 1),
+            };
+        })
+        .filter((row) => Number.isFinite(row.log_revenue) && Number.isFinite(row.risk_score));
+
+    if (!normalized.length) {
+        renderSingleTrendChartMessage(container, 'Không đủ dữ liệu để vẽ Revenue vs Risk scatter.');
+        return;
+    }
+
+    const chart = safeInitChart(container);
+    const industries = [...new Set(normalized.map((d) => d.industry))];
+    const palette = ['#002147', '#dc2626', '#ea580c', '#16a34a', '#7c3aed', '#0891b2', '#be123c', '#854d0e', '#1d4ed8', '#4d7c0f'];
+
+    const series = industries.map((industry, idx) => {
+        const points = normalized.filter((d) => d.industry === industry);
+        return {
+            name: industry,
+            type: 'scatter',
+            symbolSize: (value) => Math.max(7, Math.min(24, Number(value[2] || 0.2) * 14)),
+            itemStyle: {
+                color: palette[idx % palette.length],
+                opacity: 0.75,
+            },
+            data: points.map((d) => ({
+                value: [d.log_revenue, d.risk_score, d.expense_ratio],
+                _meta: d,
+            })),
+            emphasis: {
+                itemStyle: {
+                    opacity: 1,
+                    shadowBlur: 10,
+                    shadowColor: 'rgba(15, 23, 42, 0.3)',
+                },
+            },
+        };
+    });
+
+    chart.setOption({
+        animationDuration: MOTION_DURATION_CHART,
+        animationEasing: 'cubicOut',
+        legend: {
+            type: 'scroll',
+            bottom: 0,
+            textStyle: { fontSize: 9 },
+        },
+        grid: { left: '12%', right: '5%', top: '8%', bottom: '22%' },
+        tooltip: {
+            trigger: 'item',
+            formatter: (params) => {
+                const d = params.data && params.data._meta ? params.data._meta : null;
+                if (!d) return '';
+                return `<b>${escapeHtml(d.company_name || '---')}</b><br>`
+                    + `MST: ${escapeHtml(d.tax_code || '---')}<br>`
+                    + `Ngành: ${escapeHtml(d.industry || '---')}<br>`
+                    + `Doanh thu: <b>${formatVND(d.revenue)}</b><br>`
+                    + `Điểm rủi ro: <b>${d.risk_score.toFixed(1)}</b><br>`
+                    + `Tỷ lệ Chi phí/DT: <b>${(d.expense_ratio * 100).toFixed(1)}%</b>`;
+            },
+        },
+        xAxis: {
+            type: 'value',
+            name: 'Log10(Doanh thu)',
+            nameLocation: 'center',
+            nameGap: 28,
+            splitLine: { lineStyle: { type: 'dashed', opacity: 0.3 } },
+            axisLabel: { fontSize: 10 },
+        },
+        yAxis: {
+            type: 'value',
+            name: 'Điểm rủi ro',
+            min: 0,
+            max: 100,
+            splitLine: { lineStyle: { type: 'dashed', opacity: 0.3 } },
+            axisLabel: { fontSize: 10 },
+        },
+        series,
+        dataZoom: [
+            { type: 'inside', xAxisIndex: 0, filterMode: 'none' },
+            { type: 'slider', xAxisIndex: 0, height: 16, bottom: 28 },
+        ],
+    });
+}
+
+
 // ---- BATCH TREND CHART (Yearly) ----
 function renderBatchTrendChart(trendData) {
     const container = document.getElementById('chart-batch-trend');
@@ -623,7 +1304,7 @@ function renderBatchTrendChart(trendData) {
     const highRiskCounts = trendData.map(d => d.high_risk_count);
 
     chart.setOption({
-        animationDuration: 1500,
+        animationDuration: MOTION_DURATION_CHART,
         animationEasing: 'cubicOut',
         tooltip: { trigger: 'axis', axisPointer: { type: 'cross' } },
         legend: { data: ['Điểm Rủi ro TB', 'Số DN Rủi ro cao'], bottom: 0, textStyle: { fontSize: 10 } },
@@ -851,9 +1532,19 @@ function renderCorrelationMatrix(corrData) {
 
 function populateIndustryFilter(industryStats) {
     const select = document.getElementById('table-industry-filter');
-    select.innerHTML = '<option value="">Tất cả ngành</option>';
+    if (!select) return;
+    select.innerHTML = '';
+
+    const defaultOption = document.createElement('option');
+    defaultOption.value = '';
+    defaultOption.textContent = 'Tất cả ngành';
+    select.appendChild(defaultOption);
+
     industryStats.forEach(ind => {
-        select.innerHTML += `<option value="${ind.industry}">${ind.industry} (${ind.company_count})</option>`;
+        const option = document.createElement('option');
+        option.value = String(ind.industry || '');
+        option.textContent = `${ind.industry || '---'} (${Number(ind.company_count || 0)})`;
+        select.appendChild(option);
     });
 }
 
@@ -893,13 +1584,17 @@ function renderPaginatedTable() {
     pageData.forEach((a, idx) => {
         const globalIdx = startIdx + idx + 1;
         const levelClass = getRiskBadgeClass(a.risk_level);
+        const rawTaxCode = String(a.tax_code || '');
+        const safeTaxCode = escapeHtml(rawTaxCode || '---');
+        const safeCompanyName = escapeHtml(a.company_name || '---');
+        const safeIndustry = escapeHtml(a.industry || '---');
         const tr = document.createElement('tr');
         tr.className = 'hover:bg-surface-container-low/50 transition-colors cursor-pointer';
         tr.innerHTML = `
             <td class="px-4 py-3 font-mono text-slate-400">${globalIdx}</td>
-            <td class="px-4 py-3 font-mono font-bold">${a.tax_code}</td>
-            <td class="px-4 py-3 font-medium max-w-[200px] truncate">${a.company_name || '---'}</td>
-            <td class="px-4 py-3 text-slate-500">${a.industry || '---'}</td>
+            <td class="px-4 py-3 font-mono font-bold">${safeTaxCode}</td>
+            <td class="px-4 py-3 font-medium max-w-[200px] truncate">${safeCompanyName}</td>
+            <td class="px-4 py-3 text-slate-500">${safeIndustry}</td>
             <td class="px-4 py-3 font-mono">${formatVND(a.revenue)}</td>
             <td class="px-4 py-3 font-black text-lg">${a.risk_score.toFixed(1)}</td>
             <td class="px-4 py-3 font-mono text-slate-500">${(a.anomaly_score || 0).toFixed(3)}</td>
@@ -907,8 +1602,32 @@ function renderPaginatedTable() {
                 <span class="px-2 py-1 rounded text-[9px] font-black uppercase tracking-wider ${levelClass}">
                     ${getRiskLabel(a.risk_level)}
                 </span>
+            </td>
+            <td class="px-4 py-3 text-right">
+                <div class="inline-flex items-center gap-2">
+                    <button type="button" class="batch-copy-btn px-2.5 py-1.5 rounded-lg bg-surface-container text-on-surface-variant text-[9px] font-black uppercase tracking-wider hover:bg-surface-container-high" data-tax-code="${safeTaxCode}">Copy MST</button>
+                    <button type="button" class="batch-analyze-btn px-2.5 py-1.5 rounded-lg bg-primary-container text-white text-[9px] font-black uppercase tracking-wider hover:bg-primary" data-tax-code="${safeTaxCode}">Phân tích</button>
+                </div>
             </td>`;
         tbody.appendChild(tr);
+    });
+
+    tbody.querySelectorAll('.batch-copy-btn').forEach((btn) => {
+        btn.addEventListener('click', (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            const taxCode = btn.getAttribute('data-tax-code') || '';
+            copyTaxCodeToClipboard(taxCode);
+        });
+    });
+
+    tbody.querySelectorAll('.batch-analyze-btn').forEach((btn) => {
+        btn.addEventListener('click', (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            const taxCode = btn.getAttribute('data-tax-code') || '';
+            analyzeSingleCompanyFromBatch(taxCode);
+        });
     });
 
     // Pagination info
@@ -924,7 +1643,7 @@ function renderPaginatedTable() {
     const btnDisabled = `${btnBase} bg-surface-container-low text-slate-300 cursor-not-allowed`;
 
     // Previous
-    controlsEl.innerHTML += `<button class="${currentPage === 1 ? btnDisabled : btnInactive}" ${currentPage === 1 ? 'disabled' : ''} onclick="goToPage(${currentPage - 1})">
+    controlsEl.innerHTML += `<button type="button" class="${currentPage === 1 ? btnDisabled : btnInactive}" ${currentPage === 1 ? 'disabled' : ''} data-page="${currentPage - 1}" aria-label="Trang trước">
         <span class="material-symbols-outlined text-[14px]">chevron_left</span>
     </button>`;
 
@@ -934,23 +1653,30 @@ function renderPaginatedTable() {
     if (endPage - startPage < 6) startPage = Math.max(1, endPage - 6);
 
     if (startPage > 1) {
-        controlsEl.innerHTML += `<button class="${btnInactive}" onclick="goToPage(1)">1</button>`;
+        controlsEl.innerHTML += `<button type="button" class="${btnInactive}" data-page="1">1</button>`;
         if (startPage > 2) controlsEl.innerHTML += `<span class="px-1 text-slate-300">...</span>`;
     }
 
     for (let i = startPage; i <= endPage; i++) {
-        controlsEl.innerHTML += `<button class="${i === currentPage ? btnActive : btnInactive}" onclick="goToPage(${i})">${i}</button>`;
+        controlsEl.innerHTML += `<button type="button" class="${i === currentPage ? btnActive : btnInactive}" data-page="${i}">${i}</button>`;
     }
 
     if (endPage < totalPages) {
         if (endPage < totalPages - 1) controlsEl.innerHTML += `<span class="px-1 text-slate-300">...</span>`;
-        controlsEl.innerHTML += `<button class="${btnInactive}" onclick="goToPage(${totalPages})">${totalPages}</button>`;
+        controlsEl.innerHTML += `<button type="button" class="${btnInactive}" data-page="${totalPages}">${totalPages}</button>`;
     }
 
     // Next
-    controlsEl.innerHTML += `<button class="${currentPage === totalPages ? btnDisabled : btnInactive}" ${currentPage === totalPages ? 'disabled' : ''} onclick="goToPage(${currentPage + 1})">
+    controlsEl.innerHTML += `<button type="button" class="${currentPage === totalPages ? btnDisabled : btnInactive}" ${currentPage === totalPages ? 'disabled' : ''} data-page="${currentPage + 1}" aria-label="Trang sau">
         <span class="material-symbols-outlined text-[14px]">chevron_right</span>
     </button>`;
+
+    controlsEl.querySelectorAll('button[data-page]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+            const page = Number(btn.getAttribute('data-page'));
+            if (Number.isFinite(page)) goToPage(page);
+        });
+    });
 }
 
 
@@ -961,6 +1687,37 @@ function goToPage(page) {
     renderPaginatedTable();
     // Smooth scroll to table top
     document.getElementById('results-table-body').closest('.bg-surface-container-lowest').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+
+function analyzeSingleCompanyFromBatch(taxCode) {
+    if (!taxCode) return;
+    analyzeSingleCompanyFromDirectory(taxCode);
+}
+
+
+async function copyTaxCodeToClipboard(taxCode) {
+    if (!taxCode) return;
+
+    try {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+            await navigator.clipboard.writeText(taxCode);
+        } else {
+            const tempInput = document.createElement('textarea');
+            tempInput.value = taxCode;
+            tempInput.setAttribute('readonly', 'readonly');
+            tempInput.style.position = 'fixed';
+            tempInput.style.left = '-9999px';
+            document.body.appendChild(tempInput);
+            tempInput.select();
+            document.execCommand('copy');
+            document.body.removeChild(tempInput);
+        }
+        showToast('Đã copy MST', `MST ${taxCode} đã được sao chép.`, 'success');
+    } catch (error) {
+        console.error(error);
+        showToast('Copy thất bại', 'Không thể sao chép MST vào clipboard.', 'warning');
+    }
 }
 
 
@@ -975,6 +1732,235 @@ function sortTable(column) {
 
     currentPage = 1;
     renderPaginatedTable();
+}
+
+
+// ===================================================================
+// SINGLE-QUERY COMPANY DIRECTORY (All DB vs Assessed)
+// ===================================================================
+
+function updateSingleCompanyModeButtons() {
+    const allBtn = document.getElementById('single-company-mode-all');
+    const assessedBtn = document.getElementById('single-company-mode-assessed');
+    if (!allBtn || !assessedBtn) return;
+
+    if (singleCompanyMode === 'all') {
+        allBtn.className = 'px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider bg-primary-container text-white';
+        assessedBtn.className = 'px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider bg-surface-container text-on-surface-variant border border-outline-variant/20';
+    } else {
+        allBtn.className = 'px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider bg-surface-container text-on-surface-variant border border-outline-variant/20';
+        assessedBtn.className = 'px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider bg-primary-container text-white';
+    }
+}
+
+
+function setSingleCompanyMode(mode) {
+    if (!['all', 'assessed'].includes(mode)) return;
+    if (singleCompanyMode === mode) return;
+    singleCompanyMode = mode;
+    singleCompanyPage = 1;
+    updateSingleCompanyModeButtons();
+    loadSingleCompanyDirectory();
+}
+
+
+function formatDirectoryTimestamp(raw) {
+    if (!raw) return '--';
+    const date = new Date(raw);
+    if (Number.isNaN(date.getTime())) return '--';
+    return date.toLocaleString('vi-VN', {
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+    });
+}
+
+
+function renderSingleCompanyDirectoryTable() {
+    const tbody = document.getElementById('single-company-table-body');
+    const summary = document.getElementById('single-company-summary');
+    if (!tbody || !summary) return;
+
+    if (!singleCompanyRows.length) {
+        tbody.innerHTML = '<tr><td colspan="6" class="px-6 py-8 text-center text-slate-400 text-xs italic">Không tìm thấy doanh nghiệp phù hợp.</td></tr>';
+        summary.textContent = 'Không có dữ liệu theo bộ lọc hiện tại.';
+        return;
+    }
+
+    tbody.innerHTML = singleCompanyRows
+        .map((row) => {
+            const taxCode = escapeHtml(row.tax_code || '');
+            const name = escapeHtml(row.name || '---');
+            const industry = escapeHtml(row.industry || '---');
+            const score = Number(row.risk_score || 0);
+            const scoreClass = score >= 80
+                ? 'text-red-600'
+                : score >= 60
+                    ? 'text-orange-600'
+                    : score >= 40
+                        ? 'text-yellow-600'
+                        : 'text-emerald-600';
+            const updatedAt = formatDirectoryTimestamp(row.latest_assessment_at);
+            const assessedTag = row.assessed
+                ? '<span class="px-2 py-0.5 rounded bg-blue-50 text-blue-700 text-[9px] font-black uppercase tracking-wider">AI</span>'
+                : '<span class="px-2 py-0.5 rounded bg-slate-100 text-slate-500 text-[9px] font-black uppercase tracking-wider">CHƯA CHẤM</span>';
+
+            return `
+                <tr class="hover:bg-slate-50 transition-colors">
+                    <td class="px-4 py-3 font-mono font-bold text-primary-container">${taxCode}</td>
+                    <td class="px-4 py-3">
+                        <div class="font-semibold text-on-surface text-xs">${name}</div>
+                        <div class="mt-1">${assessedTag}</div>
+                    </td>
+                    <td class="px-4 py-3 text-slate-500">${industry}</td>
+                    <td class="px-4 py-3 font-black ${scoreClass}">${score.toFixed(1)}</td>
+                    <td class="px-4 py-3 text-slate-500 text-[10px]">${updatedAt}</td>
+                    <td class="px-4 py-3 text-right">
+                        <button class="single-company-analyze-btn px-3 py-1.5 rounded-lg bg-primary-container text-white text-[10px] font-black uppercase tracking-wider hover:bg-primary transition-colors" data-tax-code="${taxCode}">Phân tích</button>
+                    </td>
+                </tr>
+            `;
+        })
+        .join('');
+
+    summary.textContent = singleCompanyMode === 'all'
+        ? 'Đang hiển thị toàn bộ danh mục doanh nghiệp trong CSDL.'
+        : 'Đang hiển thị những doanh nghiệp đã có kết quả chấm điểm AI.';
+
+    tbody.querySelectorAll('.single-company-analyze-btn').forEach((button) => {
+        if (button.getAttribute('data-bound') === 'true') return;
+        button.setAttribute('data-bound', 'true');
+        button.addEventListener('click', () => {
+            analyzeSingleCompanyFromDirectory(button.getAttribute('data-tax-code') || '');
+        });
+    });
+}
+
+
+function renderSingleCompanyPagination() {
+    const info = document.getElementById('single-company-pagination-info');
+    const controls = document.getElementById('single-company-pagination-controls');
+    if (!info || !controls) return;
+
+    const totalPages = Math.max(1, Math.ceil(singleCompanyTotal / SINGLE_COMPANY_PAGE_SIZE));
+    const startIdx = singleCompanyTotal === 0 ? 0 : (singleCompanyPage - 1) * SINGLE_COMPANY_PAGE_SIZE + 1;
+    const endIdx = Math.min(singleCompanyPage * SINGLE_COMPANY_PAGE_SIZE, singleCompanyTotal);
+
+    info.textContent = `Hiển thị ${startIdx} - ${endIdx} / ${singleCompanyTotal.toLocaleString()} doanh nghiệp`;
+
+    const btnBase = 'px-3 py-1.5 text-[10px] font-bold rounded-lg transition-all';
+    const btnActive = `${btnBase} bg-primary-container text-white shadow-sm`;
+    const btnInactive = `${btnBase} bg-surface-container text-on-surface-variant hover:bg-surface-container-high`;
+    const btnDisabled = `${btnBase} bg-surface-container-low text-slate-300 cursor-not-allowed`;
+
+    controls.innerHTML = '';
+    controls.innerHTML += `<button type="button" class="${singleCompanyPage === 1 ? btnDisabled : btnInactive}" ${singleCompanyPage === 1 ? 'disabled' : ''} data-single-page="${singleCompanyPage - 1}" aria-label="Trang trước">&lt;</button>`;
+
+    let startPage = Math.max(1, singleCompanyPage - 2);
+    let endPage = Math.min(totalPages, startPage + 4);
+    if (endPage - startPage < 4) startPage = Math.max(1, endPage - 4);
+
+    for (let p = startPage; p <= endPage; p += 1) {
+        controls.innerHTML += `<button type="button" class="${p === singleCompanyPage ? btnActive : btnInactive}" data-single-page="${p}">${p}</button>`;
+    }
+
+    controls.innerHTML += `<button type="button" class="${singleCompanyPage >= totalPages ? btnDisabled : btnInactive}" ${singleCompanyPage >= totalPages ? 'disabled' : ''} data-single-page="${singleCompanyPage + 1}" aria-label="Trang sau">&gt;</button>`;
+
+    controls.querySelectorAll('button[data-single-page]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+            const page = Number(btn.getAttribute('data-single-page'));
+            if (Number.isFinite(page)) goToSingleCompanyPage(page);
+        });
+    });
+}
+
+
+function goToSingleCompanyPage(page) {
+    const totalPages = Math.max(1, Math.ceil(singleCompanyTotal / SINGLE_COMPANY_PAGE_SIZE));
+    if (page < 1 || page > totalPages) return;
+    singleCompanyPage = page;
+    loadSingleCompanyDirectory();
+}
+
+
+function analyzeSingleCompanyFromDirectory(taxCode) {
+    const input = document.getElementById('fraud-mst');
+    if (!input || !taxCode) return;
+
+    switchTab('single');
+    input.value = taxCode;
+    input.focus();
+    checkFraudRisk();
+
+    const singleTab = document.getElementById('tab-single');
+    if (singleTab) singleTab.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+
+async function loadSingleCompanyDirectory() {
+    const tbody = document.getElementById('single-company-table-body');
+    if (!tbody) return;
+
+    tbody.innerHTML = '<tr><td colspan="6" class="px-6 py-8 text-center text-slate-400 text-xs italic">Đang tải dữ liệu doanh nghiệp...</td></tr>';
+
+    const q = (document.getElementById('single-company-search')?.value || '').trim();
+    const params = new URLSearchParams({
+        mode: singleCompanyMode,
+        page: String(singleCompanyPage),
+        page_size: String(SINGLE_COMPANY_PAGE_SIZE),
+        sort_by: 'risk_score',
+        sort_order: 'desc',
+    });
+    if (q) params.set('q', q);
+
+    try {
+        const response = await secureFetch(`${API_BASE}/ai/companies?${params.toString()}`);
+        if (!response.ok) {
+            const err = await response.json();
+            throw new Error(err.detail || 'Không thể tải danh sách doanh nghiệp.');
+        }
+
+        const payload = await response.json();
+        singleCompanyRows = Array.isArray(payload.results) ? payload.results : [];
+        singleCompanyTotal = Number(payload.total) || 0;
+        singleCompanyPage = Number(payload.page) || 1;
+
+        renderSingleCompanyDirectoryTable();
+        renderSingleCompanyPagination();
+    } catch (error) {
+        console.error(error);
+        tbody.innerHTML = '<tr><td colspan="6" class="px-6 py-8 text-center text-error text-xs font-bold">Lỗi tải dữ liệu doanh nghiệp.</td></tr>';
+        const summary = document.getElementById('single-company-summary');
+        if (summary) summary.textContent = 'Không tải được danh sách doanh nghiệp ở thời điểm hiện tại.';
+        showToast('Lỗi danh sách doanh nghiệp', error.message || 'Không thể tải dữ liệu CSDL.', 'warning');
+    }
+}
+
+
+function initSingleCompanyDirectory() {
+    const search = document.getElementById('single-company-search');
+    const allBtn = document.getElementById('single-company-mode-all');
+    const assessedBtn = document.getElementById('single-company-mode-assessed');
+
+    if (!search || !allBtn || !assessedBtn) return;
+    if (search.getAttribute('data-initialized') === 'true') return;
+
+    search.setAttribute('data-initialized', 'true');
+
+    allBtn.addEventListener('click', () => setSingleCompanyMode('all'));
+    assessedBtn.addEventListener('click', () => setSingleCompanyMode('assessed'));
+    search.addEventListener('input', () => {
+        if (singleCompanySearchDebounce) clearTimeout(singleCompanySearchDebounce);
+        singleCompanySearchDebounce = setTimeout(() => {
+            singleCompanyPage = 1;
+            loadSingleCompanyDirectory();
+        }, 280);
+    });
+
+    updateSingleCompanyModeButtons();
+    loadSingleCompanyDirectory();
 }
 
 
@@ -1007,17 +1993,111 @@ function formatFeatureName(feature) {
 // SINGLE QUERY CHARTS (Trend Line + Individual Radar)
 // ===================================================================
 
-function renderSingleTrendChart(yearlyHistory) {
+function normalizeYearlyHistory(yearlyHistory) {
+    if (!Array.isArray(yearlyHistory)) return [];
+
+    return yearlyHistory
+        .map((row) => {
+            if (!row || typeof row !== 'object') return null;
+            const year = Number(row.year);
+            const revenue = Number(row.revenue);
+            const totalExpenses = Number(row.total_expenses);
+            if (!Number.isFinite(year) || year <= 0) return null;
+            return {
+                year: Math.trunc(year),
+                revenue: Number.isFinite(revenue) ? revenue : 0,
+                total_expenses: Number.isFinite(totalExpenses) ? totalExpenses : 0,
+            };
+        })
+        .filter(Boolean)
+        .sort((a, b) => a.year - b.year);
+}
+
+
+function renderSingleTrendChartMessage(container, message) {
+    if (!container) return;
+    const existing = echarts.getInstanceByDom(container);
+    if (existing) existing.dispose();
+
+    container.innerHTML = `
+        <div class="h-full flex items-center justify-center text-center px-4">
+            <p class="text-xs text-slate-400 italic leading-relaxed">${escapeHtml(message)}</p>
+        </div>
+    `;
+}
+
+
+function mapHistorySourceLabel(historySource) {
+    const normalized = String(historySource || '').trim();
+    const sourceMap = {
+        cache: 'Cache',
+        tax_returns: 'TaxReturns',
+        tax_returns_aggregation: 'TaxReturns',
+        assessment_history: 'AssessmentHistory',
+        unavailable: 'Chưa có',
+    };
+    return sourceMap[normalized] || 'Không rõ';
+}
+
+
+function updateSingleTrendSubtitle(yearCount, historySource) {
+    const subtitle = document.getElementById('single-trend-subtitle');
+    if (!subtitle) return;
+
+    const normalizedYearCount = Number.isFinite(Number(yearCount))
+        ? Math.max(0, Math.trunc(Number(yearCount)))
+        : 0;
+    const sourceLabel = mapHistorySourceLabel(historySource);
+    subtitle.textContent = `(${normalizedYearCount} năm • ${sourceLabel})`;
+}
+
+
+function setSingleTrendWarning(message) {
+    const warningEl = document.getElementById('single-trend-warning');
+    if (!warningEl) return;
+
+    if (!message) {
+        warningEl.classList.add('hidden');
+        warningEl.textContent = '';
+        return;
+    }
+
+    warningEl.textContent = message;
+    warningEl.classList.remove('hidden');
+}
+
+
+function renderSingleTrendChart(yearlyHistory, options = {}) {
     const container = document.getElementById('chart-single-trend');
-    if (!container || !yearlyHistory || yearlyHistory.length === 0) return;
+    if (!container) return;
+
+    const normalized = normalizeYearlyHistory(yearlyHistory);
+    const historyYearCount = Number(options.historyYearCount || 0);
+    const historySource = String(options.historySource || 'unavailable');
+    const effectiveYearCount = normalized.length || (Number.isFinite(historyYearCount) ? historyYearCount : 0);
+    updateSingleTrendSubtitle(effectiveYearCount, historySource);
+
+    if (!normalized.length) {
+        const hint = historySource === 'unavailable'
+            ? 'Không tìm thấy chuỗi doanh thu/chi phí theo năm trong dữ liệu hiện tại.'
+            : `Không đủ điểm dữ liệu trend hợp lệ (nguồn: ${historySource}, số năm: ${historyYearCount}).`;
+        setSingleTrendWarning('Chưa đủ dữ liệu lịch sử để tạo dự báo 1 năm tiếp theo.');
+        renderSingleTrendChartMessage(container, hint);
+        return;
+    }
+
+    setSingleTrendWarning('');
+    container.innerHTML = '';
 
     const chart = safeInitChart(container);
-    const years = yearlyHistory.map(d => String(d.year));
-    const revenues = yearlyHistory.map(d => d.revenue);
-    const expenses = yearlyHistory.map(d => d.total_expenses);
+    if (!chart) return;
+
+    const years = normalized.map(d => String(d.year));
+    const revenues = normalized.map(d => d.revenue);
+    const expenses = normalized.map(d => d.total_expenses);
 
     // Dynamic forecast: next year = max(years) + 1
-    const latestYear = Math.max(...years.map(y => parseInt(y)));
+    const latestYear = Math.max(...normalized.map((d) => d.year));
     const forecastYear = latestYear + 1;
     let forecastRevenue = null, forecastExpense = null;
     if (revenues.length >= 2) {
@@ -1025,6 +2105,8 @@ function renderSingleTrendChart(yearlyHistory) {
         const eGrowth = expenses[expenses.length - 1] / Math.max(expenses[expenses.length - 2], 1);
         forecastRevenue = Math.round(revenues[revenues.length - 1] * rGrowth);
         forecastExpense = Math.round(expenses[expenses.length - 1] * eGrowth);
+    } else {
+        setSingleTrendWarning(`Dữ liệu hiện tại chỉ có ${revenues.length} năm (nguồn: ${mapHistorySourceLabel(historySource)}), hệ thống chỉ hiển thị trend thực tế và không tạo dự báo.`);
     }
 
     // Add forecast year
@@ -1045,8 +2127,62 @@ function renderSingleTrendChart(yearlyHistory) {
         expForecast.push(forecastExpense);
     }
 
+    const seriesData = [
+        {
+            name: 'Doanh thu', type: 'line', data: revActual,
+            smooth: true, symbol: 'circle', symbolSize: 8,
+            lineStyle: { width: 3, color: '#002147' },
+            itemStyle: { color: '#002147' },
+            areaStyle: {
+                color: {
+                    type: 'linear', x: 0, y: 0, x2: 0, y2: 1, colorStops: [
+                        { offset: 0, color: 'rgba(0,33,71,0.15)' },
+                        { offset: 1, color: 'rgba(0,33,71,0.01)' },
+                    ],
+                },
+            },
+            connectNulls: false,
+        },
+        {
+            name: 'Tổng Chi phí', type: 'line', data: expActual,
+            smooth: true, symbol: 'diamond', symbolSize: 8,
+            lineStyle: { width: 3, color: '#dc2626', type: 'dashed' },
+            itemStyle: { color: '#dc2626' },
+            areaStyle: {
+                color: {
+                    type: 'linear', x: 0, y: 0, x2: 0, y2: 1, colorStops: [
+                        { offset: 0, color: 'rgba(220,38,38,0.1)' },
+                        { offset: 1, color: 'rgba(220,38,38,0.01)' },
+                    ],
+                },
+            },
+            connectNulls: false,
+        },
+    ];
+
+    const legendData = ['Doanh thu', 'Tổng Chi phí'];
+    if (forecastRevenue !== null) {
+        legendData.push(`DT Dự báo ${forecastYear}`, `CP Dự báo ${forecastYear}`);
+        seriesData.push(
+            {
+                name: `DT Dự báo ${forecastYear}`, type: 'line', data: revForecast,
+                smooth: true, symbol: 'emptyCircle', symbolSize: 10,
+                lineStyle: { width: 2, color: '#002147', type: 'dotted' },
+                itemStyle: { color: '#002147', borderWidth: 2 },
+                connectNulls: true,
+            },
+            {
+                name: `CP Dự báo ${forecastYear}`, type: 'line', data: expForecast,
+                smooth: true, symbol: 'emptyDiamond', symbolSize: 10,
+                lineStyle: { width: 2, color: '#dc2626', type: 'dotted' },
+                itemStyle: { color: '#dc2626', borderWidth: 2 },
+                connectNulls: true,
+            }
+        );
+    }
+
     chart.setOption({
-        animationDuration: 1500,
+        animationDuration: MOTION_DURATION_CHART,
         animationEasing: 'cubicOut',
         tooltip: {
             trigger: 'axis',
@@ -1061,54 +2197,1199 @@ function renderSingleTrendChart(yearlyHistory) {
             }
         },
         legend: {
-            data: ['Doanh thu', 'Tổng Chi phí', `DT Dự báo ${forecastYear}`, `CP Dự báo ${forecastYear}`],
+            data: legendData,
             bottom: 0, textStyle: { fontSize: 9 }
         },
         grid: { left: '15%', right: '5%', top: '10%', bottom: '22%' },
         xAxis: { type: 'category', data: allYears, axisLabel: { fontSize: 10 } },
         yAxis: { type: 'value', axisLabel: { fontSize: 9, formatter: v => formatVND(v) } },
-        series: [
-            {
-                name: 'Doanh thu', type: 'line', data: revActual,
-                smooth: true, symbol: 'circle', symbolSize: 8,
-                lineStyle: { width: 3, color: '#002147' },
-                itemStyle: { color: '#002147' },
-                areaStyle: { color: { type: 'linear', x: 0, y: 0, x2: 0, y2: 1, colorStops: [
-                    { offset: 0, color: 'rgba(0,33,71,0.15)' },
-                    { offset: 1, color: 'rgba(0,33,71,0.01)' }
-                ]}},
-                connectNulls: false,
-            },
-            {
-                name: 'Tổng Chi phí', type: 'line', data: expActual,
-                smooth: true, symbol: 'diamond', symbolSize: 8,
-                lineStyle: { width: 3, color: '#dc2626', type: 'dashed' },
-                itemStyle: { color: '#dc2626' },
-                areaStyle: { color: { type: 'linear', x: 0, y: 0, x2: 0, y2: 1, colorStops: [
-                    { offset: 0, color: 'rgba(220,38,38,0.1)' },
-                    { offset: 1, color: 'rgba(220,38,38,0.01)' }
-                ]}},
-                connectNulls: false,
-            },
-            {
-                name: `DT Dự báo ${forecastYear}`, type: 'line', data: revForecast,
-                smooth: true, symbol: 'emptyCircle', symbolSize: 10,
-                lineStyle: { width: 2, color: '#002147', type: 'dotted' },
-                itemStyle: { color: '#002147', borderWidth: 2 },
-                connectNulls: true,
-            },
-            {
-                name: `CP Dự báo ${forecastYear}`, type: 'line', data: expForecast,
-                smooth: true, symbol: 'emptyDiamond', symbolSize: 10,
-                lineStyle: { width: 2, color: '#dc2626', type: 'dotted' },
-                itemStyle: { color: '#dc2626', borderWidth: 2 },
-                connectNulls: true,
-            },
-        ],
+        series: seriesData,
     });
 
 }
 
+
+function normalizeYearlyFeatureScores(yearlyFeatureScores) {
+    if (!Array.isArray(yearlyFeatureScores)) return [];
+
+    return yearlyFeatureScores
+        .map((row) => {
+            if (!row || typeof row !== 'object') return null;
+            const year = Number(row.year);
+            if (!Number.isFinite(year) || year <= 0) return null;
+
+            const f1 = Number(row.f1_divergence);
+            const f2 = Number(row.f2_ratio_limit);
+            const f3 = Number(row.f3_vat_structure);
+            const f4 = Number(row.f4_peer_comparison);
+
+            return {
+                year: Math.trunc(year),
+                f1_divergence: Number.isFinite(f1) ? f1 : 0,
+                f2_ratio_limit: Number.isFinite(f2) ? f2 : 0,
+                f3_vat_structure: Number.isFinite(f3) ? f3 : 0,
+                f4_peer_comparison: Number.isFinite(f4) ? f4 : 0,
+            };
+        })
+        .filter(Boolean)
+        .sort((a, b) => a.year - b.year);
+}
+
+
+function renderSingleFeatureTrendChart(yearlyFeatureScores) {
+    const container = document.getElementById('chart-single-feature-trend');
+    if (!container) return false;
+
+    const normalized = normalizeYearlyFeatureScores(yearlyFeatureScores);
+    if (!normalized.length) {
+        renderSingleTrendChartMessage(container, 'Chưa có dữ liệu F1-F4 theo năm để vẽ biểu đồ tiến triển đặc trưng.');
+        return false;
+    }
+
+    const years = normalized.map((d) => String(d.year));
+    const f1Series = normalized.map((d) => d.f1_divergence);
+    const f2Series = normalized.map((d) => d.f2_ratio_limit);
+    const f3Series = normalized.map((d) => d.f3_vat_structure);
+    const f4Series = normalized.map((d) => d.f4_peer_comparison);
+
+    const maxAbs = Math.max(
+        0.2,
+        ...f1Series.map((v) => Math.abs(v)),
+        ...f2Series.map((v) => Math.abs(v)),
+        ...f3Series.map((v) => Math.abs(v)),
+        ...f4Series.map((v) => Math.abs(v)),
+    );
+    const yBound = Number((Math.ceil(maxAbs * 5) / 5).toFixed(2));
+
+    const chart = safeInitChart(container);
+    chart.setOption({
+        animationDuration: MOTION_DURATION_CHART,
+        animationEasing: 'cubicOut',
+        tooltip: {
+            trigger: 'axis',
+            formatter: (params) => {
+                let html = `<b>${params[0] ? params[0].axisValue : ''}</b><br>`;
+                params.forEach((p) => {
+                    const value = Number(p.value || 0);
+                    html += `${p.marker} ${p.seriesName}: <b>${value.toFixed(4)}</b><br>`;
+                });
+                return html;
+            },
+        },
+        legend: {
+            data: ['F1: Lệch pha', 'F2: Tỷ lệ CP/DT', 'F3: VAT', 'F4: So sánh ngành'],
+            bottom: 0,
+            textStyle: { fontSize: 9 },
+        },
+        grid: { left: '12%', right: '5%', top: '8%', bottom: '22%' },
+        xAxis: {
+            type: 'category',
+            data: years,
+            axisLabel: { fontSize: 10 },
+        },
+        yAxis: {
+            type: 'value',
+            min: -yBound,
+            max: yBound,
+            axisLabel: { fontSize: 9 },
+            splitLine: { lineStyle: { type: 'dashed', opacity: 0.35 } },
+        },
+        series: [
+            {
+                name: 'F1: Lệch pha',
+                type: 'line',
+                smooth: true,
+                data: f1Series,
+                symbol: 'circle',
+                lineStyle: { width: 2, color: '#0f766e' },
+                itemStyle: { color: '#0f766e' },
+            },
+            {
+                name: 'F2: Tỷ lệ CP/DT',
+                type: 'line',
+                smooth: true,
+                data: f2Series,
+                symbol: 'diamond',
+                lineStyle: { width: 2, color: '#0369a1' },
+                itemStyle: { color: '#0369a1' },
+            },
+            {
+                name: 'F3: VAT',
+                type: 'line',
+                smooth: true,
+                data: f3Series,
+                symbol: 'triangle',
+                lineStyle: { width: 2, color: '#b45309' },
+                itemStyle: { color: '#b45309' },
+            },
+            {
+                name: 'F4: So sánh ngành',
+                type: 'line',
+                smooth: true,
+                data: f4Series,
+                symbol: 'rect',
+                lineStyle: { width: 2, color: '#7c3aed' },
+                itemStyle: { color: '#7c3aed' },
+            },
+        ],
+    });
+
+    return true;
+}
+
+
+function deriveFeatureDeltas(singleData) {
+    const featureMeta = [
+        { key: 'f1_divergence', label: 'F1' },
+        { key: 'f2_ratio_limit', label: 'F2' },
+        { key: 'f3_vat_structure', label: 'F3' },
+        { key: 'f4_peer_comparison', label: 'F4' },
+    ];
+
+    const fromPayload = singleData && typeof singleData.feature_deltas === 'object'
+        ? singleData.feature_deltas
+        : {};
+    const previous = singleData && typeof singleData.previous_year_features === 'object'
+        ? singleData.previous_year_features
+        : null;
+
+    return featureMeta
+        .map((meta) => {
+            let delta = Number(fromPayload[meta.key]);
+
+            if (!Number.isFinite(delta) && previous) {
+                const currentVal = Number(singleData[meta.key]);
+                const previousVal = Number(previous[meta.key]);
+                if (Number.isFinite(currentVal) && Number.isFinite(previousVal)) {
+                    delta = currentVal - previousVal;
+                }
+            }
+
+            if (!Number.isFinite(delta)) return null;
+            return {
+                key: meta.key,
+                label: meta.label,
+                value: Number(delta.toFixed(4)),
+            };
+        })
+        .filter(Boolean);
+}
+
+
+function renderSingleFeatureDeltaWaterfall(singleData) {
+    const container = document.getElementById('chart-single-feature-waterfall');
+    if (!container) return false;
+
+    const deltas = deriveFeatureDeltas(singleData || {});
+    if (!deltas.length) {
+        renderSingleTrendChartMessage(container, 'Chưa đủ dữ liệu năm trước để tính waterfall biến động đặc trưng.');
+        return false;
+    }
+
+    const categories = deltas.map((d) => d.label).concat('Tong');
+    const assist = [];
+    const increase = [];
+    const decrease = [];
+    const rawValues = [];
+
+    let cumulative = 0;
+    deltas.forEach((step) => {
+        const value = Number(step.value || 0);
+        if (value >= 0) {
+            assist.push(Number(cumulative.toFixed(4)));
+            increase.push(Number(value.toFixed(4)));
+            decrease.push('-');
+        } else {
+            assist.push(Number((cumulative + value).toFixed(4)));
+            increase.push('-');
+            decrease.push(Number(Math.abs(value).toFixed(4)));
+        }
+        cumulative += value;
+        rawValues.push(Number(value.toFixed(4)));
+    });
+
+    assist.push(0);
+    rawValues.push(Number(cumulative.toFixed(4)));
+    if (cumulative >= 0) {
+        increase.push(Number(cumulative.toFixed(4)));
+        decrease.push('-');
+    } else {
+        increase.push('-');
+        decrease.push(Number(Math.abs(cumulative).toFixed(4)));
+    }
+
+    const chart = safeInitChart(container);
+    chart.setOption({
+        animationDuration: MOTION_DURATION_CHART,
+        animationEasing: 'cubicOut',
+        tooltip: {
+            trigger: 'axis',
+            axisPointer: { type: 'shadow' },
+            formatter: (params) => {
+                const active = params.find((p) => p.seriesName !== 'Nen') || params[0];
+                const idx = active ? active.dataIndex : 0;
+                const value = Number(rawValues[idx] || 0);
+                const sign = value > 0 ? '+' : '';
+                if (idx === categories.length - 1) {
+                    return `<b>${categories[idx]}</b><br>Tong bien dong: <b>${sign}${value.toFixed(4)}</b>`;
+                }
+                return `<b>${categories[idx]}</b><br>Delta: <b>${sign}${value.toFixed(4)}</b>`;
+            },
+        },
+        grid: { left: '12%', right: '6%', top: '8%', bottom: '18%' },
+        xAxis: {
+            type: 'category',
+            data: categories,
+            axisLabel: { fontSize: 10 },
+        },
+        yAxis: {
+            type: 'value',
+            axisLabel: { fontSize: 9 },
+            splitLine: { lineStyle: { type: 'dashed', opacity: 0.35 } },
+        },
+        series: [
+            {
+                name: 'Nen',
+                type: 'bar',
+                stack: 'total',
+                data: assist,
+                itemStyle: { color: 'rgba(0,0,0,0)' },
+                emphasis: { disabled: true },
+                tooltip: { show: false },
+            },
+            {
+                name: 'Tang',
+                type: 'bar',
+                stack: 'total',
+                data: increase,
+                itemStyle: {
+                    color: (params) => params.dataIndex === categories.length - 1 ? '#002147' : '#16a34a',
+                },
+                label: {
+                    show: true,
+                    position: 'top',
+                    fontSize: 9,
+                    formatter: (params) => (params.value === '-' ? '' : `+${Number(params.value).toFixed(3)}`),
+                },
+            },
+            {
+                name: 'Giam',
+                type: 'bar',
+                stack: 'total',
+                data: decrease,
+                itemStyle: {
+                    color: (params) => params.dataIndex === categories.length - 1 ? '#002147' : '#dc2626',
+                },
+                label: {
+                    show: true,
+                    position: 'bottom',
+                    fontSize: 9,
+                    formatter: (params) => (params.value === '-' ? '' : `-${Number(params.value).toFixed(3)}`),
+                },
+            },
+        ],
+    });
+
+    return true;
+}
+
+
+function computePercentileRank(values, targetValue) {
+    const numericValues = Array.isArray(values)
+        ? values.map((v) => Number(v)).filter((v) => Number.isFinite(v))
+        : [];
+    const numericTarget = Number(targetValue);
+
+    if (!numericValues.length || !Number.isFinite(numericTarget)) return null;
+    if (numericValues.length < 2) return 50;
+
+    const lessOrEqual = numericValues.filter((v) => v <= numericTarget).length;
+    return Number(((lessOrEqual / numericValues.length) * 100).toFixed(1));
+}
+
+
+function toFeatureRiskMagnitude(featureKey, rawValue) {
+    const value = Number(rawValue);
+    if (!Number.isFinite(value)) return null;
+
+    if (featureKey === 'f1_divergence' || featureKey === 'f4_peer_comparison') {
+        return Math.abs(value);
+    }
+    if (featureKey === 'f2_ratio_limit' || featureKey === 'f3_vat_structure') {
+        return Math.max(0, value);
+    }
+    if (featureKey === 'risk_score') {
+        return Math.max(0, value);
+    }
+    return value;
+}
+
+
+function buildSingleFeaturePercentileMetrics(singleData) {
+    const yearlyPoints = normalizeYearlyFeatureScores(singleData && singleData.yearly_feature_scores);
+    const metrics = [];
+
+    const riskHistory = (singleData && Array.isArray(singleData.yearly_feature_scores)
+        ? singleData.yearly_feature_scores
+        : [])
+        .map((row) => Number(row && row.risk_score))
+        .filter((v) => Number.isFinite(v));
+    const currentRisk = toFeatureRiskMagnitude('risk_score', singleData && singleData.risk_score);
+    const riskPercentile = computePercentileRank(riskHistory, currentRisk);
+    if (riskPercentile !== null && Number.isFinite(currentRisk)) {
+        metrics.push({
+            key: 'risk_score',
+            label: 'Risk',
+            percentile: riskPercentile,
+            benchmarkPercentile: 50,
+            currentDisplay: Number(currentRisk).toFixed(1),
+            benchmarkDisplay: 'P50',
+        });
+    }
+
+    const featureMeta = [
+        { key: 'f1_divergence', label: 'F1', safeThreshold: 0.30 },
+        { key: 'f2_ratio_limit', label: 'F2', safeThreshold: 0.95 },
+        { key: 'f3_vat_structure', label: 'F3', safeThreshold: 0.90 },
+        { key: 'f4_peer_comparison', label: 'F4', safeThreshold: 0.08 },
+    ];
+
+    featureMeta.forEach((meta) => {
+        const historyMagnitude = yearlyPoints
+            .map((point) => toFeatureRiskMagnitude(meta.key, point[meta.key]))
+            .filter((v) => Number.isFinite(v));
+
+        let currentRaw = Number(singleData && singleData[meta.key]);
+        if (!Number.isFinite(currentRaw) && yearlyPoints.length) {
+            currentRaw = Number(yearlyPoints[yearlyPoints.length - 1][meta.key]);
+        }
+
+        const currentMagnitude = toFeatureRiskMagnitude(meta.key, currentRaw);
+        const percentile = computePercentileRank(historyMagnitude, currentMagnitude);
+        if (percentile === null || !Number.isFinite(currentMagnitude)) return;
+
+        const safeMagnitude = toFeatureRiskMagnitude(meta.key, meta.safeThreshold);
+        let benchmarkPercentile = computePercentileRank(historyMagnitude, safeMagnitude);
+        if (benchmarkPercentile === null) benchmarkPercentile = 50;
+
+        metrics.push({
+            key: meta.key,
+            label: meta.label,
+            percentile,
+            benchmarkPercentile: Number(benchmarkPercentile.toFixed(1)),
+            currentDisplay: Number(currentRaw).toFixed(4),
+            benchmarkDisplay: Number(meta.safeThreshold).toFixed(2),
+        });
+    });
+
+    return metrics;
+}
+
+
+function classifyPercentileLevel(percentile) {
+    const value = Number(percentile);
+    if (!Number.isFinite(value)) return { code: 'unknown', label: 'Không rõ', color: '#64748b' };
+    if (value >= 75) return { code: 'high', label: 'Cao', color: '#dc2626' };
+    if (value >= 40) return { code: 'medium', label: 'Trung bình', color: '#d97706' };
+    return { code: 'low', label: 'Thấp', color: '#16a34a' };
+}
+
+
+function getFeaturePercentileNarrative(featureKey, levelCode) {
+    const narratives = {
+        risk_score: {
+            high: 'Tổng điểm rủi ro đang nằm ở nhóm cao so với lịch sử doanh nghiệp, cần ưu tiên kiểm tra kỳ gần nhất.',
+            medium: 'Tổng điểm đang tăng so với nền an toàn, nên tăng cường giám sát và đối soát chứng từ liên quan.',
+            low: 'Tổng điểm đang ở vùng thấp so với lịch sử, tạm thời chưa có dấu hiệu cảnh báo mạnh.',
+        },
+        f1_divergence: {
+            high: 'F1 lệch pha lớn, cần đối chiếu tăng trưởng doanh thu, lợi nhuận và thời điểm ghi nhận.',
+            medium: 'F1 có biến động trung bình, nên theo dõi xu hướng giữa các kỳ khai báo liên tiếp.',
+            low: 'F1 ổn định, chưa thấy dấu hiệu lệch pha đáng kể trong chuỗi dữ liệu.',
+        },
+        f2_ratio_limit: {
+            high: 'F2 vượt ngưỡng cao, tỷ lệ chi phí/doanh thu bất thường và cần rà soát hóa đơn đầu vào.',
+            medium: 'F2 ở mức cảnh báo trung bình, nên kiểm tra các khoản mục chi phí tăng đột biến.',
+            low: 'F2 nằm trong vùng an toàn tương đối, cấu trúc chi phí/doanh thu đang cân bằng.',
+        },
+        f3_vat_structure: {
+            high: 'F3 cao, cấu trúc VAT có dấu hiệu bất thường; cần đối soát VAT đầu vào/đầu ra theo kỳ.',
+            medium: 'F3 tăng nhẹ, cần theo dõi biến động VAT và đối chiếu với chu kỳ kinh doanh.',
+            low: 'F3 ổn định, cấu trúc VAT gần với nền lịch sử thông thường.',
+        },
+        f4_peer_comparison: {
+            high: 'F4 lệch xa nhóm đồng ngành, cần so sánh thêm biên lợi nhuận và hiệu suất hoạt động.',
+            medium: 'F4 có độ lệch trung bình so với nhóm ngành, nên tiếp tục giám sát để phát hiện xu hướng.',
+            low: 'F4 gần nhóm đồng ngành, không có lệch chuẩn lớn tại thời điểm hiện tại.',
+        },
+    };
+
+    const featureNarrative = narratives[featureKey] || narratives.risk_score;
+    return featureNarrative[levelCode] || featureNarrative.low;
+}
+
+
+function renderSingleFeaturePercentileBullet(singleData) {
+    const container = document.getElementById('chart-single-feature-percentile');
+    if (!container) return false;
+
+    const metrics = buildSingleFeaturePercentileMetrics(singleData || {});
+    if (!metrics.length) {
+        renderSingleTrendChartMessage(container, 'Chưa đủ dữ liệu lịch sử để tính percentile bullet cho Risk/F1-F4.');
+        return false;
+    }
+
+    const categories = metrics.map((m) => m.label);
+    const lowBand = categories.map(() => 40);
+    const mediumBand = categories.map(() => 35);
+    const highBand = categories.map(() => 25);
+    const currentPercentiles = metrics.map((m) => Number(m.percentile || 0));
+    const benchmarkData = metrics.map((m) => [Number(m.benchmarkPercentile || 50), m.label]);
+
+    const chart = safeInitChart(container);
+    chart.setOption({
+        animationDuration: MOTION_DURATION_CHART,
+        animationEasing: 'cubicOut',
+        tooltip: {
+            trigger: 'item',
+            formatter: (params) => {
+                const idx = Number(params.dataIndex || 0);
+                const metric = metrics[idx];
+                if (!metric) return '';
+
+                const riskTier = classifyPercentileLevel(metric.percentile);
+                const narrative = getFeaturePercentileNarrative(metric.key, riskTier.code);
+
+                return `<b>${metric.label}</b><br>`
+                    + `Percentile hiện tại: <b>${Number(metric.percentile).toFixed(1)}%</b><br>`
+                    + `Mốc tham chiếu: <b>P${Number(metric.benchmarkPercentile).toFixed(1)}</b><br>`
+                    + `Giá trị hiện tại: <b>${metric.currentDisplay}</b><br>`
+                    + `Ngưỡng an toàn: <b>${metric.benchmarkDisplay}</b><br>`
+                    + `Mức cảnh báo: <b style="color:${riskTier.color}">${riskTier.label}</b><br>`
+                    + `<span style="color:#475569">${escapeHtml(narrative)}</span>`;
+            },
+        },
+        legend: {
+            data: ['Percentile hiện tại', 'Mốc tham chiếu'],
+            bottom: 0,
+            textStyle: { fontSize: 9 },
+        },
+        grid: { left: '18%', right: '8%', top: '8%', bottom: '20%' },
+        xAxis: {
+            type: 'value',
+            min: 0,
+            max: 100,
+            axisLabel: { formatter: '{value}%', fontSize: 9 },
+            splitLine: { lineStyle: { type: 'dashed', opacity: 0.3 } },
+        },
+        yAxis: {
+            type: 'category',
+            data: categories,
+            inverse: true,
+            axisLabel: { fontSize: 10, fontWeight: 700 },
+        },
+        series: [
+            {
+                name: 'Band low',
+                type: 'bar',
+                stack: 'band',
+                data: lowBand,
+                barWidth: 14,
+                itemStyle: { color: 'rgba(22,163,74,0.16)' },
+                silent: true,
+                emphasis: { disabled: true },
+                tooltip: { show: false },
+            },
+            {
+                name: 'Band medium',
+                type: 'bar',
+                stack: 'band',
+                data: mediumBand,
+                barWidth: 14,
+                itemStyle: { color: 'rgba(234,179,8,0.22)' },
+                silent: true,
+                emphasis: { disabled: true },
+                tooltip: { show: false },
+            },
+            {
+                name: 'Band high',
+                type: 'bar',
+                stack: 'band',
+                data: highBand,
+                barWidth: 14,
+                itemStyle: { color: 'rgba(220,38,38,0.22)' },
+                silent: true,
+                emphasis: { disabled: true },
+                tooltip: { show: false },
+            },
+            {
+                name: 'Percentile hien tai',
+                type: 'bar',
+                data: currentPercentiles,
+                barWidth: 8,
+                barGap: '-75%',
+                itemStyle: { color: '#002147', borderRadius: [0, 5, 5, 0] },
+                z: 10,
+            },
+            {
+                name: 'Moc tham chieu',
+                type: 'scatter',
+                data: benchmarkData,
+                symbol: 'diamond',
+                symbolSize: 12,
+                itemStyle: { color: '#1d4ed8', borderColor: '#fff', borderWidth: 1.5 },
+                z: 20,
+            },
+        ],
+    });
+
+    return true;
+}
+
+
+function clampNumber(value, min, max) {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric)) return min;
+    return Math.max(min, Math.min(max, numeric));
+}
+
+
+function classifyRiskTierFromScore(score) {
+    const numeric = Number(score);
+    if (!Number.isFinite(numeric)) return { key: 'unknown', label: 'Không rõ' };
+    if (numeric >= 80) return { key: 'critical', label: 'Rất cao' };
+    if (numeric >= 60) return { key: 'high', label: 'Cao' };
+    if (numeric >= 40) return { key: 'medium', label: 'Trung bình' };
+    return { key: 'low', label: 'Thấp' };
+}
+
+
+function getSensitivityNarrative(riskTierKey, deltaRisk) {
+    const delta = Number(deltaRisk || 0);
+    if (riskTierKey === 'critical' || delta >= 12) {
+        return 'Kịch bản stress cao: cần ưu tiên thanh tra và đối soát nhanh các khoản mục phát sinh đột biến.';
+    }
+    if (riskTierKey === 'high' || delta >= 5) {
+        return 'Kịch bản cảnh báo cao: nên mở rộng theo dõi, kiểm tra hóa đơn đầu vào và biến động VAT.';
+    }
+    if (riskTierKey === 'medium' || delta >= 1) {
+        return 'Kịch bản trung bình: tiếp tục giám sát kỳ tiếp theo và đối chiếu với ngưỡng ngành.';
+    }
+    return 'Kịch bản ổn định: biến động hiện tại chưa cho thấy áp lực rủi ro lớn trên điểm tổng hợp.';
+}
+
+
+function buildLocalSensitivityHeatmapData(singleData) {
+    const revenueAdjustments = [...WHATIF_HEATMAP_DEFAULT_REVENUE_STEPS];
+    const expenseAdjustments = [...WHATIF_HEATMAP_DEFAULT_EXPENSE_STEPS];
+
+    const currentRisk = clampNumber(singleData && singleData.risk_score, 0, 100);
+    const f1 = Math.abs(Number(singleData && singleData.f1_divergence || 0));
+    const f2 = Math.max(0, Number(singleData && singleData.f2_ratio_limit || 0));
+    const f3 = Math.max(0, Number(singleData && singleData.f3_vat_structure || 0));
+    const f4 = Math.abs(Number(singleData && singleData.f4_peer_comparison || 0));
+
+    const f1Norm = clampNumber(f1 / 1.0, 0, 1);
+    const f2Norm = clampNumber(f2 / 1.2, 0, 1);
+    const f3Norm = clampNumber(f3 / 1.1, 0, 1);
+    const f4Norm = clampNumber(f4 / 0.2, 0, 1);
+
+    const baseSensitivity = 0.55 + (f2Norm * 0.20) + (f3Norm * 0.15) + (f1Norm * 0.10) + (f4Norm * 0.08);
+    const interactionGain = 0.04 + (f2Norm * 0.03) + (f3Norm * 0.03);
+
+    const values = [];
+    for (let yIdx = 0; yIdx < expenseAdjustments.length; yIdx += 1) {
+        const expAdj = expenseAdjustments[yIdx];
+        for (let xIdx = 0; xIdx < revenueAdjustments.length; xIdx += 1) {
+            const revAdj = revenueAdjustments[xIdx];
+
+            const revenueEffect = (-revAdj) * (0.24 + (f1Norm * 0.05));
+            const expenseEffect = expAdj * (0.27 + (f2Norm * 0.06) + (f3Norm * 0.05));
+            const interactionEffect = (expAdj - revAdj) * interactionGain;
+
+            const deltaRisk = (revenueEffect + expenseEffect + interactionEffect) * baseSensitivity;
+            const projectedRisk = clampNumber(currentRisk + deltaRisk, 0, 100);
+
+            values.push([
+                xIdx,
+                yIdx,
+                Number(projectedRisk.toFixed(2)),
+                Number(deltaRisk.toFixed(2)),
+            ]);
+        }
+    }
+
+    return {
+        source: 'local_fallback',
+        revenueAdjustments,
+        expenseAdjustments,
+        currentRisk,
+        values,
+    };
+}
+
+
+function normalizeWhatIfHeatmapSteps(rawSteps, fallbackSteps) {
+    const source = Array.isArray(rawSteps) ? rawSteps : fallbackSteps;
+    return source
+        .map((v) => Number(v))
+        .filter((v) => Number.isFinite(v));
+}
+
+
+function normalizeWhatIfHeatmapValues(rawValues, revenueAdjustments, expenseAdjustments) {
+    if (!Array.isArray(rawValues)) return [];
+
+    const xMax = Math.max(0, revenueAdjustments.length - 1);
+    const yMax = Math.max(0, expenseAdjustments.length - 1);
+
+    return rawValues
+        .map((row) => {
+            if (!Array.isArray(row) || row.length < 4) return null;
+
+            const xIndex = Number(row[0]);
+            const yIndex = Number(row[1]);
+            const simulatedRisk = Number(row[2]);
+            const deltaRisk = Number(row[3]);
+
+            if (!Number.isFinite(xIndex) || !Number.isFinite(yIndex)) return null;
+            if (!Number.isFinite(simulatedRisk) || !Number.isFinite(deltaRisk)) return null;
+
+            const x = Math.trunc(xIndex);
+            const y = Math.trunc(yIndex);
+            if (x < 0 || y < 0 || x > xMax || y > yMax) return null;
+
+            return [
+                x,
+                y,
+                clampNumber(simulatedRisk, 0, 100),
+                deltaRisk,
+            ];
+        })
+        .filter(Boolean);
+}
+
+
+function getSingleHeatmapCacheKey(singleData) {
+    const taxCode = String(singleData && singleData.tax_code || window._whatifTaxCode || '').trim();
+    const riskScore = Number(singleData && singleData.risk_score || window._whatifOriginalScore || 0);
+    return `${taxCode}|${Number.isFinite(riskScore) ? riskScore.toFixed(2) : '0.00'}`;
+}
+
+
+async function fetchSingleSensitivityHeatmapData(singleData) {
+    const taxCode = String(singleData && singleData.tax_code || window._whatifTaxCode || '').trim();
+    if (!taxCode) {
+        throw new Error('Không có MST để tải sensitivity heatmap.');
+    }
+
+    const cacheKey = getSingleHeatmapCacheKey(singleData || {});
+    if (_singleSensitivityHeatmapCache.has(cacheKey)) {
+        return _singleSensitivityHeatmapCache.get(cacheKey);
+    }
+
+    const response = await secureFetch(`${API_BASE}/ai/what-if-grid/${encodeURIComponent(taxCode)}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            revenue_steps: WHATIF_HEATMAP_DEFAULT_REVENUE_STEPS,
+            expense_steps: WHATIF_HEATMAP_DEFAULT_EXPENSE_STEPS,
+        }),
+    });
+
+    if (!response.ok) {
+        let detail = 'Không thể tải dữ liệu sensitivity từ backend.';
+        try {
+            const err = await response.json();
+            detail = err && err.detail ? String(err.detail) : detail;
+        } catch {
+            // ignore JSON parse failure
+        }
+        throw new Error(detail);
+    }
+
+    const payload = await response.json();
+    const revenueAdjustments = normalizeWhatIfHeatmapSteps(
+        payload && payload.revenue_steps,
+        WHATIF_HEATMAP_DEFAULT_REVENUE_STEPS,
+    );
+    const expenseAdjustments = normalizeWhatIfHeatmapSteps(
+        payload && payload.expense_steps,
+        WHATIF_HEATMAP_DEFAULT_EXPENSE_STEPS,
+    );
+    const values = normalizeWhatIfHeatmapValues(
+        payload && payload.values,
+        revenueAdjustments,
+        expenseAdjustments,
+    );
+
+    const originalRiskFromApi = Number(payload && payload.original_risk_score);
+    const fallbackRisk = Number(singleData && singleData.risk_score);
+    const currentRisk = Number.isFinite(originalRiskFromApi)
+        ? clampNumber(originalRiskFromApi, 0, 100)
+        : clampNumber(fallbackRisk, 0, 100);
+
+    if (!revenueAdjustments.length || !expenseAdjustments.length || !values.length) {
+        throw new Error('Payload sensitivity từ backend không đầy đủ.');
+    }
+
+    const normalized = {
+        source: 'what_if_backend',
+        revenueAdjustments,
+        expenseAdjustments,
+        currentRisk,
+        values,
+    };
+    _singleSensitivityHeatmapCache.set(cacheKey, normalized);
+    return normalized;
+}
+
+
+function snapToSliderValue(rawValue, sliderEl) {
+    const value = Number(rawValue);
+    const minValue = Number(sliderEl && sliderEl.min);
+    const maxValue = Number(sliderEl && sliderEl.max);
+    const stepValue = Number(sliderEl && sliderEl.step);
+
+    const safeMin = Number.isFinite(minValue) ? minValue : -80;
+    const safeMax = Number.isFinite(maxValue) ? maxValue : 250;
+    const safeStep = Number.isFinite(stepValue) && stepValue > 0 ? stepValue : 1;
+
+    const clamped = clampNumber(value, safeMin, safeMax);
+    return Math.round(clamped / safeStep) * safeStep;
+}
+
+
+function applyHeatmapScenarioToWhatIfSliders(revenuePct, expensePct) {
+    const revenueSlider = document.getElementById('whatif-revenue');
+    const expenseSlider = document.getElementById('whatif-expenses');
+    if (!revenueSlider || !expenseSlider) return;
+
+    const revenueValue = snapToSliderValue(revenuePct, revenueSlider);
+    const expenseValue = snapToSliderValue(expensePct, expenseSlider);
+
+    revenueSlider.value = String(revenueValue);
+    expenseSlider.value = String(expenseValue);
+
+    const whatifBox = document.getElementById('whatif-sandbox');
+    if (whatifBox && whatifBox.style.display === 'none') {
+        whatifBox.style.display = 'block';
+    }
+
+    onWhatIfChange();
+    showToast(
+        'Đã áp dụng kịch bản heatmap',
+        `Cập nhật slider: Doanh thu ${revenueValue > 0 ? '+' : ''}${revenueValue}% | Chi phí ${expenseValue > 0 ? '+' : ''}${expenseValue}%`,
+        'info',
+        2200,
+    );
+}
+
+
+function renderSingleSensitivityHeatmapChart(container, heatmapData) {
+    if (!container) return false;
+
+    const xLabels = heatmapData.revenueAdjustments.map((v) => `DT ${v > 0 ? '+' : ''}${v}%`);
+    const yLabels = heatmapData.expenseAdjustments.map((v) => `CP ${v > 0 ? '+' : ''}${v}%`);
+    const baseX = heatmapData.revenueAdjustments.indexOf(0);
+    const baseY = heatmapData.expenseAdjustments.indexOf(0);
+    const sourceLabel = heatmapData.source === 'what_if_backend' ? 'What-If Backend' : 'Local Fallback';
+
+    const chart = safeInitChart(container);
+    chart.setOption({
+        animationDuration: MOTION_DURATION_CHART,
+        animationEasing: 'cubicOut',
+        tooltip: {
+            formatter: (params) => {
+                const payload = params.data || [];
+                const xIndex = Number(payload[0] || 0);
+                const yIndex = Number(payload[1] || 0);
+                const projectedRisk = Number(payload[2] || 0);
+                const deltaRisk = Number(payload[3] || 0);
+                const tier = classifyRiskTierFromScore(projectedRisk);
+                const narrative = getSensitivityNarrative(tier.key, deltaRisk);
+
+                const revAdj = heatmapData.revenueAdjustments[xIndex] || 0;
+                const expAdj = heatmapData.expenseAdjustments[yIndex] || 0;
+                const deltaSign = deltaRisk > 0 ? '+' : '';
+
+                return `<b>Kịch bản mô phỏng</b><br>`
+                    + `Doanh thu: <b>${revAdj > 0 ? '+' : ''}${revAdj}%</b><br>`
+                    + `Chi phí: <b>${expAdj > 0 ? '+' : ''}${expAdj}%</b><br>`
+                    + `Risk ước tính: <b>${projectedRisk.toFixed(1)}</b><br>`
+                    + `Delta Risk: <b>${deltaSign}${deltaRisk.toFixed(1)}</b><br>`
+                    + `Mức cảnh báo: <b>${tier.label}</b><br>`
+                    + `Nguồn: <b>${sourceLabel}</b><br>`
+                    + `<span style="color:#475569">${escapeHtml(narrative)}</span>`;
+            },
+        },
+        grid: { left: '13%', right: '16%', top: '8%', bottom: '12%' },
+        xAxis: {
+            type: 'category',
+            data: xLabels,
+            splitArea: { show: true },
+            axisLabel: { fontSize: 9, interval: 0 },
+        },
+        yAxis: {
+            type: 'category',
+            data: yLabels,
+            splitArea: { show: true },
+            axisLabel: { fontSize: 9, interval: 0 },
+        },
+        visualMap: {
+            min: 0,
+            max: 100,
+            calculable: true,
+            orient: 'vertical',
+            right: 0,
+            top: 'middle',
+            text: ['Risk cao', 'Risk thấp'],
+            inRange: {
+                color: ['#dcfce7', '#bbf7d0', '#fde68a', '#fdba74', '#f87171', '#b91c1c'],
+            },
+            textStyle: { fontSize: 9 },
+        },
+        series: [
+            {
+                name: 'Sensitivity',
+                type: 'heatmap',
+                data: heatmapData.values,
+                label: {
+                    show: true,
+                    fontSize: 8,
+                    formatter: (params) => Number(params.data[2] || 0).toFixed(0),
+                },
+                emphasis: {
+                    itemStyle: {
+                        shadowBlur: 10,
+                        shadowColor: 'rgba(0, 0, 0, 0.35)',
+                    },
+                },
+            },
+            {
+                name: 'Hien tai',
+                type: 'scatter',
+                data: [[baseX, baseY, heatmapData.currentRisk]],
+                symbol: 'pin',
+                symbolSize: 22,
+                itemStyle: {
+                    color: '#002147',
+                    borderColor: '#ffffff',
+                    borderWidth: 1.5,
+                },
+                label: {
+                    show: true,
+                    formatter: 'Now',
+                    color: '#ffffff',
+                    fontSize: 8,
+                    position: 'inside',
+                },
+                z: 30,
+                tooltip: {
+                    formatter: () => `Trang thai hien tai\nRisk: ${heatmapData.currentRisk.toFixed(1)}`,
+                },
+            },
+        ],
+    });
+
+    chart.off('click');
+    chart.on('click', (params) => {
+        if (!params || params.seriesName !== 'Sensitivity' || !Array.isArray(params.data)) return;
+
+        const xIndex = Math.trunc(Number(params.data[0]));
+        const yIndex = Math.trunc(Number(params.data[1]));
+        const revenuePct = Number(heatmapData.revenueAdjustments[xIndex]);
+        const expensePct = Number(heatmapData.expenseAdjustments[yIndex]);
+
+        if (!Number.isFinite(revenuePct) || !Number.isFinite(expensePct)) return;
+        applyHeatmapScenarioToWhatIfSliders(revenuePct, expensePct);
+    });
+
+    return true;
+}
+
+
+function renderSingleSensitivityHeatmap(singleData) {
+    const container = document.getElementById('chart-single-sensitivity-heatmap');
+    if (!container) return false;
+
+    const currentRisk = Number(singleData && singleData.risk_score);
+    if (!Number.isFinite(currentRisk)) {
+        renderSingleTrendChartMessage(container, 'Không có điểm rủi ro hiện tại để tạo sensitivity heatmap.');
+        return false;
+    }
+
+    const requestToken = ++_singleSensitivityHeatmapRequestToken;
+    renderSingleTrendChartMessage(container, 'Đang tải sensitivity heatmap từ backend What-If...');
+
+    fetchSingleSensitivityHeatmapData(singleData || {})
+        .then((heatmapData) => {
+            if (requestToken !== _singleSensitivityHeatmapRequestToken) return;
+            renderSingleSensitivityHeatmapChart(container, heatmapData);
+        })
+        .catch((error) => {
+            if (requestToken !== _singleSensitivityHeatmapRequestToken) return;
+
+            console.warn('[SensitivityHeatmap] Backend grid failed, fallback local simulation:', error);
+            const fallbackData = buildLocalSensitivityHeatmapData(singleData || {});
+            renderSingleSensitivityHeatmapChart(container, fallbackData);
+        });
+
+    return true;
+}
+
+
+// ---- COHORT RISK PROGRESSION (Sankey) ----
+function renderCohortRiskFunnel(sankeyData) {
+    const container = document.getElementById('chart-cohort-funnel');
+    if (!container) return;
+
+    const nodes = Array.isArray(sankeyData.nodes) ? sankeyData.nodes : [];
+    const links = Array.isArray(sankeyData.links) ? sankeyData.links : [];
+
+    if (!nodes.length || !links.length) {
+        renderSingleTrendChartMessage(container, 'Chưa có dữ liệu chuyển dịch nhóm rủi ro giữa các năm.');
+        return;
+    }
+
+    const chart = safeInitChart(container);
+    const tierLabel = {
+        low: 'An toàn',
+        medium: 'Trung bình',
+        high: 'Rủi ro cao',
+        critical: 'Rất cao',
+    };
+    const tierColor = {
+        low: '#16a34a',
+        medium: '#eab308',
+        high: '#ea580c',
+        critical: '#dc2626',
+    };
+
+    const formattedNodes = nodes.map((node) => {
+        const name = String(node.name || 'unknown');
+        const parts = name.split(':');
+        const year = parts[0] || '-';
+        const tier = parts[1] || 'low';
+        return {
+            name,
+            itemStyle: { color: tierColor[tier] || '#64748b' },
+            label: {
+                formatter: `${year}\n${tierLabel[tier] || tier}`,
+                fontSize: 9,
+                color: '#334155',
+            },
+        };
+    });
+
+    const formattedLinks = links
+        .filter((link) => Number(link.value || 0) > 0)
+        .map((link) => ({
+            source: String(link.source || ''),
+            target: String(link.target || ''),
+            value: Number(link.value || 0),
+        }));
+
+    chart.setOption({
+        animationDuration: MOTION_DURATION_CHART,
+        tooltip: {
+            trigger: 'item',
+            formatter: (params) => {
+                if (params.dataType === 'edge') {
+                    return `${params.data.source} -> ${params.data.target}<br><b>${params.data.value.toLocaleString()} DN</b>`;
+                }
+                return `${params.name}`;
+            },
+        },
+        series: [
+            {
+                type: 'sankey',
+                data: formattedNodes,
+                links: formattedLinks,
+                nodeWidth: 18,
+                nodeGap: 14,
+                orient: 'horizontal',
+                lineStyle: {
+                    color: 'source',
+                    curveness: 0.45,
+                    opacity: 0.45,
+                },
+                emphasis: {
+                    focus: 'adjacency',
+                },
+            },
+        ],
+    });
+}
+
+
+// ---- VAT ANOMALY HEATMAP (Industry x Year) ----
+function renderVatAnomalyHeatmap(heatmapData) {
+    const container = document.getElementById('chart-vat-heatmap');
+    if (!container) return;
+
+    const years = Array.isArray(heatmapData.years) ? heatmapData.years : [];
+    const industries = Array.isArray(heatmapData.industries) ? heatmapData.industries : [];
+    const values = Array.isArray(heatmapData.values) ? heatmapData.values : [];
+    const counts = Array.isArray(heatmapData.counts) ? heatmapData.counts : [];
+
+    if (!years.length || !industries.length || !values.length) {
+        renderSingleTrendChartMessage(container, 'Chưa có dữ liệu F3 VAT anomaly theo ngành-năm.');
+        return;
+    }
+
+    const chart = safeInitChart(container);
+    const countsMap = new Map();
+    counts.forEach((cell) => {
+        if (!Array.isArray(cell) || cell.length < 4) return;
+        countsMap.set(`${cell[0]}-${cell[1]}`, { anomaly: cell[2], total: cell[3] });
+    });
+
+    const maxRate = Math.max(10, ...values.map((v) => Number(v[2] || 0)));
+
+    chart.setOption({
+        animationDuration: MOTION_DURATION_CHART,
+        tooltip: {
+            formatter: (params) => {
+                const x = params.data[0];
+                const y = params.data[1];
+                const rate = Number(params.data[2] || 0);
+                const metric = countsMap.get(`${x}-${y}`) || { anomaly: 0, total: 0 };
+                return `<b>${escapeHtml(String(industries[y] || '---'))}</b><br>`
+                    + `Năm: ${escapeHtml(String(years[x] || '---'))}<br>`
+                    + `Tỉ lệ bất thường F3: <b>${rate.toFixed(2)}%</b><br>`
+                    + `Số bản ghi anomaly: <b>${Number(metric.anomaly || 0).toLocaleString()}</b>/<b>${Number(metric.total || 0).toLocaleString()}</b>`;
+            },
+        },
+        grid: { left: '20%', right: '16%', top: '6%', bottom: '10%' },
+        xAxis: {
+            type: 'category',
+            data: years,
+            splitArea: { show: true },
+            axisLabel: { fontSize: 10 },
+        },
+        yAxis: {
+            type: 'category',
+            data: industries,
+            splitArea: { show: true },
+            axisLabel: { fontSize: 9, width: 110, overflow: 'truncate' },
+        },
+        visualMap: {
+            min: 0,
+            max: maxRate,
+            calculable: true,
+            orient: 'vertical',
+            right: 0,
+            top: 'middle',
+            text: ['Cao', 'Thấp'],
+            inRange: {
+                color: ['#ecfeff', '#bae6fd', '#fef08a', '#fdba74', '#f87171', '#b91c1c'],
+            },
+            textStyle: { fontSize: 10 },
+        },
+        series: [
+            {
+                name: 'VAT anomaly rate',
+                type: 'heatmap',
+                data: values,
+                label: {
+                    show: true,
+                    fontSize: 8,
+                    formatter: (params) => `${Number(params.data[2] || 0).toFixed(1)}%`,
+                },
+                emphasis: {
+                    itemStyle: {
+                        shadowBlur: 10,
+                        shadowColor: 'rgba(0, 0, 0, 0.3)',
+                    },
+                },
+            },
+        ],
+    });
+}
+
+
+// ---- CUMULATIVE RISK CURVE (Concentration) ----
+function renderCumulativeRiskCurve(curveData) {
+    const container = document.getElementById('chart-cumulative-risk');
+    if (!container) return;
+
+    const points = Array.isArray(curveData.points) ? curveData.points : [];
+    if (!points.length) {
+        renderSingleTrendChartMessage(container, 'Chưa có dữ liệu cumulative risk curve.');
+        return;
+    }
+
+    const chart = safeInitChart(container);
+    const seriesData = points.map((p) => [Number(p.percent_companies || 0), Number(p.percent_risk || 0)]);
+    const diagonal = [[0, 0], [100, 100]];
+
+    chart.setOption({
+        animationDuration: MOTION_DURATION_CHART,
+        tooltip: {
+            trigger: 'axis',
+            formatter: (params) => {
+                const point = params[0] && params[0].data ? params[0].data : [0, 0];
+                return `Top <b>${Number(point[0]).toFixed(1)}%</b> DN đang chứa <b>${Number(point[1]).toFixed(1)}%</b> tổng rủi ro`;
+            },
+        },
+        legend: {
+            data: ['Cumulative Risk', 'Đường cân bằng'],
+            bottom: 0,
+            textStyle: { fontSize: 9 },
+        },
+        grid: { left: '12%', right: '6%', top: '8%', bottom: '18%' },
+        xAxis: {
+            type: 'value',
+            min: 0,
+            max: 100,
+            name: '% Doanh nghiệp',
+            axisLabel: { formatter: '{value}%' },
+        },
+        yAxis: {
+            type: 'value',
+            min: 0,
+            max: 100,
+            name: '% Tổng rủi ro',
+            axisLabel: { formatter: '{value}%' },
+        },
+        series: [
+            {
+                name: 'Cumulative Risk',
+                type: 'line',
+                smooth: true,
+                data: seriesData,
+                lineStyle: { width: 3, color: '#dc2626' },
+                itemStyle: { color: '#dc2626' },
+                areaStyle: { color: 'rgba(220,38,38,0.12)' },
+                markPoint: {
+                    symbolSize: 44,
+                    data: [
+                        {
+                            name: 'Top 10%',
+                            coord: [10, Number(curveData.top_10pct_risk_share || 0)],
+                            value: `${Number(curveData.top_10pct_risk_share || 0).toFixed(1)}%`,
+                        },
+                        {
+                            name: 'Top 20%',
+                            coord: [20, Number(curveData.top_20pct_risk_share || 0)],
+                            value: `${Number(curveData.top_20pct_risk_share || 0).toFixed(1)}%`,
+                        },
+                    ],
+                    label: { fontSize: 8, color: '#334155' },
+                },
+            },
+            {
+                name: 'Duong can bang',
+                type: 'line',
+                data: diagonal,
+                lineStyle: { width: 2, color: '#64748b', type: 'dashed' },
+                showSymbol: false,
+                tooltip: { show: false },
+            },
+        ],
+    });
+}
 
 function renderSingleRadarChart(data) {
     const container = document.getElementById('chart-single-radar');
@@ -1139,7 +3420,7 @@ function renderSingleRadarChart(data) {
     ];
 
     chart.setOption({
-        animationDuration: 1500,
+        animationDuration: MOTION_DURATION_CHART,
         animationEasing: 'cubicOut',
         tooltip: {},
         legend: { data: [data.company_name || 'Doanh nghiệp', 'Ngưỡng An toàn'], bottom: 0, textStyle: { fontSize: 9 } },
@@ -1195,7 +3476,7 @@ function renderBoxPlot(boxPlotData) {
     });
 
     chart.setOption({
-        animationDuration: 1500,
+        animationDuration: MOTION_DURATION_CHART,
         animationEasing: 'cubicOut',
         tooltip: {
             trigger: 'item',
@@ -1248,7 +3529,7 @@ function renderGlobalFeatureImportance(featureData) {
     const driverColors = ['#dc2626', '#ea580c', '#eab308', '#002147'];
 
     chart.setOption({
-        animationDuration: 1500,
+        animationDuration: MOTION_DURATION_CHART,
         animationEasing: 'cubicOut',
         tooltip: {
             trigger: 'axis', axisPointer: { type: 'shadow' },
@@ -1296,7 +3577,7 @@ function renderKeyDrivers(keyDrivers) {
     const driverColors = ['#dc2626', '#ea580c', '#eab308', '#002147'];
 
     chart.setOption({
-        animationDuration: 1500,
+        animationDuration: MOTION_DURATION_CHART,
         animationEasing: 'cubicOut',
         tooltip: {
             trigger: 'axis', axisPointer: { type: 'shadow' },
@@ -1356,7 +3637,7 @@ function renderPeerComparison(data) {
     const isBelow = profitMargin < industryAvg;
 
     chart.setOption({
-        animationDuration: 1500,
+        animationDuration: MOTION_DURATION_CHART,
         animationEasing: 'cubicOut',
         tooltip: {
             trigger: 'axis', axisPointer: { type: 'shadow' },
@@ -1533,10 +3814,11 @@ async function runWhatIfSimulation(revPct, expPct) {
         renderWhatIfResult(data);
 
     } catch (error) {
+        const safeMessage = escapeHtml(error?.message || 'Mô phỏng thất bại');
         resultDiv.innerHTML = `
             <div class="flex items-center gap-3">
                 <span class="material-symbols-outlined text-red-400 text-xl">error</span>
-                <p class="text-[10px] text-red-500">${error.message}</p>
+                <p class="text-[10px] text-red-500">${safeMessage}</p>
             </div>`;
     }
 }
@@ -1546,9 +3828,35 @@ function renderWhatIfResult(data) {
     const resultDiv = document.getElementById('whatif-result');
     if (!resultDiv) return;
 
-    const origScore = data.original_risk_score || window._whatifOriginalScore || 0;
-    const simScore = data.simulated_risk_score || 0;
-    const delta = data.delta_risk || (simScore - origScore);
+    const origScore = Number.isFinite(Number(data.original_risk_score))
+        ? Number(data.original_risk_score)
+        : Number(window._whatifOriginalScore || 0);
+    const simScore = Number.isFinite(Number(data.simulated_risk_score))
+        ? Number(data.simulated_risk_score)
+        : 0;
+    const delta = Number.isFinite(Number(data.delta_risk))
+        ? Number(data.delta_risk)
+        : (simScore - origScore);
+
+    const appliedAdjustmentsRaw = (data && typeof data === 'object' && data.applied_adjustments && typeof data.applied_adjustments === 'object')
+        ? data.applied_adjustments
+        : {};
+    const adjustmentLabels = {
+        revenue: 'Doanh thu',
+        total_expenses: 'Tổng chi phí',
+    };
+    const adjustmentChips = Object.entries(appliedAdjustmentsRaw)
+        .map(([field, value]) => {
+            const pct = Number(value);
+            if (!Number.isFinite(pct)) return '';
+            const sign = pct > 0 ? '+' : '';
+            const label = adjustmentLabels[field] || field;
+            const toneClass = pct > 0 ? 'bg-red-50 text-red-600' : pct < 0 ? 'bg-emerald-50 text-emerald-600' : 'bg-slate-100 text-slate-500';
+            return `<span class="px-2 py-1 rounded ${toneClass} text-[9px] font-black uppercase tracking-wider">${escapeHtml(label)} ${sign}${pct.toFixed(0)}%</span>`;
+        })
+        .filter(Boolean)
+        .join('');
+
     const deltaColor = delta > 0 ? 'text-red-600' : delta < 0 ? 'text-emerald-600' : 'text-slate-500';
     const deltaIcon = delta > 0 ? 'trending_up' : delta < 0 ? 'trending_down' : 'trending_flat';
     const deltaSign = delta > 0 ? '+' : '';
@@ -1561,21 +3869,26 @@ function renderWhatIfResult(data) {
     };
 
     resultDiv.innerHTML = `
-        <div class="flex items-center justify-between w-full gap-4">
-            <div class="flex items-center gap-4">
-                <div class="text-center">
-                    <p class="text-[8px] text-slate-400 uppercase tracking-wider mb-1">Gốc</p>
-                    <span class="text-xl font-black" style="color:${getRiskColor(origScore)}">${origScore.toFixed(1)}</span>
+        <div class="flex flex-col gap-3 w-full">
+            <div class="flex items-center justify-between w-full gap-4">
+                <div class="flex items-center gap-4">
+                    <div class="text-center">
+                        <p class="text-[8px] text-slate-400 uppercase tracking-wider mb-1">Gốc</p>
+                        <span class="text-xl font-black" style="color:${getRiskColor(origScore)}">${origScore.toFixed(1)}</span>
+                    </div>
+                    <span class="material-symbols-outlined text-slate-300">arrow_forward</span>
+                    <div class="text-center">
+                        <p class="text-[8px] text-slate-400 uppercase tracking-wider mb-1">Mô phỏng</p>
+                        <span class="text-xl font-black" style="color:${getRiskColor(simScore)}">${simScore.toFixed(1)}</span>
+                    </div>
                 </div>
-                <span class="material-symbols-outlined text-slate-300">arrow_forward</span>
-                <div class="text-center">
-                    <p class="text-[8px] text-slate-400 uppercase tracking-wider mb-1">Mô phỏng</p>
-                    <span class="text-xl font-black" style="color:${getRiskColor(simScore)}">${simScore.toFixed(1)}</span>
+                <div class="flex items-center gap-2 px-3 py-2 rounded-lg ${delta > 0 ? 'bg-red-50' : delta < 0 ? 'bg-emerald-50' : 'bg-slate-50'}">
+                    <span class="material-symbols-outlined ${deltaColor} text-lg">${deltaIcon}</span>
+                    <span class="text-sm font-black ${deltaColor}">${deltaSign}${delta.toFixed(1)}</span>
                 </div>
             </div>
-            <div class="flex items-center gap-2 px-3 py-2 rounded-lg ${delta > 0 ? 'bg-red-50' : delta < 0 ? 'bg-emerald-50' : 'bg-slate-50'}">
-                <span class="material-symbols-outlined ${deltaColor} text-lg">${deltaIcon}</span>
-                <span class="text-sm font-black ${deltaColor}">${deltaSign}${delta.toFixed(1)}</span>
+            <div class="flex flex-wrap items-center gap-1.5">
+                ${adjustmentChips || '<span class="px-2 py-1 rounded bg-slate-100 text-slate-500 text-[9px] font-black uppercase tracking-wider">Không có thay đổi</span>'}
             </div>
         </div>`;
 }
@@ -1780,6 +4093,14 @@ async function exportPDF() {
         // Prepare texts
         const riskTextColor = data.risk_score >= 60 ? '#dc2626' : (data.risk_score >= 40 ? '#ea580c' : '#16a34a');
         const anomalyPercent = ((data.anomaly_score || 0)*100).toFixed(1);
+        const safeCompanyName = escapeHtml(data.company_name || 'Không rõ');
+        const safeTaxCode = escapeHtml(data.tax_code || '---');
+        const safeIndustry = escapeHtml(data.industry || '---');
+        const safeRiskLevel = escapeHtml(getRiskLabel(data.risk_level));
+        const revenueText = Number.isFinite(Number(data.revenue)) ? `${Number(data.revenue).toLocaleString()} tỷ VNĐ` : '---';
+        const expensesText = Number.isFinite(Number(data.total_expenses)) ? `${Number(data.total_expenses).toLocaleString()} tỷ VNĐ` : '---';
+        const riskScoreText = Number.isFinite(Number(data.risk_score)) ? Number(data.risk_score).toFixed(1) : '0.0';
+        const safeAnomalyPercent = escapeHtml(anomalyPercent);
         
         let riskConclusion = 'Doanh nghiệp <b>chưa có dấu hiệu rủi ro rõ ràng</b>, đề xuất đưa vào diện <b>Theo Dõi Định Kỳ</b>.';
         if (data.risk_score >= 80) {
@@ -1791,7 +4112,10 @@ async function exportPDF() {
         }
 
         const flagsHtml = (data.red_flags || []).map(f => {
-            return `<li><b>Phát hiện bất thường về ${f.feature}:</b> ${f.reason} <i>(Chỉ số hiện tại ghi nhận: ${f.actual_value})</i>. Trí Tuệ Nhân Tạo (XGBoost) đánh giá đây là mắt xích trọng yếu có khả năng liên đới tới hành vi trục lợi thuế.</li>`;
+            const feature = escapeHtml(f?.feature || 'Đặc trưng chưa xác định');
+            const reason = escapeHtml(f?.reason || 'Không có mô tả');
+            const actualValue = escapeHtml(f?.actual_value || '---');
+            return `<li><b>Phát hiện bất thường về ${feature}:</b> ${reason} <i>(Chỉ số hiện tại ghi nhận: ${actualValue})</i>. Trí Tuệ Nhân Tạo (XGBoost) đánh giá đây là mắt xích trọng yếu có khả năng liên đới tới hành vi trục lợi thuế.</li>`;
         }).join('');
 
         const today = new Date();
@@ -1825,16 +4149,16 @@ async function exportPDF() {
                 </div>
 
                 <div style="margin-left: 30px; margin-bottom: 15px;">
-                    - Ký danh: <b>${data.company_name || 'Không rõ'}</b><br>
-                    - Mã số doanh nghiệp (MST): <b>${data.tax_code || '---'}</b><br>
-                    - Ngành nghề kê khai: ${data.industry || '---'}<br>
-                    - Quy mô doanh thu/năm: ${data.revenue ? data.revenue.toLocaleString() + ' tỷ VNĐ' : '---'}<br>
-                    - Thống kê chi phí vận hành: ${data.total_expenses ? data.total_expenses.toLocaleString() + ' tỷ VNĐ' : '---'}
+                    - Ký danh: <b>${safeCompanyName}</b><br>
+                    - Mã số doanh nghiệp (MST): <b>${safeTaxCode}</b><br>
+                    - Ngành nghề kê khai: ${safeIndustry}<br>
+                    - Quy mô doanh thu/năm: ${escapeHtml(revenueText)}<br>
+                    - Thống kê chi phí vận hành: ${escapeHtml(expensesText)}
                 </div>
 
                 <div style="text-align: justify; text-indent: 30px; margin-bottom: 15px;">
-                    Căn cứ vào việc đối soát chuỗi chỉ số cơ bản của đối tượng với hàng nghìn thực thể khác trên cùng hệ sinh thái ngành, hệ thống đặc biệt đưa ra xếp loại rủi ro <b>${getRiskLabel(data.risk_level)}</b> (điểm tổng hợp: <b>${data.risk_score} / 100</b>). 
-                    Đồng thời, cấu trúc tài chính phát sinh mức phân tán <b>${anomalyPercent}%</b> so với biên độ an toàn cho phép. 
+                    Căn cứ vào việc đối soát chuỗi chỉ số cơ bản của đối tượng với hàng nghìn thực thể khác trên cùng hệ sinh thái ngành, hệ thống đặc biệt đưa ra xếp loại rủi ro <b>${safeRiskLevel}</b> (điểm tổng hợp: <b>${riskScoreText} / 100</b>). 
+                    Đồng thời, cấu trúc tài chính phát sinh mức phân tán <b>${safeAnomalyPercent}%</b> so với biên độ an toàn cho phép. 
                 </div>
 
                 <div style="text-align: justify; text-indent: 30px; margin-bottom: 10px;">
@@ -1891,8 +4215,7 @@ async function exportPDF() {
         `;
         
         paper.innerHTML = htmlTemplate;
-        modal.classList.add('active');
-        document.body.style.overflow = 'hidden'; // prevent background scrolling
+        openReportModal(modal);
 
     } catch (e) {
         console.error("Lỗi xuất PDF", e);
@@ -1903,10 +4226,183 @@ async function exportPDF() {
     }
 }
 
+function trapModalFocus(event, modal) {
+    const focusable = modal.querySelectorAll(
+        'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+    );
+    if (!focusable.length) return;
+
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+
+    if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+    }
+}
+
+function openReportModal(modal) {
+    if (!modal) return;
+    _modalLastFocusedElement = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    modal.classList.add('active');
+    modal.setAttribute('aria-hidden', 'false');
+    document.body.style.overflow = 'hidden';
+
+    const closeBtn = document.getElementById('report-modal-close-btn');
+    if (closeBtn) closeBtn.focus();
+
+    _modalKeydownListener = (event) => {
+        if (event.key === 'Escape') {
+            event.preventDefault();
+            closeReportModal();
+            return;
+        }
+        if (event.key === 'Tab') {
+            trapModalFocus(event, modal);
+        }
+    };
+    document.addEventListener('keydown', _modalKeydownListener);
+}
+
 function closeReportModal() {
     const modal = document.getElementById('report-preview-modal');
     if (modal) {
         modal.classList.remove('active');
+        modal.setAttribute('aria-hidden', 'true');
         document.body.style.overflow = '';
+        if (_modalKeydownListener) {
+            document.removeEventListener('keydown', _modalKeydownListener);
+            _modalKeydownListener = null;
+        }
+        if (_modalLastFocusedElement) {
+            _modalLastFocusedElement.focus();
+            _modalLastFocusedElement = null;
+        }
     }
 }
+
+
+function initFraudPageEventBindings() {
+    if (_fraudPageBindingsInitialized) return;
+    _fraudPageBindingsInitialized = true;
+
+    const tabSingleBtn = document.getElementById('tab-single-btn');
+    if (tabSingleBtn) {
+        tabSingleBtn.addEventListener('click', () => switchTab('single'));
+    }
+
+    const tabDirectoryBtn = document.getElementById('tab-directory-btn');
+    if (tabDirectoryBtn) {
+        tabDirectoryBtn.addEventListener('click', () => switchTab('directory'));
+    }
+
+    const tabBatchBtn = document.getElementById('tab-batch-btn');
+    if (tabBatchBtn) {
+        tabBatchBtn.addEventListener('click', () => switchTab('batch'));
+    }
+
+    const fraudBtn = document.getElementById('fraud-btn');
+    if (fraudBtn) {
+        fraudBtn.addEventListener('click', () => checkFraudRisk());
+    }
+
+    const fraudInput = document.getElementById('fraud-mst');
+    if (fraudInput) {
+        fraudInput.addEventListener('keydown', (event) => {
+            if (event.key === 'Enter') {
+                event.preventDefault();
+                checkFraudRisk();
+            }
+        });
+    }
+
+    const whatIfResetBtn = document.getElementById('whatif-reset-btn');
+    if (whatIfResetBtn) {
+        whatIfResetBtn.addEventListener('click', () => resetWhatIf());
+    }
+
+    const whatIfRevenue = document.getElementById('whatif-revenue');
+    if (whatIfRevenue) {
+        whatIfRevenue.addEventListener('input', () => onWhatIfChange());
+    }
+
+    const whatIfExpenses = document.getElementById('whatif-expenses');
+    if (whatIfExpenses) {
+        whatIfExpenses.addEventListener('input', () => onWhatIfChange());
+    }
+
+    const exportBtn = document.getElementById('btn-export-pdf');
+    if (exportBtn) {
+        exportBtn.addEventListener('click', () => exportPDF());
+    }
+
+    const actionSendNoticeBtn = document.getElementById('action-send-notice-btn');
+    if (actionSendNoticeBtn) {
+        actionSendNoticeBtn.addEventListener('click', () => actionSendNotice());
+    }
+
+    const actionCreateReportBtn = document.getElementById('action-create-report-btn');
+    if (actionCreateReportBtn) {
+        actionCreateReportBtn.addEventListener('click', () => actionCreateReport());
+    }
+
+    const uploadZone = document.getElementById('batch-upload-zone');
+    const csvInput = document.getElementById('csv-file-input');
+    if (uploadZone) {
+        uploadZone.addEventListener('dragover', handleDragOver);
+        uploadZone.addEventListener('dragleave', handleDragLeave);
+        uploadZone.addEventListener('drop', handleDrop);
+        uploadZone.addEventListener('click', () => {
+            if (csvInput) csvInput.click();
+        });
+        uploadZone.addEventListener('keydown', (event) => {
+            if (event.key === 'Enter' || event.key === ' ') {
+                event.preventDefault();
+                if (csvInput) csvInput.click();
+            }
+        });
+    }
+
+    if (csvInput) {
+        csvInput.addEventListener('change', handleFileSelect);
+    }
+
+    const tableSearch = document.getElementById('table-search');
+    if (tableSearch) {
+        tableSearch.addEventListener('input', () => filterAndPaginate());
+    }
+
+    const tableIndustryFilter = document.getElementById('table-industry-filter');
+    if (tableIndustryFilter) {
+        tableIndustryFilter.addEventListener('change', () => filterAndPaginate());
+    }
+
+    document.querySelectorAll('th[data-sort-key]').forEach((header) => {
+        const sortKey = header.getAttribute('data-sort-key');
+        if (!sortKey) return;
+        header.addEventListener('click', () => sortTable(sortKey));
+        header.addEventListener('keydown', (event) => {
+            if (event.key === 'Enter' || event.key === ' ') {
+                event.preventDefault();
+                sortTable(sortKey);
+            }
+        });
+    });
+
+    const modalCloseBtn = document.getElementById('report-modal-close-btn');
+    if (modalCloseBtn) {
+        modalCloseBtn.addEventListener('click', () => closeReportModal());
+    }
+
+    const modalPrintBtn = document.getElementById('report-modal-print-btn');
+    if (modalPrintBtn) {
+        modalPrintBtn.addEventListener('click', () => window.print());
+    }
+}
+
+
+// Initialize single-query extras on first page load.
+initFraudPageEventBindings();

@@ -137,6 +137,7 @@ class AIRiskAssessment(Base):
     anomaly_score = Column(Float, nullable=True)
     risk_score = Column(Float, nullable=False, default=0.0, index=True)
     risk_level = Column(String(20), default="low")
+    model_version = Column(String(80), nullable=True, index=True)
     model_confidence = Column(Float, nullable=True)  # Real confidence from pipeline: max(prob, 1-prob)*100
     red_flags = Column(JSON, nullable=True)
     shap_explanation = Column(JSON, nullable=True)
