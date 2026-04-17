@@ -417,3 +417,154 @@ class GraphQualityResponse(BaseModel):
     stress: GraphStressQuality
     drift: GraphDriftQuality
 
+
+# ════════════════════════════════════════════════════════════════
+#  NEW: Flagship Model Schemas (Phase 0 API contract expansion)
+# ════════════════════════════════════════════════════════════════
+
+# --- Enhanced Delinquency Prediction (replaces mock) ---
+class DelinquencyTopReason(BaseModel):
+    reason: str
+    weight: float = 0.0
+
+class DelinquencyPredictionItem(BaseModel):
+    """Single company delinquency prediction – replaces old mock DelinquencyPrediction."""
+    tax_code: str
+    company_name: str = ""
+    probability: float = 0.0        # Overall delinquency probability (backward-compat)
+    prob_30d: float = 0.0           # P(overdue within 30 days)
+    prob_60d: float = 0.0           # P(overdue within 60 days)
+    prob_90d: float = 0.0           # P(overdue within 90 days)
+    cluster: str = ""               # Risk cluster label
+    top_reasons: List[DelinquencyTopReason] = Field(default_factory=list)
+    model_version: Optional[str] = None
+    model_confidence: Optional[float] = None
+    prediction_date: Optional[str] = None
+    score_source: Literal["ml_model", "statistical_baseline", "no_data", "inference_error"] = "statistical_baseline"
+    prediction_age_days: Optional[int] = None
+    freshness: Literal["fresh", "aging", "stale", "unknown"] = "unknown"
+    monotonic_adjusted: bool = False
+    payment_history_summary: Optional[Dict[str, Any]] = None
+
+class DelinquencyListResponse(BaseModel):
+    total: int = 0
+    page: int = 1
+    page_size: int = 20
+    predictions: List[DelinquencyPredictionItem] = Field(default_factory=list)
+    model_info: Optional[Dict[str, Any]] = None
+
+
+class DelinquencyBatchPredictRequest(BaseModel):
+    tax_codes: Optional[List[str]] = None
+    limit: int = Field(default=200, ge=1, le=2000)
+    refresh_existing: bool = False
+
+
+class DelinquencyBatchPredictItem(BaseModel):
+    tax_code: str
+    status: Literal["created", "updated", "skipped", "failed"]
+    score_source: Literal["ml_model", "statistical_baseline", "no_data", "inference_error"]
+    prob_90d: Optional[float] = None
+    model_version: Optional[str] = None
+    message: Optional[str] = None
+
+
+class DelinquencyBatchPredictResponse(BaseModel):
+    total_candidates: int = 0
+    processed: int = 0
+    created: int = 0
+    updated: int = 0
+    skipped: int = 0
+    failed: int = 0
+    items: List[DelinquencyBatchPredictItem] = Field(default_factory=list)
+
+
+# --- Enhanced Fraud Risk Scoring (replaces mock) ---
+class FraudRiskPredictionEnhanced(BaseModel):
+    """Enhanced single-company scoring – backward compatible with old FraudRiskPrediction."""
+    tax_code: str
+    company_name: str = ""
+    risk_score: float = 0.0
+    risk_level: str = "low"
+    red_flags: List[str] = Field(default_factory=list)
+    model_confidence: Optional[float] = None
+    model_version: Optional[str] = None
+    f1_divergence: Optional[float] = None
+    f2_ratio_limit: Optional[float] = None
+    f3_vat_structure: Optional[float] = None
+    f4_peer_comparison: Optional[float] = None
+    anomaly_score: Optional[float] = None
+    top_features: List[Dict[str, Any]] = Field(default_factory=list)
+
+
+# --- Inspector Labels (ground-truth feedback) ---
+class InspectorLabelCreate(BaseModel):
+    tax_code: str
+    label_type: str = Field(..., description="fraud_confirmed, fraud_rejected, delinquency_confirmed, etc.")
+    confidence: Literal["low", "medium", "high"] = "medium"
+    assessment_id: Optional[int] = None
+    evidence_summary: Optional[str] = None
+    decision: Optional[str] = None
+    decision_date: Optional[date] = None
+    tax_period: Optional[str] = None
+    amount_recovered: Optional[float] = None
+
+class InspectorLabelResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    tax_code: str
+    inspector_id: Optional[int] = None
+    assessment_id: Optional[int] = None
+    label_type: str
+    confidence: str = "medium"
+    evidence_summary: Optional[str] = None
+    decision: Optional[str] = None
+    decision_date: Optional[date] = None
+    tax_period: Optional[str] = None
+    amount_recovered: Optional[float] = None
+    created_at: Optional[datetime] = None
+
+
+# --- Multi-Scenario What-If Comparison (Program C) ---
+class ScenarioDefinition(BaseModel):
+    name: str = "Scenario"
+    adjustments: Dict[str, float] = Field(default_factory=dict)
+
+class ScenarioResult(BaseModel):
+    name: str
+    adjustments: Dict[str, float] = Field(default_factory=dict)
+    simulated_risk_score: float = 0.0
+    risk_level: str = "low"
+    delta_risk: float = 0.0
+    confidence_low: Optional[float] = None
+    confidence_high: Optional[float] = None
+    simulated_features: Dict[str, float] = Field(default_factory=dict)
+    recommended_action: Optional[str] = None
+
+class MultiScenarioRequest(BaseModel):
+    scenarios: List[ScenarioDefinition] = Field(..., min_length=1, max_length=10)
+
+class MultiScenarioResponse(BaseModel):
+    tax_code: str
+    company_name: str = ""
+    baseline_risk_score: float = 0.0
+    baseline_risk_level: str = "low"
+    scenarios: List[ScenarioResult] = Field(default_factory=list)
+    best_scenario: Optional[str] = None
+    worst_scenario: Optional[str] = None
+
+
+# --- Ownership / Company Network ---
+class OwnershipLinkItem(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    parent_tax_code: str
+    child_tax_code: str
+    ownership_percent: float = 0.0
+    relationship_type: str = "shareholder"
+    person_name: Optional[str] = None
+    effective_date: Optional[date] = None
+    end_date: Optional[date] = None
+    verified: bool = False
+
+

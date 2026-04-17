@@ -362,10 +362,51 @@ function renderSingleRedFlagsTimeline(timelineData) {
 const TOAST_ICONS = {
     success: 'check_circle', error: 'error', warning: 'warning', info: 'info'
 };
+
+function readMotionToken(name) {
+    try {
+        const raw = getComputedStyle(document.documentElement).getPropertyValue(name);
+        return (raw || '').toString().trim();
+    } catch (_err) {
+        return '';
+    }
+}
+
+function readMotionDurationMs(name, fallbackMs) {
+    const raw = readMotionToken(name);
+    if (!raw) return fallbackMs;
+
+    if (/^-?\d+(\.\d+)?$/.test(raw)) {
+        const parsed = Number(raw);
+        return Number.isFinite(parsed) ? parsed : fallbackMs;
+    }
+
+    if (raw.endsWith('ms')) {
+        const parsed = Number(raw.slice(0, -2));
+        return Number.isFinite(parsed) ? parsed : fallbackMs;
+    }
+
+    if (raw.endsWith('s')) {
+        const parsed = Number(raw.slice(0, -1));
+        return Number.isFinite(parsed) ? parsed * 1000 : fallbackMs;
+    }
+
+    return fallbackMs;
+}
+
+function readMotionEase(fallback) {
+    const raw = readMotionToken('--motion-ease-emphasis');
+    return raw || fallback;
+}
+
 const PREFERS_REDUCED_MOTION = !!(
     window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches
 );
-const MOTION_DURATION_CHART = PREFERS_REDUCED_MOTION ? 0 : 900;
+const MOTION_EASE_EMPHASIS = readMotionEase('cubic-bezier(0.16, 1, 0.3, 1)');
+const MOTION_DURATION_CHART = PREFERS_REDUCED_MOTION ? 0 : readMotionDurationMs('--motion-duration-chart-ms', 900);
+const MOTION_DURATION_SCORE = PREFERS_REDUCED_MOTION ? 0 : readMotionDurationMs('--motion-duration-score-ms', 850);
+const MOTION_DURATION_RESULT = PREFERS_REDUCED_MOTION ? 0 : readMotionDurationMs('--motion-duration-result-ms', 600);
+const MOTION_DURATION_TOAST_OUT = PREFERS_REDUCED_MOTION ? 0 : readMotionDurationMs('--motion-duration-toast-out-ms', 400);
 
 let _fraudPageBindingsInitialized = false;
 let _modalLastFocusedElement = null;
@@ -383,7 +424,7 @@ function dismissToast(toast) {
     toast.classList.add('hide');
     setTimeout(() => {
         if (toast.parentElement) toast.remove();
-    }, 400);
+    }, MOTION_DURATION_TOAST_OUT || 1);
 }
 
 function showToast(title, message, type = 'info', duration = 4000) {
@@ -608,7 +649,7 @@ function renderSingleResult(data) {
         resultDiv.animate([
             { opacity: 0, transform: 'translateY(40px)' },
             { opacity: 1, transform: 'translateY(0)' }
-        ], { duration: 600, easing: 'cubic-bezier(0.16, 1, 0.3, 1)', fill: 'both' });
+        ], { duration: MOTION_DURATION_RESULT, easing: MOTION_EASE_EMPHASIS, fill: 'both' });
     }
 
     document.getElementById('result-company-name').textContent = data.company_name || 'Không rõ';
@@ -756,7 +797,7 @@ function animateRiskScore(targetScore, data) {
         return;
     }
 
-    const durationMs = 850;
+    const durationMs = MOTION_DURATION_SCORE;
     const startTime = performance.now();
 
     requestAnimationFrame(function animateNumbers(currentTime) {

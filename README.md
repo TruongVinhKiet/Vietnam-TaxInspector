@@ -74,6 +74,75 @@ Truy cập: **http://localhost:3000** để bắt đầu.
 - Mở link trong outbox để vào trang `reset-password.html` và đặt mật khẩu mới.
 - Sau khi đăng nhập, vào trang **Tài khoản** để dùng chức năng **Đổi mật khẩu**.
 
+### 5. Test Delinquency End-to-End (có lệnh seed mock riêng)
+`data/seed_db.py` chỉ tạo dữ liệu cho `companies` + `tax_returns`.
+Để test đầy đủ Delinquency, cần seed thêm bảng `tax_payments` bằng script mới:
+
+```bash
+# Từ thư mục gốc dự án
+python Backend/data/generate_mock_data.py
+python Backend/data/seed_db.py
+python Backend/data/seed_tax_payments.py --reset --companies 5000 --seed 42
+```
+
+Sau đó chạy batch predict để làm đầy cache dự báo:
+
+```bash
+curl -X POST "http://localhost:8000/api/delinquency/predict-batch" \
+	-H "Authorization: Bearer <JWT_TOKEN>" \
+	-H "Content-Type: application/json" \
+	-d '{"limit": 500, "refresh_existing": false}'
+```
+
+Nếu cần refresh toàn bộ cache khi dữ liệu lớn (ví dụ 5000+ MST), dùng script chunk tự động (khuyến nghị):
+
+```bash
+cd Backend
+python -m app.scripts.refresh_delinquency_cache --base-url http://127.0.0.1:8000 --chunk-size 500 --refresh-existing
+```
+
+Lý do dùng script: API `predict-batch` giới hạn `limit <= 2000`, nên full refresh phải chia nhiều lượt theo `tax_codes`.
+
+Theo dõi sức khỏe cache Delinquency (coverage + freshness + model versions):
+
+```bash
+curl "http://localhost:8000/api/delinquency/health/cache?fresh_days=7&stale_days=30"
+```
+
+Dashboard `pages/dashboard.html` da duoc gan realtime widget cho health endpoint nay (polling mac dinh 60s).
+
+Tự động refresh định kỳ bằng scheduler script:
+
+```bash
+cd Backend
+python -m app.scripts.schedule_delinquency_refresh --interval-minutes 180 --chunk-size 500 --no-refresh-existing
+```
+
+Chạy 1 vòng duy nhất (phù hợp cron/Task Scheduler):
+
+```bash
+cd Backend
+python -m app.scripts.schedule_delinquency_refresh --once --chunk-size 500 --refresh-existing
+```
+
+Backend co event hook canh bao tu dong khi `coverage` hoac `stale_ratio` vuot nguong:
+- `delinquency_cache_health_threshold_breach` (warning/critical, co cooldown 5 phut de tranh spam log)
+- `delinquency_cache_health_ok`
+
+Checklist smoke test Delinquency:
+- `GET /api/delinquency?page=1&page_size=20` trả về danh sách có `freshness`, `score_source`, `prediction_age_days`.
+- `GET /api/delinquency?page=1&page_size=20&freshness=stale` lọc đúng theo freshness.
+- `POST /api/delinquency/predict-batch` trả về `processed/created/updated/failed` hợp lệ.
+- `GET /api/delinquency/health/cache` trả về `coverage/freshness/sources/model_versions` và cảnh báo vận hành.
+- Mở `Frontend/pages/delinquency.html` để kiểm tra dropdown freshness + nút Batch Predict + metadata badge trên bảng.
+
+Test backend nhanh:
+
+```bash
+python -m pytest Backend/tests/test_delinquency_contract_helpers.py -q
+python -m pytest Backend/tests/test_delinquency_batch_api.py -q
+```
+
 Biến môi trường tùy chọn:
 - `RESET_TOKEN_EXPIRE_MINUTES` (mặc định: 30)
 - `FRONTEND_RESET_URL` (mặc định: http://localhost:3000/pages/reset-password.html)

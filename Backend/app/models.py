@@ -43,6 +43,7 @@ class Company(Base):
     tax_code = Column(String(20), primary_key=True, index=True)
     name = Column(String(255), nullable=False)
     industry = Column(String(100))
+    province = Column(String(100))                      # Geographic slice for fairness metrics
     registration_date = Column(Date)
     risk_score = Column(Float, default=0.0)
     is_active = Column(Boolean, default=True)
@@ -60,6 +61,9 @@ class TaxReturn(Base):
     tax_paid = Column(Numeric(15, 2), default=0.0)
     status = Column(String(50), default="submitted")
     filing_date = Column(Date, nullable=False)
+    due_date = Column(Date, nullable=True)              # Original due date for temporal features
+    tax_type = Column(String(50), default="VAT")        # VAT, CIT, PIT
+    amendment_number = Column(Integer, default=0)       # 0 = original, 1+ = amendment
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
@@ -73,6 +77,9 @@ class Invoice(Base):
     vat_rate = Column(Numeric(5, 2), default=10.0)
     date = Column(Date, nullable=False)
     invoice_number = Column(String(50), unique=True)
+    payment_status = Column(String(30), default="unknown")   # For graph enrichment
+    goods_category = Column(String(100))                      # Product category for motif analysis
+    is_adjustment = Column(Boolean, default=False)            # Credit note / adjustment
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
@@ -143,4 +150,113 @@ class AIRiskAssessment(Base):
     shap_explanation = Column(JSON, nullable=True)
     yearly_history = Column(JSON, nullable=True)  # [{year, revenue, total_expenses}, ...]
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+# ════════════════════════════════════════════════════════════════
+#  NEW: Flagship Model Tables (Phase 0 data expansion)
+# ════════════════════════════════════════════════════════════════
+
+class TaxPayment(Base):
+    """
+    Actual tax payment records – tracks real payment dates vs due dates.
+    Core data source for the Temporal Compliance Intelligence model (Program A).
+    """
+    __tablename__ = "tax_payments"
+
+    id = Column(Integer, primary_key=True, index=True)
+    tax_code = Column(String(20), ForeignKey("companies.tax_code", ondelete="CASCADE"), nullable=False, index=True)
+    tax_period = Column(String(20), nullable=False)      # e.g. '2025-Q1', '2025-M03'
+    tax_type = Column(String(50), nullable=False, default="VAT")
+    amount_due = Column(Numeric(18, 2), nullable=False, default=0.0)
+    amount_paid = Column(Numeric(18, 2), nullable=False, default=0.0)
+    due_date = Column(Date, nullable=False)
+    actual_payment_date = Column(Date, nullable=True)     # NULL if not yet paid
+    # days_overdue is computed column in PG – not mapped in ORM (read-only via raw SQL)
+    penalty_amount = Column(Numeric(18, 2), default=0.0)
+    payment_method = Column(String(50), nullable=True)
+    status = Column(String(30), nullable=False, default="pending")
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class InvoiceLineItem(Base):
+    """
+    Dense invoice detail for graph enrichment.
+    Enables motif detection and link prediction at granular item level (Program B).
+    """
+    __tablename__ = "invoice_line_items"
+
+    id = Column(Integer, primary_key=True, index=True)
+    invoice_id = Column(Integer, ForeignKey("invoices.id", ondelete="CASCADE"), nullable=False, index=True)
+    item_description = Column(String(500), nullable=True)
+    item_code = Column(String(100), nullable=True)        # HS code or internal product code
+    quantity = Column(Numeric(12, 3), default=1.0)
+    unit_price = Column(Numeric(18, 2), nullable=False, default=0.0)
+    line_amount = Column(Numeric(18, 2), nullable=False, default=0.0)
+    vat_amount = Column(Numeric(18, 2), default=0.0)
+    unit = Column(String(50), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class InspectorLabel(Base):
+    """
+    Ground-truth labels from tax inspectors.
+    Used for supervised model retraining, false positive reduction, and audit trail.
+    """
+    __tablename__ = "inspector_labels"
+
+    id = Column(Integer, primary_key=True, index=True)
+    tax_code = Column(String(20), nullable=False, index=True)
+    inspector_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    label_type = Column(String(50), nullable=False)       # 'fraud_confirmed', 'fraud_rejected', etc.
+    confidence = Column(String(20), default="medium")     # low, medium, high
+    assessment_id = Column(Integer, ForeignKey("ai_risk_assessments.id", ondelete="SET NULL"), nullable=True)
+    evidence_summary = Column(Text, nullable=True)
+    decision = Column(String(50), nullable=True)          # 'investigate', 'dismiss', 'escalate', 'penalize'
+    decision_date = Column(Date, nullable=True)
+    tax_period = Column(String(20), nullable=True)
+    amount_recovered = Column(Numeric(18, 2), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class OwnershipLink(Base):
+    """
+    Company ownership relationships.
+    Enables shell company / "sân sau" detection via ownership graph (Program B).
+    """
+    __tablename__ = "ownership_links"
+
+    id = Column(Integer, primary_key=True, index=True)
+    parent_tax_code = Column(String(20), ForeignKey("companies.tax_code", ondelete="CASCADE"), nullable=False, index=True)
+    child_tax_code = Column(String(20), ForeignKey("companies.tax_code", ondelete="CASCADE"), nullable=False, index=True)
+    ownership_percent = Column(Numeric(5, 2), nullable=False, default=0.0)
+    relationship_type = Column(String(50), nullable=False, default="shareholder")
+    person_name = Column(String(255), nullable=True)
+    person_id = Column(String(50), nullable=True, index=True)
+    effective_date = Column(Date, nullable=True)
+    end_date = Column(Date, nullable=True)                # NULL if still active
+    data_source = Column(String(100), nullable=True)
+    verified = Column(Boolean, default=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class DelinquencyPrediction(Base):
+    """
+    Cached predictions from the temporal delinquency model (Program A).
+    One row per company per prediction run.
+    """
+    __tablename__ = "delinquency_predictions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    tax_code = Column(String(20), ForeignKey("companies.tax_code", ondelete="CASCADE"), nullable=False, index=True)
+    prediction_date = Column(Date, nullable=False, server_default=func.current_date())
+    prob_30d = Column(Float, nullable=False, default=0.0)
+    prob_60d = Column(Float, nullable=False, default=0.0)
+    prob_90d = Column(Float, nullable=False, default=0.0)
+    risk_cluster = Column(String(100), nullable=True)
+    top_reasons = Column(JSON, nullable=True)             # [{reason, weight}, ...]
+    model_version = Column(String(80), nullable=True)
+    model_confidence = Column(Float, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
 

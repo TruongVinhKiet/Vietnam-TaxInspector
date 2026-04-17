@@ -3,10 +3,10 @@
 <html class="light" lang="vi"><head>
 <meta charset="utf-8"/>
 <meta content="width=device-width, initial-scale=1.0" name="viewport"/>
-<title>Dự báo Nợ đọng - Tax Inspectorate</title>
+<title>Chi tiết Dự báo Nợ đọng - Tax Inspectorate</title>
 <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&amp;display=swap" rel="stylesheet"/>
-<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
 <script id="tailwind-config">
         tailwind.config = {
             darkMode: "class",
@@ -61,16 +61,16 @@
                         "surface-tint": "#465f88",
                         "on-secondary-container": "#5a6375"
                     },
-                    "borderRadius": {
-                        "DEFAULT": "0.125rem",
-                        "lg": "0.25rem",
-                        "xl": "0.5rem",
-                        "full": "0.75rem"
+                    borderRadius: {
+                        DEFAULT: "0.125rem",
+                        lg: "0.25rem",
+                        xl: "0.5rem",
+                        full: "0.75rem"
                     },
-                    "fontFamily": {
-                        "headline": ["Inter"],
-                        "body": ["Inter"],
-                        "label": ["Inter"]
+                    fontFamily: {
+                        headline: ["Inter"],
+                        body: ["Inter"],
+                        label: ["Inter"]
                     }
                 },
             },
@@ -81,18 +81,24 @@
         .material-symbols-outlined {
             font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
         }
-        /* No-Line separation logic from Design System */
-        .no-line { border: none !important; }
-        .ghost-border { outline: 1px solid rgba(196, 198, 207, 0.15); }
 
-        .delinq-modal-enter {
-            animation: fadeSlideUp var(--motion-duration-modal, 0.32s) var(--motion-ease-emphasis, cubic-bezier(0.16, 1, 0.3, 1)) both;
+        .delinq-detail-enter {
+            animation: fadeSlideUp var(--motion-duration-medium, 0.5s) var(--motion-ease-emphasis, cubic-bezier(0.16, 1, 0.3, 1)) both;
+        }
+
+        .delinq-detail-enter[data-motion-order="1"] {
+            animation-delay: 0.06s;
+        }
+
+        .delinq-detail-enter[data-motion-order="2"] {
+            animation-delay: 0.12s;
         }
 
         @media (prefers-reduced-motion: reduce) {
-            .delinq-modal-enter {
+            .delinq-detail-enter {
                 animation: none !important;
             }
+
             * {
                 transition-duration: 0ms !important;
                 scroll-behavior: auto !important;
@@ -100,7 +106,6 @@
         }
     </style>
 <link rel="stylesheet" href="../css/global.css?v=3.2">
-
 <link rel="icon" type="image/png" href="../assets/logo.png">
 </head>
 <body class="bg-background text-on-surface selection:bg-primary-fixed-dim">
@@ -112,11 +117,10 @@
 </div>
 <div>
 <h1 class="text-xl font-bold tracking-tighter text-white">TaxInspector</h1>
-<p class="text-[10px] uppercase tracking-widest text-slate-400 font-semibold" id="sidebar-subtitle">Hệ thống Giám sát</p>
+<p class="text-[10px] uppercase tracking-widest text-slate-400 font-semibold" id="sidebar-subtitle">Dự báo Nợ đọng</p>
 </div>
 </div>
 <nav class="flex-1 space-y-1 px-2" id="sidebar-nav">
-<!-- Items will be styled dynamically via JS -->
 <a class="nav-item text-slate-400 hover:text-white transition-colors hover:bg-white/5 flex items-center gap-3 px-4 py-3 scale-95 active:scale-90 transition-transform rounded-lg" href="dashboard.html" data-page="dashboard.html" data-title="Tổng quan hệ thống">
 <span class="material-symbols-outlined">dashboard</span>
 <span class="text-sm">Tổng quan</span>
@@ -151,14 +155,16 @@
 </div>
 </div>
 </aside>
+
 <!-- TopAppBar -->
 <header class="sticky top-0 z-40 w-full ml-64 bg-white/85 dark:bg-[#002147]/85 backdrop-blur-md shadow-sm flex items-center justify-between px-8 h-16 font-inter text-sm border-b border-surface-container-high/50 max-w-[calc(100%-16rem)]">
 <div class="flex items-center gap-6">
-<!-- Breadcrumbs -->
 <nav class="flex items-center space-x-2 text-xs font-medium" id="header-breadcrumb">
 <span class="text-slate-400">Ứng dụng</span>
 <span class="material-symbols-outlined text-[14px] text-slate-300">chevron_right</span>
-<span class="text-primary-container font-bold" id="breadcrumb-current">Tổng quan hệ thống</span>
+<span class="text-slate-500">Dự báo Nợ đọng</span>
+<span class="material-symbols-outlined text-[14px] text-slate-300">chevron_right</span>
+<span class="text-primary-container font-bold" id="breadcrumb-current">Chi tiết doanh nghiệp</span>
 </nav>
 </div>
 <div class="flex items-center gap-8">
@@ -169,7 +175,7 @@
 <div class="flex items-center gap-4 border-l border-slate-200 pl-4">
 <button class="relative p-1 text-slate-500 hover:text-primary-container transition-colors">
 <span class="material-symbols-outlined">notifications</span>
-<span class="absolute top-0 right-0 w-2 h-2 bg-error rounded-full"></span>
+<span class="absolute top-0 right-0 w-2 h-2 bg-red-600 rounded-full"></span>
 </button>
 <button class="p-1 text-slate-500 hover:text-primary-container transition-colors">
 <span class="material-symbols-outlined">settings</span>
@@ -177,90 +183,116 @@
 </div>
 </div>
 </header>
+
 <!-- Canvas -->
-<main class="ml-64 min-h-screen bg-surface p-10 page-transition">
-<!-- Page Header -->
-<div class="mb-10 max-w-6xl mx-auto">
-<h2 class="text-[2rem] font-extrabold tracking-[-0.02em] text-primary mb-2">Dự báo Rủi ro Trễ hạn Nộp thuế</h2>
-<p class="text-on-surface-variant font-medium text-sm uppercase tracking-widest">Temporal Compliance Intelligence – Phân tích dữ liệu thanh toán thực tế bằng AI</p>
-</div>
-<!-- KPI Row -->
-<div class="grid grid-cols-1 md:grid-cols-3 gap-8 max-w-6xl mx-auto mb-10">
-<!-- KPI 1 -->
-<div class="bg-surface-container-lowest p-6 rounded-xl shadow-[0_20px_40px_rgba(0,33,71,0.06)] border-none">
-<div class="flex justify-between items-start mb-4">
-<span class="text-xs font-bold uppercase tracking-widest text-slate-500">Tổng DN phát hiện</span>
-<span class="material-symbols-outlined text-primary-container" data-weight="fill">warning</span>
-</div>
-<div class="text-4xl font-extrabold tracking-tighter text-primary-container" data-kpi="high-risk-count">---</div>
-<div class="mt-2 text-xs font-medium text-slate-400">Dữ liệu từ hệ thống phân tích thực</div>
-</div>
-<!-- KPI 2 -->
-<div class="bg-surface-container-lowest p-6 rounded-xl shadow-[0_20px_40px_rgba(0,33,71,0.06)] border-none">
-<div class="flex justify-between items-start mb-4">
-<span class="text-xs font-bold uppercase tracking-widest text-slate-500">Tổng phạt tích lũy</span>
-<span class="material-symbols-outlined text-error" data-weight="fill">account_balance_wallet</span>
-</div>
-<div class="text-4xl font-extrabold tracking-tighter text-error" data-kpi="estimated-loss">--- <span class="text-lg">VNĐ</span></div>
-<div class="mt-2 text-xs font-medium text-slate-400">Phạt thực tế từ lịch sử thanh toán</div>
-</div>
-<!-- KPI 3 -->
-<div class="bg-surface-container-lowest p-6 rounded-xl shadow-[0_20px_40px_rgba(0,33,71,0.06)] border-none">
-<div class="flex justify-between items-start mb-4">
-<span class="text-xs font-bold uppercase tracking-widest text-slate-500">Nguồn dữ liệu</span>
-<span class="material-symbols-outlined text-emerald-600" data-weight="fill">verified</span>
-</div>
-<div class="text-4xl font-extrabold tracking-tighter text-emerald-600" data-kpi="model-accuracy">---</div>
-<div class="mt-2 text-xs font-medium text-slate-400">Program A – Temporal Compliance Intelligence</div>
-</div>
-</div>
-<!-- Enterprise Data Grid -->
-<div class="max-w-6xl mx-auto bg-surface-container-lowest rounded-xl overflow-hidden shadow-[0_20px_40px_rgba(0,33,71,0.06)]">
-<div class="px-8 py-6 bg-white flex flex-col md:flex-row md:justify-between md:items-center gap-4 border-b border-slate-100">
-<div>
-<h3 class="text-lg font-bold text-primary-container tracking-tight">Danh sách Doanh nghiệp – Dự báo Trễ hạn</h3>
-<p class="text-xs text-slate-500 mt-1">Bấm vào Chi tiết để mở trang hồ sơ rủi ro riêng cho từng doanh nghiệp.</p>
-</div>
-<div class="flex gap-2 items-center flex-wrap">
-<label for="delinq-freshness-filter" class="text-[10px] font-bold uppercase tracking-widest text-slate-500">Freshness</label>
-<select id="delinq-freshness-filter" class="bg-surface-container-low border border-outline-variant/20 rounded-lg px-3 py-2 text-xs font-semibold text-slate-700 focus:outline-none focus:ring-2 focus:ring-primary-container/40">
-<option value="">Tất cả</option>
-<option value="stale">Stale (&gt;30 ngày)</option>
-<option value="aging">Aging (8-30 ngày)</option>
-<option value="fresh">Fresh (0-7 ngày)</option>
-<option value="unknown">Unknown</option>
-</select>
-<button id="delinq-batch-predict-btn" class="bg-emerald-600 text-white px-4 py-2 rounded-lg text-xs font-bold uppercase tracking-widest flex items-center gap-2 hover:bg-emerald-700 transition-colors">
-<span class="material-symbols-outlined text-[16px]">autorenew</span> Batch Predict
-</button>
-<button class="bg-primary-container text-white px-4 py-2 rounded-lg text-xs font-bold uppercase tracking-widest flex items-center gap-2 hover:opacity-90 transition-all">
-<span class="material-symbols-outlined text-[16px]">file_download</span> Xuất báo cáo
-                        </button>
-</div>
-</div>
-<div class="px-8 py-2 bg-slate-50 border-b border-slate-100 hidden" id="delinq-batch-status"></div>
-<div class="px-8 py-4 bg-surface-container-low border-b border-slate-100">
-<div class="grid grid-cols-12 gap-3 text-[10px] uppercase tracking-widest font-bold text-slate-500">
-<div class="col-span-12 md:col-span-2">MST</div>
-<div class="col-span-12 md:col-span-3">Doanh nghiệp</div>
-<div class="col-span-12 md:col-span-2">Nhóm rủi ro</div>
-<div class="col-span-12 md:col-span-3">Xác suất Trễ hạn</div>
-<div class="col-span-8 md:col-span-1">Phạt</div>
-<div class="col-span-4 md:col-span-1 text-right">Hành động</div>
-</div>
-</div>
-<div id="delinq-list" class="divide-y divide-slate-100 min-h-[280px]">
-<!-- Dynamic record cards loaded by delinquency.js -->
-</div>
-<!-- Pagination Footer -->
-<div class="px-8 py-6 border-t border-slate-100 flex flex-col md:flex-row md:justify-between md:items-center gap-4">
-<span class="text-xs font-bold text-slate-400 uppercase tracking-widest" data-kpi="pagination-info">Đang tải...</span>
-<div id="delinq-pagination" class="flex items-center gap-2 flex-wrap">
-<!-- Dynamic pagination by delinquency.js -->
-</div>
-</div>
+<main class="ml-64 min-h-screen bg-surface p-8 md:p-10 page-transition">
+<div class="max-w-6xl mx-auto">
+    <a id="delinq-back-link" href="delinquency.html" class="inline-flex items-center gap-1 text-xs font-bold uppercase tracking-widest text-slate-500 hover:text-primary-container transition-colors mb-5 delinq-detail-enter">
+        <span class="material-symbols-outlined text-base">arrow_back</span>
+        Quay lại danh sách
+    </a>
+
+    <section class="bg-gradient-to-r from-primary-container to-slate-800 rounded-2xl shadow-xl text-white px-6 md:px-8 py-6 md:py-7 delinq-detail-enter">
+        <div class="flex flex-col md:flex-row md:justify-between md:items-start gap-4">
+            <div>
+                <h2 id="detail-company-name" class="text-2xl md:text-[30px] font-black tracking-tight">Đang tải doanh nghiệp...</h2>
+                <p id="detail-tax-code" class="font-mono text-sm text-white/75 mt-1">---</p>
+            </div>
+            <div class="text-left md:text-right">
+                <p class="text-[11px] uppercase tracking-widest text-white/60 font-semibold">Xác suất Trễ hạn 90 ngày</p>
+                <div class="flex md:justify-end items-center gap-3 mt-1">
+                    <span id="detail-overall-prob" class="text-4xl md:text-5xl font-black leading-none">---</span>
+                    <span id="detail-risk-badge" class="px-3 py-1 rounded-full text-xs font-bold bg-white/20">---</span>
+                </div>
+            </div>
+        </div>
+        <div id="detail-meta-badges" class="flex flex-wrap items-center gap-2 mt-5"></div>
+    </section>
+
+    <section class="grid grid-cols-1 lg:grid-cols-3 gap-6 mt-6 delinq-detail-enter" data-motion-order="1">
+        <article class="bg-white rounded-xl border border-slate-100 shadow-sm p-5">
+            <h3 class="text-xs font-bold uppercase tracking-widest text-slate-500 mb-3">Phân tích 30/60/90 ngày</h3>
+            <div class="grid grid-cols-3 gap-3" id="detail-horizon-grid">
+                <div class="rounded-lg bg-slate-50 p-3 text-center">
+                    <p id="detail-prob-30" class="text-2xl font-black text-primary-container">---</p>
+                    <p class="text-[10px] text-slate-500 font-bold uppercase tracking-wide">30 ngày</p>
+                </div>
+                <div class="rounded-lg bg-slate-50 p-3 text-center">
+                    <p id="detail-prob-60" class="text-2xl font-black text-primary-container">---</p>
+                    <p class="text-[10px] text-slate-500 font-bold uppercase tracking-wide">60 ngày</p>
+                </div>
+                <div class="rounded-lg bg-slate-50 p-3 text-center">
+                    <p id="detail-prob-90" class="text-2xl font-black text-primary-container">---</p>
+                    <p class="text-[10px] text-slate-500 font-bold uppercase tracking-wide">90 ngày</p>
+                </div>
+            </div>
+        </article>
+
+        <article class="bg-white rounded-xl border border-slate-100 shadow-sm p-5 lg:col-span-2">
+            <h3 class="text-xs font-bold uppercase tracking-widest text-slate-500 mb-3">Nguyên nhân chính</h3>
+            <ul id="detail-top-reasons" class="space-y-2 text-sm text-slate-600">
+                <li class="text-slate-400">Đang tải dữ liệu nguyên nhân...</li>
+            </ul>
+        </article>
+    </section>
+
+    <section class="grid grid-cols-1 xl:grid-cols-3 gap-6 mt-6 delinq-detail-enter" data-motion-order="2">
+        <article class="bg-white rounded-xl border border-slate-100 shadow-sm p-5 xl:col-span-2">
+            <h3 class="text-xs font-bold uppercase tracking-widest text-slate-500 mb-4">Lịch sử thanh toán</h3>
+            <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+                <div class="rounded-lg bg-emerald-50 p-3 text-center">
+                    <p id="detail-payment-on-time" class="text-2xl font-black text-emerald-700">0</p>
+                    <p class="text-[10px] text-emerald-700/70 font-bold uppercase tracking-wide">Đúng hạn</p>
+                </div>
+                <div class="rounded-lg bg-orange-50 p-3 text-center">
+                    <p id="detail-payment-late" class="text-2xl font-black text-orange-700">0</p>
+                    <p class="text-[10px] text-orange-700/70 font-bold uppercase tracking-wide">Trễ hạn</p>
+                </div>
+                <div class="rounded-lg bg-red-50 p-3 text-center">
+                    <p id="detail-payment-unpaid" class="text-2xl font-black text-red-700">0</p>
+                    <p class="text-[10px] text-red-700/70 font-bold uppercase tracking-wide">Chưa nộp</p>
+                </div>
+                <div class="rounded-lg bg-slate-50 p-3 text-center">
+                    <p id="detail-payment-avg-late" class="text-2xl font-black text-slate-700">0</p>
+                    <p class="text-[10px] text-slate-500 font-bold uppercase tracking-wide">TB ngày trễ</p>
+                </div>
+            </div>
+            <div class="mt-4 text-xs text-slate-500 font-medium">
+                Tổng phạt tích lũy: <span id="detail-total-penalty" class="font-bold text-slate-700">---</span>
+            </div>
+        </article>
+
+        <article class="bg-white rounded-xl border border-slate-100 shadow-sm p-5">
+            <h3 class="text-xs font-bold uppercase tracking-widest text-slate-500 mb-4">Thông tin mô hình</h3>
+            <dl class="space-y-3 text-sm">
+                <div class="flex justify-between gap-3">
+                    <dt class="text-slate-500">Nhóm rủi ro</dt>
+                    <dd id="detail-cluster" class="font-bold text-slate-700 text-right">---</dd>
+                </div>
+                <div class="flex justify-between gap-3">
+                    <dt class="text-slate-500">Model version</dt>
+                    <dd id="detail-model-version" class="font-bold text-slate-700 text-right">---</dd>
+                </div>
+                <div class="flex justify-between gap-3">
+                    <dt class="text-slate-500">Prediction date</dt>
+                    <dd id="detail-prediction-date" class="font-bold text-slate-700 text-right">---</dd>
+                </div>
+                <div class="flex justify-between gap-3">
+                    <dt class="text-slate-500">Prediction age</dt>
+                    <dd id="detail-age-days" class="font-bold text-slate-700 text-right">---</dd>
+                </div>
+                <div class="flex justify-between gap-3">
+                    <dt class="text-slate-500">Source</dt>
+                    <dd id="detail-score-source" class="font-bold text-slate-700 text-right">---</dd>
+                </div>
+            </dl>
+        </article>
+    </section>
+
+    <div id="detail-status" class="mt-6 text-sm text-slate-500"></div>
 </div>
 </main>
+
 <!-- Footer -->
 <footer class="w-full py-4 ml-64 bg-slate-50 dark:bg-slate-950 flex justify-between items-center px-8 border-t border-slate-200 dark:border-slate-800 font-inter text-[10px] uppercase tracking-widest text-slate-500 min-h-[50px] max-w-[calc(100%-16rem)] relative z-10" style="margin-top: auto;">
 <div class="flex items-center gap-6">
@@ -279,34 +311,36 @@
 </div>
 </div>
 </footer>
+
 <script src="../js/api.js?v=3.2"></script>
-<script src="../js/delinquency.js?v=3.3"></script>
+<script src="../js/delinquency-detail.js?v=1.0"></script>
 <script>
 document.addEventListener("DOMContentLoaded", function() {
-    const currentPage = window.location.pathname.split("/").pop() || 'dashboard.html';
-    const navItems = document.querySelectorAll('#sidebar-nav .nav-item');
-    let pageTitle = "Hệ thống Giám sát";
+    const currentFile = window.location.pathname.split("/").pop() || "dashboard.html";
+    const navItems = document.querySelectorAll("#sidebar-nav .nav-item");
+    const activePage = currentFile.startsWith("delinquency") ? "delinquency.html" : currentFile;
+    let pageTitle = "Chi tiết Dự báo Nợ đọng";
 
     navItems.forEach(item => {
-        if (item.getAttribute('data-page') === currentPage) {
-            item.classList.remove('text-slate-400', 'hover:bg-white/5');
-            item.classList.add('bg-white/10', 'text-white', 'font-semibold');
-            pageTitle = item.getAttribute('data-title');
+        if (item.getAttribute("data-page") === activePage) {
+            item.classList.remove("text-slate-400", "hover:bg-white/5");
+            item.classList.add("bg-white/10", "text-white", "font-semibold");
+            pageTitle = item.getAttribute("data-title") || pageTitle;
         }
     });
 
-    const breadcrumbCurrent = document.getElementById('breadcrumb-current');
-    if (breadcrumbCurrent) breadcrumbCurrent.textContent = pageTitle;
-    const sidebarSubtitle = document.getElementById('sidebar-subtitle');
+    const breadcrumbCurrent = document.getElementById("breadcrumb-current");
+    if (breadcrumbCurrent) breadcrumbCurrent.textContent = "Chi tiết doanh nghiệp";
+    const sidebarSubtitle = document.getElementById("sidebar-subtitle");
     if (sidebarSubtitle) sidebarSubtitle.textContent = pageTitle;
 
-    if (typeof hydrateSidebarIdentity === 'function') {
+    if (typeof hydrateSidebarIdentity === "function") {
         hydrateSidebarIdentity({ forceRefresh: true });
     }
 });
 
-window.addEventListener('pageshow', function() {
-    if (typeof hydrateSidebarIdentity === 'function') {
+window.addEventListener("pageshow", function() {
+    if (typeof hydrateSidebarIdentity === "function") {
         hydrateSidebarIdentity({ forceRefresh: true });
     }
 });

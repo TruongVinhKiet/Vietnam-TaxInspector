@@ -1,4 +1,4 @@
-﻿from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import Optional
 import json
@@ -31,6 +31,18 @@ FRAUD_DRIFT_FEATURES = (
     "f3_vat_structure",
     "f4_peer_comparison",
     "anomaly_score",
+)
+
+# Flagship: Delinquency model drift features (Program A)
+DELINQUENCY_DRIFT_FEATURES = (
+    "late_ratio_1yr",
+    "avg_days_overdue",
+    "unpaid_count",
+    "penalty_trend",
+    "payment_cv",
+    "prob_30d",
+    "prob_60d",
+    "prob_90d",
 )
 
 
@@ -524,6 +536,19 @@ def get_db_connection():
         return None
 
 
+def _resolve_db_url() -> str:
+    db_url = os.getenv("DATABASE_URL")
+    if db_url:
+        return db_url
+
+    user = os.getenv("DB_USER", "postgres")
+    password = os.getenv("DB_PASSWORD", "")
+    host = os.getenv("DB_HOST", "localhost")
+    port = os.getenv("DB_PORT", "5432")
+    db_name = os.getenv("DB_NAME", "TaxInspector")
+    return f"postgresql://{user}:{password}@{host}:{port}/{db_name}"
+
+
 @router.post("/feedback")
 async def submit_expert_feedback(feedback: FeedbackData):
     """
@@ -582,10 +607,11 @@ async def mlops_health_check():
     status = {
         "status": "healthy",
         "models": {
-            "gat_model": (model_dir / "gat_model.pt").exists(),
-            "calibrator": (model_dir / "calibrator.pkl").exists(),
-            "anomaly_detector": (model_dir / "anomaly_detector.pkl").exists(),
-            "ensemble_meta": (model_dir / "ensemble_meta.pkl").exists(),
+            "graph_model": (model_dir / "gat_model.pt").exists(),
+            "fraud_xgboost": (model_dir / "xgboost_model.joblib").exists(),
+            "fraud_isolation_forest": (model_dir / "isolation_forest.joblib").exists(),
+            "fraud_calibrator": (model_dir / "fraud_calibrator.joblib").exists(),
+            "fraud_manifest": (model_dir / "fraud_model_manifest.json").exists(),
         },
         "db_connection": False,
     }
@@ -597,7 +623,12 @@ async def mlops_health_check():
     else:
         status["status"] = "degraded"
 
-    if not all(status["models"].values()):
+    critical_artifacts = (
+        status["models"].get("graph_model"),
+        status["models"].get("fraud_xgboost"),
+        status["models"].get("fraud_isolation_forest"),
+    )
+    if not all(critical_artifacts):
         status["status"] = "degraded"
 
     return status
@@ -749,3 +780,337 @@ async def get_fraud_quality_summary(include_criteria: bool = False):
         quality_report_available=response.get("model_info", {}).get("quality_report_available", False),
     )
     return response
+
+
+# ════════════════════════════════════════════════════════════════
+#  Flagship: Delinquency Drift & Data Quality (Phase 0.2)
+# ════════════════════════════════════════════════════════════════
+
+@router.get("/delinquency_drift")
+async def get_delinquency_drift():
+    """
+    Drift detection for the delinquency temporal model (Program A).
+    Compares recent prediction distributions against baseline saved during training.
+    """
+    baseline_path = MODEL_DIR / "delinquency_drift_baseline.json"
+    predictions_log = LOG_DIR / "delinquency_predictions.jsonl"
+
+    baseline = {}
+    if baseline_path.exists():
+        try:
+            with open(baseline_path, "r", encoding="utf-8") as f:
+                baseline = json.load(f)
+        except Exception:
+            pass
+
+    recent_preds = _read_jsonl(predictions_log)
+
+    if not baseline and not recent_preds:
+        return {
+            "status": "no_data",
+            "message": "Chưa có baseline hoặc prediction logs cho delinquency model.",
+            "features": [],
+            "overall_severity": "unknown",
+            "generated_at": datetime.utcnow().isoformat(),
+        }
+
+    feature_drifts = []
+    overall_severity = "healthy"
+
+    for feat in DELINQUENCY_DRIFT_FEATURES:
+        baseline_vals = baseline.get(feat, {})
+        baseline_mean = baseline_vals.get("mean", 0.0)
+        baseline_std = baseline_vals.get("std", 1.0)
+        baseline_dist = baseline_vals.get("distribution", [])
+
+        recent_vals = [r.get(feat, 0.0) for r in recent_preds[-500:] if feat in r]
+
+        if not recent_vals:
+            feature_drifts.append({
+                "feature": feat,
+                "status": "no_data",
+                "drift_score": 0.0,
+                "baseline_mean": round(baseline_mean, 4),
+                "recent_mean": None,
+                "recent_count": 0,
+            })
+            continue
+
+        recent_mean = float(np.mean(recent_vals))
+        recent_std = float(np.std(recent_vals)) if len(recent_vals) > 1 else 0.0
+
+        # Compute drift using Wasserstein-like distance
+        if baseline_dist:
+            drift_score = _wasserstein_like(baseline_dist, recent_vals)
+        else:
+            drift_score = abs(recent_mean - baseline_mean) / max(baseline_std, 0.01)
+
+        # Classify severity
+        if drift_score > 2.0:
+            severity = "critical"
+            overall_severity = "critical"
+        elif drift_score > 1.0:
+            severity = "warning"
+            if overall_severity == "healthy":
+                overall_severity = "warning"
+        else:
+            severity = "healthy"
+
+        feature_drifts.append({
+            "feature": feat,
+            "status": severity,
+            "drift_score": round(drift_score, 4),
+            "baseline_mean": round(baseline_mean, 4),
+            "recent_mean": round(recent_mean, 4),
+            "baseline_std": round(baseline_std, 4),
+            "recent_std": round(recent_std, 4),
+            "recent_count": len(recent_vals),
+        })
+
+    log_event(
+        logger,
+        "info",
+        "monitoring_delinquency_drift_generated",
+        overall_severity=overall_severity,
+        features_checked=len(feature_drifts),
+    )
+
+    return {
+        "status": overall_severity,
+        "features": feature_drifts,
+        "overall_severity": overall_severity,
+        "model_version": baseline.get("model_version", "unknown"),
+        "baseline_date": baseline.get("created_at", "unknown"),
+        "recent_window_size": len(recent_preds),
+        "generated_at": datetime.utcnow().isoformat(),
+    }
+
+
+@router.get("/data_quality")
+def get_data_quality_gate():
+    """
+    Data quality gate: checks completeness and freshness of all flagship data sources.
+    Returns pass/fail status for each data source with actionable guidance.
+    """
+    import psycopg2
+
+    db_url = _resolve_db_url()
+
+    checks = []
+    overall = "pass"
+
+    try:
+        conn = psycopg2.connect(db_url)
+        cur = conn.cursor()
+
+        # Check 1: Companies table
+        cur.execute("SELECT COUNT(*), COUNT(DISTINCT province) FROM companies")
+        co_count, co_provinces = cur.fetchone()
+        checks.append({
+            "source": "companies",
+            "status": "pass" if co_count > 0 else "fail",
+            "row_count": co_count,
+            "details": {
+                "distinct_provinces": co_provinces,
+                "has_province_data": co_provinces > 0,
+            },
+            "guidance": None if co_count > 0 else "Import danh sách doanh nghiệp vào bảng companies.",
+        })
+
+        # Check 2: Tax Returns
+        cur.execute("SELECT COUNT(*), MIN(filing_date), MAX(filing_date) FROM tax_returns")
+        tr_count, tr_min, tr_max = cur.fetchone()
+        checks.append({
+            "source": "tax_returns",
+            "status": "pass" if tr_count > 10 else ("warning" if tr_count > 0 else "fail"),
+            "row_count": tr_count,
+            "details": {
+                "earliest_filing": str(tr_min) if tr_min else None,
+                "latest_filing": str(tr_max) if tr_max else None,
+            },
+            "guidance": None if tr_count > 10 else "Cần ít nhất 10 tờ khai thuế để model hoạt động.",
+        })
+
+        # Check 3: Invoices
+        cur.execute("SELECT COUNT(*), COUNT(DISTINCT seller_tax_code), COUNT(DISTINCT buyer_tax_code) FROM invoices")
+        inv_count, inv_sellers, inv_buyers = cur.fetchone()
+        checks.append({
+            "source": "invoices",
+            "status": "pass" if inv_count > 50 else ("warning" if inv_count > 0 else "fail"),
+            "row_count": inv_count,
+            "details": {"distinct_sellers": inv_sellers, "distinct_buyers": inv_buyers},
+            "guidance": None if inv_count > 50 else "Cần hóa đơn để phân tích mạng lưới Graph Intelligence.",
+        })
+
+        # Check 4: Tax Payments (Program A core data)
+        cur.execute("SELECT COUNT(*), COUNT(DISTINCT tax_code) FROM tax_payments")
+        tp_count, tp_companies = cur.fetchone()
+        status_tp = "pass" if tp_count > 20 else ("warning" if tp_count > 0 else "fail")
+        if status_tp != "pass":
+            overall = "warning" if overall == "pass" else overall
+        checks.append({
+            "source": "tax_payments",
+            "status": status_tp,
+            "row_count": tp_count,
+            "details": {"distinct_companies": tp_companies},
+            "program": "A – Temporal Compliance",
+            "guidance": None if tp_count > 20 else "Import dữ liệu ngày nộp thực tế (tax_payments) cho Program A.",
+        })
+
+        # Check 5: Invoice Line Items (Program B enrichment)
+        cur.execute("SELECT COUNT(*), COUNT(DISTINCT invoice_id) FROM invoice_line_items")
+        li_count, li_invoices = cur.fetchone()
+        checks.append({
+            "source": "invoice_line_items",
+            "status": "pass" if li_count > 0 else "optional",
+            "row_count": li_count,
+            "details": {"distinct_invoices": li_invoices},
+            "program": "B – Graph Intelligence 2.0",
+            "guidance": None if li_count > 0 else "Optional: chi tiết hóa đơn giúp Graph motif detection chính xác hơn.",
+        })
+
+        # Check 6: Ownership Links (Program B shell detection)
+        cur.execute("SELECT COUNT(*), COUNT(DISTINCT parent_tax_code) FROM ownership_links")
+        ol_count, ol_parents = cur.fetchone()
+        checks.append({
+            "source": "ownership_links",
+            "status": "pass" if ol_count > 0 else "optional",
+            "row_count": ol_count,
+            "details": {"distinct_parent_companies": ol_parents},
+            "program": "B – Graph Intelligence 2.0",
+            "guidance": None if ol_count > 0 else "Optional: quan hệ sở hữu giúp phát hiện công ty vỏ bọc.",
+        })
+
+        # Check 7: Inspector Labels (Retrain data)
+        cur.execute("SELECT COUNT(*), COUNT(DISTINCT label_type) FROM inspector_labels")
+        il_count, il_types = cur.fetchone()
+        checks.append({
+            "source": "inspector_labels",
+            "status": "pass" if il_count > 50 else ("building" if il_count > 0 else "empty"),
+            "row_count": il_count,
+            "details": {"distinct_label_types": il_types},
+            "program": "All – Model Retraining",
+            "guidance": f"Có {il_count} nhãn. Cần ≥50 nhãn để retrain hiệu quả." if il_count < 50 else None,
+        })
+
+        # Check 8: Delinquency Predictions cache
+        cur.execute("SELECT COUNT(*), MAX(created_at) FROM delinquency_predictions")
+        dp_count, dp_latest = cur.fetchone()
+        checks.append({
+            "source": "delinquency_predictions",
+            "status": "pass" if dp_count > 0 else "empty",
+            "row_count": dp_count,
+            "details": {"latest_prediction": str(dp_latest) if dp_latest else None},
+            "program": "A – Temporal Compliance",
+            "guidance": None if dp_count > 0 else "Chạy batch prediction để populate cache.",
+        })
+
+        cur.close()
+        conn.close()
+
+    except Exception as e:
+        log_event(logger, "error", "data_quality_check_failed", error=str(e))
+        return {
+            "status": "error",
+            "message": f"Không thể kết nối database: {str(e)}",
+            "checks": [],
+            "generated_at": datetime.utcnow().isoformat(),
+        }
+
+    fail_count = sum(1 for c in checks if c["status"] == "fail")
+    warn_count = sum(1 for c in checks if c["status"] == "warning")
+    if fail_count > 0:
+        overall = "fail"
+    elif warn_count > 0:
+        overall = "warning"
+
+    log_event(
+        logger,
+        "info",
+        "data_quality_gate_checked",
+        overall=overall,
+        fail_count=fail_count,
+        warn_count=warn_count,
+    )
+
+    return {
+        "status": overall,
+        "checks": checks,
+        "summary": {
+            "total_sources": len(checks),
+            "pass": sum(1 for c in checks if c["status"] == "pass"),
+            "warning": warn_count,
+            "fail": fail_count,
+            "optional": sum(1 for c in checks if c["status"] in ("optional", "empty", "building")),
+        },
+        "generated_at": datetime.utcnow().isoformat(),
+    }
+
+
+@router.get("/inspector_label_stats")
+def get_inspector_label_stats():
+    """
+    Inspector label statistics for model retraining readiness.
+    Shows label distribution, recency, and coverage metrics.
+    """
+    import psycopg2
+
+    db_url = _resolve_db_url()
+
+    try:
+        conn = psycopg2.connect(db_url)
+        cur = conn.cursor()
+
+        cur.execute("""
+            SELECT label_type, confidence, COUNT(*) as cnt
+            FROM inspector_labels
+            GROUP BY label_type, confidence
+            ORDER BY cnt DESC
+        """)
+        label_dist = [
+            {"label_type": r[0], "confidence": r[1], "count": r[2]}
+            for r in cur.fetchall()
+        ]
+
+        cur.execute("""
+            SELECT decision, COUNT(*) as cnt
+            FROM inspector_labels
+            WHERE decision IS NOT NULL
+            GROUP BY decision
+            ORDER BY cnt DESC
+        """)
+        decision_dist = [
+            {"decision": r[0], "count": r[1]}
+            for r in cur.fetchall()
+        ]
+
+        cur.execute("SELECT COUNT(*), COUNT(DISTINCT tax_code), MAX(created_at) FROM inspector_labels")
+        total, companies, latest = cur.fetchone()
+
+        cur.execute("SELECT SUM(amount_recovered) FROM inspector_labels WHERE amount_recovered IS NOT NULL")
+        total_recovered = cur.fetchone()[0] or 0
+
+        cur.close()
+        conn.close()
+
+        retrain_ready = total >= 50
+        return {
+            "total_labels": total,
+            "distinct_companies": companies,
+            "latest_label": str(latest) if latest else None,
+            "total_amount_recovered": float(total_recovered),
+            "retrain_ready": retrain_ready,
+            "retrain_message": "Đủ dữ liệu để retrain model." if retrain_ready else f"Cần thêm {50 - total} nhãn.",
+            "label_distribution": label_dist,
+            "decision_distribution": decision_dist,
+            "generated_at": datetime.utcnow().isoformat(),
+        }
+    except Exception as e:
+        return {
+            "total_labels": 0,
+            "retrain_ready": False,
+            "retrain_message": f"Lỗi kiểm tra: {str(e)}",
+            "label_distribution": [],
+            "generated_at": datetime.utcnow().isoformat(),
+        }
+

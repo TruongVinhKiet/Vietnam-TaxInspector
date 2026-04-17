@@ -504,3 +504,213 @@ def _extract_full_graph(db: Session, limit: int = 200) -> tuple:
     invoices = [dict(zip(inv_columns, row)) for row in inv_result.fetchall()]
 
     return companies, invoices
+
+
+# ════════════════════════════════════════════════════════════════
+#  Graph Intelligence 2.0 (Program B) – Flagship Endpoints
+# ════════════════════════════════════════════════════════════════
+
+@router.get("/graph/motifs")
+def detect_graph_motifs(
+    tax_code: Optional[str] = Query(None, description="Tax code tâm điểm"),
+    depth: int = Query(2, ge=1, le=4),
+    db: Session = Depends(get_db),
+):
+    """
+    Motif Detection: Identify suspicious transaction patterns in the VAT invoice graph.
+    Detects: triangles (carousel fraud), stars (shell hubs), chains (layering),
+    fan-out/fan-in patterns.
+    """
+    try:
+        if tax_code:
+            companies, invoices = _extract_subgraph(db, tax_code, depth)
+        else:
+            companies, invoices = _extract_full_graph(db, limit=200)
+    except Exception as e:
+        log_event(logger, "error", "graph_motif_data_error", error=str(e))
+        raise HTTPException(status_code=500, detail=f"Lỗi truy vấn dữ liệu: {str(e)}")
+
+    if not invoices:
+        return {
+            "status": "no_data",
+            "message": "Không có dữ liệu giao dịch để phân tích motif.",
+            "motifs": {},
+            "summary": {},
+        }
+
+    try:
+        from ml_engine.graph_intelligence import MotifDetector
+        detector = MotifDetector()
+        result = detector.detect_all(companies, invoices)
+
+        log_event(
+            logger, "info", "graph_motif_detection_complete",
+            triangles=result["summary"]["total_triangles"],
+            stars=result["summary"]["total_stars"],
+            chains=result["summary"]["total_chains"],
+        )
+        return result
+
+    except Exception as e:
+        log_event(logger, "error", "graph_motif_detection_failed", error=str(e))
+        raise HTTPException(status_code=500, detail=f"Lỗi phân tích motif: {str(e)}")
+
+
+@router.get("/graph/link-prediction")
+def predict_graph_links(
+    tax_code: Optional[str] = Query(None),
+    depth: int = Query(2, ge=1, le=4),
+    top_k: int = Query(20, ge=1, le=100),
+    db: Session = Depends(get_db),
+):
+    """
+    Link Prediction: Predict likely future fraudulent connections between companies.
+    Uses Jaccard coefficient + Adamic-Adar index + topology risk.
+    """
+    try:
+        if tax_code:
+            companies, invoices = _extract_subgraph(db, tax_code, depth)
+        else:
+            companies, invoices = _extract_full_graph(db, limit=200)
+    except Exception as e:
+        log_event(logger, "error", "graph_link_pred_data_error", error=str(e))
+        raise HTTPException(status_code=500, detail=f"Lỗi truy vấn dữ liệu: {str(e)}")
+
+    if not invoices:
+        return {"predictions": [], "total": 0, "message": "Không đủ dữ liệu giao dịch."}
+
+    try:
+        from ml_engine.graph_intelligence import LinkPredictor
+        predictor = LinkPredictor()
+        predictions = predictor.predict_new_links(companies, invoices, top_k=top_k)
+
+        log_event(
+            logger, "info", "graph_link_prediction_complete",
+            predicted_links=len(predictions),
+        )
+        return {
+            "predictions": predictions,
+            "total": len(predictions),
+            "query_context": {"tax_code": tax_code, "depth": depth, "top_k": top_k},
+        }
+
+    except Exception as e:
+        log_event(logger, "error", "graph_link_prediction_failed", error=str(e))
+        raise HTTPException(status_code=500, detail=f"Lỗi dự đoán liên kết: {str(e)}")
+
+
+@router.get("/graph/ownership")
+def analyze_ownership_network(
+    tax_code: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+):
+    """
+    Ownership Graph Analysis: Detect shell company networks through ownership relationships.
+    Identifies common controllers, ownership chains, and cross-ownership trades.
+    """
+    try:
+        # Load ownership links
+        if tax_code:
+            ownership_result = db.execute(text("""
+                SELECT ol.id, ol.parent_tax_code, ol.child_tax_code, ol.ownership_percent,
+                       ol.relationship_type, ol.person_name, ol.person_id,
+                       ol.effective_date, ol.end_date, ol.verified
+                FROM ownership_links ol
+                WHERE ol.parent_tax_code = :tc OR ol.child_tax_code = :tc
+                   OR ol.parent_tax_code IN (
+                       SELECT child_tax_code FROM ownership_links WHERE parent_tax_code = :tc
+                   )
+                   OR ol.child_tax_code IN (
+                       SELECT parent_tax_code FROM ownership_links WHERE child_tax_code = :tc
+                   )
+                LIMIT 500
+            """), {"tc": tax_code})
+        else:
+            ownership_result = db.execute(text("""
+                SELECT id, parent_tax_code, child_tax_code, ownership_percent,
+                       relationship_type, person_name, person_id,
+                       effective_date, end_date, verified
+                FROM ownership_links
+                ORDER BY ownership_percent DESC
+                LIMIT 500
+            """))
+
+        ownership_cols = [col for col in ownership_result.keys()]
+        ownership_links = [dict(zip(ownership_cols, row)) for row in ownership_result.fetchall()]
+
+        # Load relevant invoices for cross-ownership trade detection
+        if tax_code:
+            _, invoices = _extract_subgraph(db, tax_code, depth=2)
+        else:
+            _, invoices = _extract_full_graph(db, limit=200)
+
+    except Exception as e:
+        log_event(logger, "error", "graph_ownership_data_error", error=str(e))
+        raise HTTPException(status_code=500, detail=f"Lỗi truy vấn dữ liệu sở hữu: {str(e)}")
+
+    try:
+        from ml_engine.graph_intelligence import OwnershipGraphAnalyzer
+        analyzer = OwnershipGraphAnalyzer()
+        result = analyzer.analyze(ownership_links, invoices)
+
+        log_event(
+            logger, "info", "graph_ownership_analysis_complete",
+            clusters=result.get("summary", {}).get("total_clusters", 0),
+            cross_trades=result.get("summary", {}).get("total_cross_trades", 0),
+        )
+        return result
+
+    except Exception as e:
+        log_event(logger, "error", "graph_ownership_analysis_failed", error=str(e))
+        raise HTTPException(status_code=500, detail=f"Lỗi phân tích sở hữu: {str(e)}")
+
+
+@router.get("/graph/ring-scoring")
+def score_transaction_rings(
+    tax_code: Optional[str] = Query(None),
+    depth: int = Query(2, ge=1, le=4),
+    db: Session = Depends(get_db),
+):
+    """
+    Ring Scoring: Score circular transaction rings by severity.
+    Multi-factor analysis: amount, speed, and complexity.
+    """
+    try:
+        if tax_code:
+            companies, invoices = _extract_subgraph(db, tax_code, depth)
+        else:
+            companies, invoices = _extract_full_graph(db, limit=200)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Lỗi truy vấn dữ liệu: {str(e)}")
+
+    if not invoices:
+        return {"rings": [], "total": 0}
+
+    # Use existing GNN engine to get cycles
+    try:
+        engine = _get_gnn_engine()
+        result = engine.predict(companies, invoices)
+        cycles = result.get("cycles", [])
+    except Exception:
+        cycles = []
+
+    try:
+        from ml_engine.graph_intelligence import RingScorer
+        scorer = RingScorer()
+        scored_rings = scorer.score_rings(cycles, invoices)
+
+        log_event(
+            logger, "info", "graph_ring_scoring_complete",
+            rings_scored=len(scored_rings),
+        )
+        return {
+            "rings": scored_rings,
+            "total": len(scored_rings),
+            "critical_count": sum(1 for r in scored_rings if r["risk_level"] == "critical"),
+            "query_context": {"tax_code": tax_code, "depth": depth},
+        }
+
+    except Exception as e:
+        log_event(logger, "error", "graph_ring_scoring_failed", error=str(e))
+        raise HTTPException(status_code=500, detail=f"Lỗi chấm điểm vòng lặp: {str(e)}")
+

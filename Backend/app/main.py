@@ -33,6 +33,7 @@ async def lifespan(app: FastAPI):
     try:
         from sqlalchemy import text
         with engine.connect() as conn:
+            # Original migrations
             conn.execute(text(
                 "ALTER TABLE ai_risk_assessments "
                 "ADD COLUMN IF NOT EXISTS model_confidence FLOAT;"
@@ -45,8 +46,39 @@ async def lifespan(app: FastAPI):
                 "ALTER TABLE ai_risk_assessments "
                 "ADD COLUMN IF NOT EXISTS model_version VARCHAR(80);"
             ))
+
+            # Flagship model migrations (Phase 0.1)
+            conn.execute(text(
+                "ALTER TABLE companies "
+                "ADD COLUMN IF NOT EXISTS province VARCHAR(100);"
+            ))
+            conn.execute(text(
+                "ALTER TABLE invoices "
+                "ADD COLUMN IF NOT EXISTS payment_status VARCHAR(30) DEFAULT 'unknown';"
+            ))
+            conn.execute(text(
+                "ALTER TABLE invoices "
+                "ADD COLUMN IF NOT EXISTS goods_category VARCHAR(100);"
+            ))
+            conn.execute(text(
+                "ALTER TABLE invoices "
+                "ADD COLUMN IF NOT EXISTS is_adjustment BOOLEAN DEFAULT FALSE;"
+            ))
+            conn.execute(text(
+                "ALTER TABLE tax_returns "
+                "ADD COLUMN IF NOT EXISTS due_date DATE;"
+            ))
+            conn.execute(text(
+                "ALTER TABLE tax_returns "
+                "ADD COLUMN IF NOT EXISTS tax_type VARCHAR(50) DEFAULT 'VAT';"
+            ))
+            conn.execute(text(
+                "ALTER TABLE tax_returns "
+                "ADD COLUMN IF NOT EXISTS amendment_number INTEGER DEFAULT 0;"
+            ))
+
             conn.commit()
-        print("[OK] Schema migration: model_confidence + yearly_history + model_version columns verified.")
+        print("[OK] Schema migration: all flagship columns verified.")
     except Exception as e:
         print(f"[WARN] Schema migration skipped (table may not exist yet): {e}")
 
@@ -75,9 +107,11 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="TaxInspector ML API",
-    description="API he thong giam sat thue tich hop Machine Learning: "
-                "Fraud Risk Scoring, VAT Invoice Graph, Delinquency Prediction.",
-    version="2.0.0-SECURE",
+    description="API hệ thống giám sát thuế tích hợp Machine Learning: "
+                "Fraud Risk Scoring, VAT Invoice Graph, Delinquency Prediction, "
+                "Temporal Compliance Intelligence, Graph Intelligence 2.0, "
+                "Investigator Decision Intelligence.",
+    version="3.0.0-FLAGSHIP",
     lifespan=lifespan,
 )
 
@@ -117,7 +151,7 @@ app.include_router(monitoring.router)
 def read_root():
     return {
         "status": "online",
-        "version": "2.0.0-SECURE",
+        "version": "3.0.0-FLAGSHIP",
         "security": {
             "cookie_auth": True,
             "rate_limiting": True,
@@ -125,5 +159,10 @@ def read_root():
             "data_encryption": True,
             "audit_logging": True,
         },
-        "message": "TaxInspector API is running with full security hardening.",
+        "flagship_models": {
+            "temporal_compliance": "Program A – active",
+            "graph_intelligence": "Program B – active",
+            "decision_intelligence": "Program C – active",
+        },
+        "message": "TaxInspector API is running with full security hardening + flagship models.",
     }

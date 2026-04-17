@@ -88,7 +88,7 @@
             background-size: 40px 40px;
         }
         /* Tab active/inactive styles */
-        .tab-btn { transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1); }
+        .tab-btn { transition: all var(--motion-duration-fast, 0.3s) var(--motion-ease-emphasis, cubic-bezier(0.16, 1, 0.3, 1)); }
         .tab-btn.active {
             background: #002147;
             color: #fff;
@@ -98,7 +98,7 @@
             background: transparent;
             color: #44474e;
         }
-        .tab-content { display: none; animation: fadeSlideUp 0.5s cubic-bezier(0.16,1,0.3,1); }
+        .tab-content { display: none; animation: fadeSlideUp var(--motion-duration-medium, 0.5s) var(--motion-ease-emphasis, cubic-bezier(0.16, 1, 0.3, 1)); }
         .tab-content.active { display: block; }
         @keyframes fadeSlideUp {
             from { opacity: 0; transform: translateY(20px); }
@@ -106,13 +106,13 @@
         }
         /* Progress bar */
         .progress-bar-fill {
-            transition: width 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+            transition: width var(--motion-duration-fast, 0.3s) var(--motion-ease-emphasis, cubic-bezier(0.16, 1, 0.3, 1));
             background: linear-gradient(90deg, #002147, #465f88, #aec7f6);
         }
         /* Drop zone */
         .drop-zone {
             border: 2px dashed #c4c6cf;
-            transition: all 0.3s ease;
+            transition: all var(--motion-duration-fast, 0.3s) var(--motion-ease-emphasis, cubic-bezier(0.16, 1, 0.3, 1));
         }
         .drop-zone.dragover {
             border-color: #002147;
@@ -147,13 +147,13 @@
             }
         }
         .red-flag-item {
-            animation: redFlagReveal 0.35s cubic-bezier(0.16, 1, 0.3, 1) both;
+            animation: redFlagReveal var(--motion-duration-red-flag, 0.35s) var(--motion-ease-emphasis, cubic-bezier(0.16, 1, 0.3, 1)) both;
         }
 
         /* Toast Notification */
         .toast-container { position: fixed; top: 80px; right: 24px; z-index: 60; display: flex; flex-direction: column; gap: 12px; pointer-events: none; }
-        .toast { pointer-events: auto; min-width: 340px; max-width: 440px; padding: 16px 20px; border-radius: 12px; display: flex; align-items: flex-start; gap: 12px; box-shadow: 0 20px 40px rgba(0,0,0,.12); animation: toastIn .5s cubic-bezier(.16,1,.3,1); backdrop-filter: blur(12px); border: 1px solid rgba(255,255,255,.1); }
-        .toast.hide { animation: toastOut .4s cubic-bezier(.16,1,.3,1) forwards; }
+        .toast { pointer-events: auto; min-width: 340px; max-width: 440px; padding: 16px 20px; border-radius: 12px; display: flex; align-items: flex-start; gap: 12px; box-shadow: 0 20px 40px rgba(0,0,0,.12); animation: toastIn var(--motion-duration-toast-in, .5s) var(--motion-ease-emphasis, cubic-bezier(.16,1,.3,1)); backdrop-filter: blur(12px); border: 1px solid rgba(255,255,255,.1); }
+        .toast.hide { animation: toastOut var(--motion-duration-toast-out, .4s) var(--motion-ease-emphasis, cubic-bezier(.16,1,.3,1)) forwards; }
         .toast-success { background: linear-gradient(135deg, #065f46, #047857); color: #d1fae5; }
         .toast-error { background: linear-gradient(135deg, #7f1d1d, #991b1b); color: #fecaca; }
         .toast-warning { background: linear-gradient(135deg, #78350f, #92400e); color: #fde68a; }
@@ -248,7 +248,7 @@
             #btn-export-pdf { display: none !important; }
         }
     </style>
-<link rel="stylesheet" href="../css/global.css?v=3.1">
+<link rel="stylesheet" href="../css/global.css?v=3.2">
 <link rel="icon" type="image/png" href="../assets/logo.png">
 </head>
 <body class="bg-background font-body text-on-surface antialiased">

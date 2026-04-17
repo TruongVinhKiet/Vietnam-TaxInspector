@@ -237,3 +237,39 @@ def test_graph_quality_summary_handles_missing_reports(client, monkeypatch, tmp_
     assert payload["serving"]["available"] is False
     assert payload["stress"]["available"] is False
     assert payload["gate_summary"]["all_pass"] is False
+
+
+def test_graph_link_prediction_returns_non_empty_for_open_chain(client, monkeypatch):
+    companies = [
+        {"tax_code": "A", "name": "Cong ty A"},
+        {"tax_code": "B", "name": "Cong ty B"},
+        {"tax_code": "C", "name": "Cong ty C"},
+    ]
+    invoices = [
+        {
+            "seller_tax_code": "A",
+            "buyer_tax_code": "B",
+            "amount": 1000000,
+            "date": "2026-01-01",
+        },
+        {
+            "seller_tax_code": "B",
+            "buyer_tax_code": "C",
+            "amount": 1200000,
+            "date": "2026-01-03",
+        },
+    ]
+
+    monkeypatch.setattr(graph, "_extract_full_graph", lambda db, limit=200: (companies, invoices))
+
+    response = client.get("/api/graph/link-prediction?top_k=5")
+    assert response.status_code == 200
+
+    payload = response.json()
+    assert payload["total"] >= 1
+    assert isinstance(payload["predictions"], list)
+
+    top = payload["predictions"][0]
+    assert top["prediction_score"] > 0
+    assert "jaccard" in top
+    assert "adamic_adar" in top

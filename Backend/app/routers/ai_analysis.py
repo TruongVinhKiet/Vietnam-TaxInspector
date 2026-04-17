@@ -28,7 +28,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import text, func, and_
 
 from ..database import get_db
-from .. import models, schemas
+from .. import auth, models, schemas
 
 import sys
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
@@ -1481,3 +1481,218 @@ def what_if_grid(tax_code: str, payload: Optional[dict] = None, db: Session = De
             "min_delta_risk": round(min_score - original_risk_score, 2),
         },
     }
+
+
+# ════════════════════════════════════════════════════════════════
+#  Flagship: Multi-Scenario What-If Comparison (Program C)
+#  Investigator Decision Intelligence
+# ════════════════════════════════════════════════════════════════
+
+@router.post("/multi-scenario/{tax_code}", response_model=schemas.MultiScenarioResponse)
+def multi_scenario_comparison(
+    tax_code: str,
+    request: schemas.MultiScenarioRequest,
+    db: Session = Depends(get_db),
+):
+    """
+    Program C – Multi-Scenario What-If: Compare up to 10 scenarios simultaneously.
+    Each scenario adjusts financial parameters by percentage and simulates risk score.
+    Returns comparative analysis with confidence intervals and recommended actions.
+    """
+    # Resolve company
+    company = db.query(models.Company).filter(
+        models.Company.tax_code == tax_code
+    ).first()
+    if not company:
+        raise HTTPException(status_code=404, detail="Không tìm thấy doanh nghiệp.")
+
+    # Get baseline assessment
+    cached = (
+        db.query(models.AIRiskAssessment)
+        .filter(models.AIRiskAssessment.tax_code == tax_code)
+        .order_by(models.AIRiskAssessment.created_at.desc())
+        .first()
+    )
+
+    if not cached:
+        raise HTTPException(
+            status_code=404,
+            detail="Chưa có đánh giá rủi ro cơ sở. Vui lòng chạy phân tích AI trước.",
+        )
+
+    baseline_score = float(cached.risk_score or 0)
+    baseline_level = cached.risk_level or "low"
+    base_revenue = float(cached.revenue or 0)
+    base_expenses = float(cached.total_expenses or 0)
+
+    if base_revenue == 0 and base_expenses == 0:
+        raise HTTPException(
+            status_code=422,
+            detail="Dữ liệu tài chính cơ sở = 0, không thể mô phỏng.",
+        )
+
+    # Load pipeline
+    try:
+        pipeline = get_pipeline()
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Không thể tải model: {exc}",
+        )
+
+    base_data = {
+        "tax_code": tax_code,
+        "company_name": company.name or "",
+        "industry": cached.industry or company.industry or "Unknown",
+        "year": cached.year or 2024,
+        "revenue": base_revenue,
+        "total_expenses": base_expenses,
+        "net_profit": base_revenue - base_expenses,
+        "vat_output": base_revenue * 0.10,
+        "vat_input": base_expenses * 0.75 * 0.10,
+        "industry_avg_profit_margin": 0.08,
+    }
+
+    scenario_results = []
+    for scenario in request.scenarios:
+        adjusted = base_data.copy()
+
+        for field, pct_change in scenario.adjustments.items():
+            if field in adjusted and isinstance(adjusted[field], (int, float)):
+                clamped_pct = max(-80.0, min(250.0, pct_change))
+                adjusted[field] = adjusted[field] * (1 + clamped_pct / 100)
+
+        # Recalculate derived fields
+        adjusted["net_profit"] = adjusted["revenue"] - adjusted["total_expenses"]
+        adjusted["vat_output"] = adjusted["revenue"] * 0.10
+        adjusted["vat_input"] = adjusted["total_expenses"] * 0.75 * 0.10
+
+        # Run prediction
+        try:
+            result = pipeline.predict_single([adjusted])
+            sim_score = float(result.get("risk_score", 0))
+        except Exception:
+            sim_score = baseline_score
+
+        # Classify risk level
+        if sim_score >= 80:
+            sim_level = "critical"
+        elif sim_score >= 60:
+            sim_level = "high"
+        elif sim_score >= 40:
+            sim_level = "medium"
+        else:
+            sim_level = "low"
+
+        delta = round(sim_score - baseline_score, 2)
+
+        # Confidence interval (heuristic: ±5% of score)
+        ci_margin = max(2.0, sim_score * 0.05)
+        ci_low = round(max(0, sim_score - ci_margin), 2)
+        ci_high = round(min(100, sim_score + ci_margin), 2)
+
+        # Recommended action
+        if sim_level == "critical":
+            action = "Khẩn cấp: Lập tức kiểm tra & thu hồi thuế"
+        elif sim_level == "high":
+            action = "Ưu tiên cao: Lên kế hoạch thanh tra trong 30 ngày"
+        elif sim_level == "medium":
+            action = "Theo dõi: Đưa vào danh sách giám sát quý"
+        else:
+            action = "Bình thường: Không cần hành động đặc biệt"
+
+        # Simulated feature values
+        sim_features = {}
+        for field in ("revenue", "total_expenses", "net_profit", "vat_output", "vat_input"):
+            sim_features[field] = round(adjusted.get(field, 0), 2)
+
+        scenario_results.append(schemas.ScenarioResult(
+            name=scenario.name,
+            adjustments=scenario.adjustments,
+            simulated_risk_score=round(sim_score, 2),
+            risk_level=sim_level,
+            delta_risk=delta,
+            confidence_low=ci_low,
+            confidence_high=ci_high,
+            simulated_features=sim_features,
+            recommended_action=action,
+        ))
+
+    # Determine best/worst
+    best = min(scenario_results, key=lambda s: s.simulated_risk_score) if scenario_results else None
+    worst = max(scenario_results, key=lambda s: s.simulated_risk_score) if scenario_results else None
+
+    return schemas.MultiScenarioResponse(
+        tax_code=tax_code,
+        company_name=company.name or "",
+        baseline_risk_score=baseline_score,
+        baseline_risk_level=baseline_level,
+        scenarios=scenario_results,
+        best_scenario=best.name if best else None,
+        worst_scenario=worst.name if worst else None,
+    )
+
+
+@router.post("/inspector-label")
+def submit_inspector_label(
+    label: schemas.InspectorLabelCreate,
+    current_user: models.User = Depends(auth.get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Submit a ground-truth label from an inspector.
+    Used for model retraining and false positive reduction.
+    """
+    if label.assessment_id is not None:
+        assessment = (
+            db.query(models.AIRiskAssessment)
+            .filter(models.AIRiskAssessment.id == label.assessment_id)
+            .first()
+        )
+        if assessment is None:
+            raise HTTPException(status_code=404, detail="Không tìm thấy assessment_id tương ứng.")
+        if assessment.tax_code and assessment.tax_code != label.tax_code:
+            raise HTTPException(
+                status_code=400,
+                detail="assessment_id không khớp với tax_code.",
+            )
+
+    new_label = models.InspectorLabel(
+        tax_code=label.tax_code,
+        inspector_id=current_user.id,
+        label_type=label.label_type,
+        confidence=label.confidence,
+        assessment_id=label.assessment_id,
+        evidence_summary=label.evidence_summary,
+        decision=label.decision,
+        decision_date=label.decision_date,
+        tax_period=label.tax_period,
+        amount_recovered=label.amount_recovered,
+    )
+    db.add(new_label)
+    db.commit()
+    db.refresh(new_label)
+
+    return schemas.InspectorLabelResponse.model_validate(new_label)
+
+
+@router.get("/inspector-labels/{tax_code}")
+def get_inspector_labels(
+    tax_code: str,
+    db: Session = Depends(get_db),
+):
+    """Get all inspector labels for a specific company."""
+    labels = (
+        db.query(models.InspectorLabel)
+        .filter(models.InspectorLabel.tax_code == tax_code)
+        .order_by(models.InspectorLabel.created_at.desc())
+        .limit(100)
+        .all()
+    )
+
+    return {
+        "tax_code": tax_code,
+        "labels": [schemas.InspectorLabelResponse.model_validate(l) for l in labels],
+        "total": len(labels),
+    }
+

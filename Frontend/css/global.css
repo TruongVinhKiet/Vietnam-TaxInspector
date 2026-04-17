@@ -1,4 +1,21 @@
 /* Common Styles */
+:root {
+    --motion-ease-emphasis: cubic-bezier(0.16, 1, 0.3, 1);
+    --motion-duration-fast: 0.3s;
+    --motion-duration-medium: 0.5s;
+    --motion-duration-page: 0.6s;
+    --motion-duration-modal: 0.32s;
+    --motion-duration-red-flag: 0.35s;
+    --motion-duration-toast-in: 0.5s;
+    --motion-duration-toast-out: 0.4s;
+
+    /* JS-friendly numeric tokens */
+    --motion-duration-chart-ms: 900;
+    --motion-duration-score-ms: 850;
+    --motion-duration-result-ms: 600;
+    --motion-duration-toast-out-ms: 400;
+}
+
 body {
     font-family: 'Inter', sans-serif;
 }
@@ -50,8 +67,9 @@ html {
     scroll-behavior: smooth;
 }
 
-body.page-transition {
-    animation: fadeSlideUp 0.6s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+body.page-transition,
+.page-transition {
+    animation: fadeSlideUp var(--motion-duration-page) var(--motion-ease-emphasis) forwards;
 }
 
 @keyframes fadeSlideUp {
@@ -62,5 +80,19 @@ body.page-transition {
     to {
         opacity: 1;
         transform: none;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    html {
+        scroll-behavior: auto !important;
+    }
+
+    *,
+    *::before,
+    *::after {
+        animation-duration: 0ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0ms !important;
     }
 }
