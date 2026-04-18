@@ -95,6 +95,44 @@
             box-shadow: 0 8px 18px rgba(0, 33, 71, 0.08);
         }
 
+        .delinq-toolbar-btn {
+            transition: transform var(--motion-duration-fast, 0.24s) var(--motion-ease-standard, cubic-bezier(0.2, 0, 0, 1)),
+                        box-shadow var(--motion-duration-fast, 0.24s) var(--motion-ease-standard, cubic-bezier(0.2, 0, 0, 1)),
+                        background-color var(--motion-duration-fast, 0.24s) var(--motion-ease-standard, cubic-bezier(0.2, 0, 0, 1));
+        }
+
+        .delinq-toolbar-btn:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 8px 16px rgba(0, 33, 71, 0.1);
+        }
+
+        .delinq-active-filter-chip {
+            transition: transform var(--motion-duration-fast, 0.24s) var(--motion-ease-standard, cubic-bezier(0.2, 0, 0, 1));
+        }
+
+        .delinq-active-filter-chip:hover {
+            transform: translateY(-1px);
+        }
+
+        .delinq-modal-chip {
+            transition: all var(--motion-duration-fast, 0.24s) var(--motion-ease-standard, cubic-bezier(0.2, 0, 0, 1));
+        }
+
+        .delinq-modal-chip[aria-pressed="true"] {
+            box-shadow: 0 8px 16px rgba(0, 33, 71, 0.12);
+            transform: translateY(-1px);
+        }
+
+        .delinq-modal-radio {
+            transition: border-color var(--motion-duration-fast, 0.24s) var(--motion-ease-standard, cubic-bezier(0.2, 0, 0, 1)),
+                        background-color var(--motion-duration-fast, 0.24s) var(--motion-ease-standard, cubic-bezier(0.2, 0, 0, 1));
+        }
+
+        .delinq-modal-radio:hover {
+            border-color: rgba(2, 132, 199, 0.3);
+            background-color: rgba(248, 250, 252, 0.9);
+        }
+
         .delinq-legend-chip {
             transition: transform var(--motion-duration-fast, 0.24s) var(--motion-ease-standard, cubic-bezier(0.2, 0, 0, 1)),
                         box-shadow var(--motion-duration-fast, 0.24s) var(--motion-ease-standard, cubic-bezier(0.2, 0, 0, 1)),
@@ -246,84 +284,79 @@
 </div>
 <!-- Enterprise Data Grid -->
 <div class="max-w-6xl mx-auto bg-surface-container-lowest rounded-xl overflow-hidden shadow-[0_20px_40px_rgba(0,33,71,0.06)]">
-<div class="px-8 py-6 bg-white flex flex-col md:flex-row md:justify-between md:items-center gap-4 border-b border-slate-100">
+<div class="px-8 py-6 bg-white border-b border-slate-100 space-y-4">
+<div class="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4">
 <div>
 <h3 class="text-lg font-bold text-primary-container tracking-tight">Danh sách Doanh nghiệp – Dự báo Trễ hạn</h3>
-<p class="text-xs text-slate-500 mt-1">Bấm vào Chi tiết để mở trang hồ sơ rủi ro riêng cho từng doanh nghiệp.</p>
+<p class="text-xs text-slate-500 mt-1">Tập trung vào 4 thông tin quyết định: doanh nghiệp, xác suất, can thiệp, hành động.</p>
 </div>
-<div class="flex gap-2 items-center flex-wrap">
-<label for="delinq-search-keyword" class="text-[10px] font-bold uppercase tracking-widest text-slate-500">Từ khóa</label>
-<input id="delinq-search-keyword" type="text" class="delinq-filter-control min-w-[220px] bg-surface-container-low border border-outline-variant/20 rounded-lg px-3 py-2 text-xs font-semibold text-slate-700 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-primary-container/40" placeholder="MST / tên DN / cụm rủi ro" autocomplete="off">
-<label for="delinq-freshness-filter" class="text-[10px] font-bold uppercase tracking-widest text-slate-500">Độ mới</label>
-<select id="delinq-freshness-filter" class="delinq-filter-control bg-surface-container-low border border-outline-variant/20 rounded-lg px-3 py-2 text-xs font-semibold text-slate-700 focus:outline-none focus:ring-2 focus:ring-primary-container/40">
-<option value="">Tất cả</option>
-<option value="stale">Cũ (&gt;30 ngày)</option>
-<option value="aging">Đang cũ (8-30 ngày)</option>
-<option value="fresh">Mới (0-7 ngày)</option>
-<option value="unknown">Không rõ</option>
-</select>
-<label for="delinq-intervention-filter" class="text-[10px] font-bold uppercase tracking-widest text-slate-500">Can thiệp</label>
-<select id="delinq-intervention-filter" class="delinq-filter-control bg-surface-container-low border border-outline-variant/20 rounded-lg px-3 py-2 text-xs font-semibold text-slate-700 focus:outline-none focus:ring-2 focus:ring-primary-container/40">
-<option value="">Tất cả</option>
-<option value="priority_hot">Ưu tiên cao (P≥70)</option>
-<option value="escalated_enforcement">Cưỡng chế tăng cường</option>
-<option value="field_audit">Kiểm tra thực địa</option>
-<option value="structured_outreach">Tiếp cận có cấu trúc</option>
-<option value="auto_reminder">Nhắc hạn tự động</option>
-<option value="monitor">Theo dõi</option>
-</select>
-<label for="delinq-sort-by" class="text-[10px] font-bold uppercase tracking-widest text-slate-500">Sắp xếp</label>
-<select id="delinq-sort-by" class="delinq-filter-control bg-surface-container-low border border-outline-variant/20 rounded-lg px-3 py-2 text-xs font-semibold text-slate-700 focus:outline-none focus:ring-2 focus:ring-primary-container/40">
-<option value="risk_desc">Rủi ro (mặc định)</option>
-<option value="intervention_priority_desc">Ưu tiên can thiệp ↓</option>
-<option value="intervention_priority_asc">Ưu tiên can thiệp ↑</option>
-<option value="expected_risk_reduction_desc">Giảm rủi ro kỳ vọng ↓</option>
-<option value="expected_collection_uplift_desc">Tăng thu hồi kỳ vọng ↓</option>
-</select>
-<button id="delinq-batch-predict-btn" class="bg-emerald-600 text-white px-4 py-2 rounded-lg text-xs font-bold uppercase tracking-widest flex items-center gap-2 hover:bg-emerald-700 transition-colors">
+<div class="flex flex-col gap-3 w-full lg:w-auto lg:min-w-[34rem]">
+<div class="flex flex-wrap items-center gap-2">
+<div class="relative flex-1 min-w-[240px]">
+<span class="material-symbols-outlined text-[16px] text-slate-400 absolute left-3 top-1/2 -translate-y-1/2">search</span>
+<input id="delinq-search-keyword" type="text" class="delinq-filter-control w-full bg-surface-container-low border border-outline-variant/20 rounded-lg pl-9 pr-3 py-2 text-xs font-semibold text-slate-700 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-primary-container/40" placeholder="Tìm theo MST, tên doanh nghiệp, nhóm rủi ro" autocomplete="off">
+</div>
+<button id="delinq-open-filter-btn" type="button" class="delinq-toolbar-btn inline-flex items-center gap-1.5 bg-white border border-outline-variant/30 text-slate-700 px-3 py-2 rounded-lg text-xs font-bold">
+<span class="material-symbols-outlined text-[16px]">tune</span>
+<span>Bộ lọc</span>
+<span id="delinq-active-filter-count" class="min-w-[18px] h-[18px] px-1 rounded-full bg-primary-container text-white text-[10px] inline-flex items-center justify-center font-black">0</span>
+</button>
+<button id="delinq-open-sort-btn" type="button" class="delinq-toolbar-btn inline-flex items-center gap-1.5 bg-white border border-outline-variant/30 text-slate-700 px-3 py-2 rounded-lg text-xs font-bold">
+<span class="material-symbols-outlined text-[16px]">swap_vert</span>
+<span id="delinq-sort-label">Rủi ro</span>
+</button>
+<button id="delinq-batch-predict-btn" class="delinq-toolbar-btn bg-emerald-600 text-white px-4 py-2 rounded-lg text-xs font-bold uppercase tracking-wide flex items-center gap-2 hover:bg-emerald-700 transition-colors">
 <span class="material-symbols-outlined text-[16px]">autorenew</span> Dự báo hàng loạt
 </button>
-<button class="bg-primary-container text-white px-4 py-2 rounded-lg text-xs font-bold uppercase tracking-widest flex items-center gap-2 hover:opacity-90 transition-all">
-<span class="material-symbols-outlined text-[16px]">file_download</span> Xuất báo cáo
-                        </button>
+</div>
+<div id="delinq-active-filter-summary" class="hidden items-center justify-between gap-2 rounded-lg border border-outline-variant/20 bg-slate-50 px-3 py-2">
+<div id="delinq-active-filter-chips" class="flex flex-wrap items-center gap-1.5"></div>
+<button id="delinq-clear-filters-btn" type="button" class="text-[11px] font-bold text-slate-500 hover:text-primary-container transition-colors">Xóa tất cả</button>
+</div>
+</div>
 </div>
 </div>
 <div class="px-8 py-2 bg-slate-50 border-b border-slate-100 hidden" id="delinq-batch-status"></div>
-<div id="delinq-split-gate-strip" class="px-8 py-3 bg-slate-50 border-b border-slate-100">
-<div class="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-2">
-<div>
-<p class="text-[10px] font-bold uppercase tracking-widest text-slate-500">Quản trị split-trigger</p>
-<p id="delinq-split-gate-summary" class="text-[11px] text-slate-500">Đang tải trạng thái split-trigger...</p>
+<div id="delinq-split-gate-strip" class="px-8 py-2.5 bg-slate-50 border-b border-slate-100">
+<div class="flex flex-wrap items-center justify-between gap-2">
+<div class="flex items-center gap-2 min-w-0">
+<span class="material-symbols-outlined text-[16px] text-slate-500">policy</span>
+<p id="delinq-split-gate-summary" class="text-[11px] text-slate-600 font-semibold truncate">Đang tải trạng thái split-trigger...</p>
 </div>
 <div class="flex items-center gap-2">
-<span id="delinq-split-gate-updated" class="text-[10px] text-slate-400 uppercase tracking-wider">Cập nhật: --</span>
+<button type="button" class="text-slate-400 hover:text-slate-600 transition-colors" title="Split-trigger điều phối các hành động can thiệp theo KPI và quy tắc quản trị.">
+<span class="material-symbols-outlined text-[15px]">info</span>
+</button>
+<span id="delinq-split-gate-updated" class="text-[10px] text-slate-400 tracking-wide">Cập nhật: --</span>
 <span id="delinq-split-gate-badge" class="text-[10px] px-2 py-0.5 rounded bg-slate-100 text-slate-600 font-black uppercase tracking-wider">ĐANG TẢI</span>
 </div>
 </div>
 </div>
-<div id="delinq-intervention-legend" class="px-8 py-3 bg-white border-b border-slate-100">
-<div class="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-2">
-<p class="text-[10px] font-bold uppercase tracking-widest text-slate-500">Chú giải nhanh can thiệp (nhấn để lọc nhanh)</p>
-<p class="text-[10px] text-slate-400">Màu badge phản ánh mức độ can thiệp từ Theo dõi đến Cưỡng chế tăng cường.</p>
+<div id="delinq-intervention-legend" class="px-8 py-2.5 bg-white border-b border-slate-100">
+<div class="flex items-center justify-between gap-2">
+<p class="text-[11px] font-semibold text-slate-500">Lọc nhanh theo can thiệp</p>
+<button id="delinq-legend-toggle-btn" type="button" class="text-[11px] font-bold text-slate-500 hover:text-primary-container transition-colors">Ẩn chú giải</button>
 </div>
-<div class="flex flex-wrap gap-2 mt-2">
-<button type="button" data-legend-intervention="" aria-pressed="true" class="delinq-legend-chip px-2.5 py-1 rounded text-[10px] font-black uppercase tracking-wider bg-slate-100 text-slate-700 border border-slate-200">Tất cả</button>
-<button type="button" data-legend-intervention="monitor" aria-pressed="false" class="delinq-legend-chip px-2.5 py-1 rounded text-[10px] font-black uppercase tracking-wider bg-slate-100 text-slate-600 border border-slate-200">Theo dõi</button>
-<button type="button" data-legend-intervention="auto_reminder" aria-pressed="false" class="delinq-legend-chip px-2.5 py-1 rounded text-[10px] font-black uppercase tracking-wider bg-blue-50 text-blue-700 border border-blue-100">Nhắc hạn tự động</button>
-<button type="button" data-legend-intervention="structured_outreach" aria-pressed="false" class="delinq-legend-chip px-2.5 py-1 rounded text-[10px] font-black uppercase tracking-wider bg-amber-50 text-amber-700 border border-amber-100">Tiếp cận có cấu trúc</button>
-<button type="button" data-legend-intervention="field_audit" aria-pressed="false" class="delinq-legend-chip px-2.5 py-1 rounded text-[10px] font-black uppercase tracking-wider bg-orange-50 text-orange-700 border border-orange-100">Kiểm tra thực địa</button>
-<button type="button" data-legend-intervention="escalated_enforcement" aria-pressed="false" class="delinq-legend-chip px-2.5 py-1 rounded text-[10px] font-black uppercase tracking-wider bg-rose-50 text-rose-700 border border-rose-100">Cưỡng chế tăng cường</button>
-<button type="button" data-legend-intervention="priority_hot" aria-pressed="false" class="delinq-legend-chip px-2.5 py-1 rounded text-[10px] font-black uppercase tracking-wider bg-violet-50 text-violet-700 border border-violet-100">Ưu tiên nóng (P≥70)</button>
+<div id="delinq-intervention-legend-scroll" class="mt-2 overflow-x-auto">
+<div class="flex min-w-max gap-2 pb-1">
+<button type="button" data-legend-intervention="" aria-pressed="true" class="delinq-legend-chip px-2.5 py-1 rounded text-[10px] font-bold tracking-wide bg-slate-100 text-slate-700 border border-slate-200">Tất cả</button>
+<button type="button" data-legend-intervention="monitor" aria-pressed="false" class="delinq-legend-chip px-2.5 py-1 rounded text-[10px] font-bold tracking-wide bg-slate-100 text-slate-600 border border-slate-200">Theo dõi</button>
+<button type="button" data-legend-intervention="auto_reminder" aria-pressed="false" class="delinq-legend-chip px-2.5 py-1 rounded text-[10px] font-bold tracking-wide bg-blue-50 text-blue-700 border border-blue-100">Nhắc hạn tự động</button>
+<button type="button" data-legend-intervention="structured_outreach" aria-pressed="false" class="delinq-legend-chip px-2.5 py-1 rounded text-[10px] font-bold tracking-wide bg-amber-50 text-amber-700 border border-amber-100">Tiếp cận có cấu trúc</button>
+<button type="button" data-legend-intervention="field_audit" aria-pressed="false" class="delinq-legend-chip px-2.5 py-1 rounded text-[10px] font-bold tracking-wide bg-orange-50 text-orange-700 border border-orange-100">Kiểm tra thực địa</button>
+<button type="button" data-legend-intervention="escalated_enforcement" aria-pressed="false" class="delinq-legend-chip px-2.5 py-1 rounded text-[10px] font-bold tracking-wide bg-rose-50 text-rose-700 border border-rose-100">Cưỡng chế tăng cường</button>
+<button type="button" data-legend-intervention="priority_hot" aria-pressed="false" class="delinq-legend-chip px-2.5 py-1 rounded text-[10px] font-bold tracking-wide bg-violet-50 text-violet-700 border border-violet-100">Ưu tiên nóng (P≥70)</button>
+</div>
 </div>
 </div>
 <div class="px-8 py-4 bg-surface-container-low border-b border-slate-100">
-<div class="grid grid-cols-12 gap-3 text-[10px] uppercase tracking-widest font-bold text-slate-500">
+<div class="grid grid-cols-12 gap-3 text-[10px] tracking-wide font-bold text-slate-500">
 <div class="col-span-12 md:col-span-2">MST</div>
 <div class="col-span-12 md:col-span-3">Doanh nghiệp</div>
-<div class="col-span-12 md:col-span-2">Nhóm rủi ro</div>
 <div class="col-span-12 md:col-span-3">Xác suất Trễ hạn</div>
-<div class="col-span-8 md:col-span-1">Phạt</div>
-<div class="col-span-4 md:col-span-1 text-right">Hành động</div>
+<div class="col-span-8 md:col-span-2">Can thiệp</div>
+<div class="col-span-4 md:col-span-1">Phạt</div>
+<div class="col-span-12 md:col-span-1 text-right">Hành động</div>
 </div>
 </div>
 <div id="delinq-list" class="divide-y divide-slate-100 min-h-[280px]">
@@ -335,6 +368,92 @@
 <div id="delinq-pagination" class="flex items-center gap-2 flex-wrap">
 <!-- Dynamic pagination by delinquency.js -->
 </div>
+</div>
+</div>
+
+<div id="delinq-filter-modal" class="fixed inset-0 z-[90] hidden" aria-hidden="true">
+<div class="absolute inset-0 bg-slate-900/45 backdrop-blur-[1px]" data-filter-modal-close></div>
+<div class="relative z-10 flex min-h-full items-end sm:items-center justify-center p-3 sm:p-6">
+<section role="dialog" aria-modal="true" aria-labelledby="delinq-filter-modal-title" class="delinq-modal-enter w-full max-w-3xl max-h-[88vh] overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl flex flex-col">
+<header class="px-5 py-4 border-b border-slate-100 flex items-start justify-between gap-3">
+<div>
+<h3 id="delinq-filter-modal-title" class="text-base font-black text-primary-container tracking-tight">Bộ lọc nâng cao</h3>
+<p class="text-xs text-slate-500 mt-1">Thiết lập lọc theo nhóm, sau đó nhấn Áp dụng để làm mới danh sách.</p>
+</div>
+<button type="button" class="p-1.5 rounded-md text-slate-400 hover:bg-slate-100 hover:text-slate-600 transition-colors" data-filter-modal-close aria-label="Đóng hộp thoại lọc">
+<span class="material-symbols-outlined text-[18px]">close</span>
+</button>
+</header>
+
+<div class="px-5 py-4 overflow-y-auto space-y-4">
+<div class="rounded-xl border border-slate-100 bg-slate-50 p-4">
+<h4 class="text-xs font-bold text-slate-600 tracking-wide">Cơ bản</h4>
+<div class="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-3">
+<label class="text-xs text-slate-600 font-semibold">Từ khóa
+<input id="delinq-modal-search-keyword" type="text" class="mt-1 w-full bg-white border border-outline-variant/20 rounded-lg px-3 py-2 text-xs font-semibold text-slate-700 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-primary-container/40" placeholder="MST, tên doanh nghiệp, nhóm rủi ro" autocomplete="off">
+</label>
+<label class="text-xs text-slate-600 font-semibold">Độ mới dự báo
+<select id="delinq-modal-freshness" class="mt-1 w-full bg-white border border-outline-variant/20 rounded-lg px-3 py-2 text-xs font-semibold text-slate-700 focus:outline-none focus:ring-2 focus:ring-primary-container/40">
+<option value="">Tất cả</option>
+<option value="stale">Cũ (&gt;30 ngày)</option>
+<option value="aging">Đang cũ (8-30 ngày)</option>
+<option value="fresh">Mới (0-7 ngày)</option>
+<option value="unknown">Không rõ</option>
+</select>
+</label>
+</div>
+</div>
+
+<div id="delinq-modal-governance-hint" class="hidden rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] text-amber-700 font-semibold"></div>
+
+<div class="rounded-xl border border-slate-100 bg-slate-50 p-4">
+<h4 class="text-xs font-bold text-slate-600 tracking-wide">Can thiệp</h4>
+<div id="delinq-modal-intervention-group" class="mt-3 flex flex-wrap gap-2">
+<button type="button" data-modal-intervention="" aria-pressed="true" class="delinq-modal-chip px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-slate-700 text-xs font-bold">Tất cả</button>
+<button type="button" data-modal-intervention="monitor" aria-pressed="false" class="delinq-modal-chip px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-slate-700 text-xs font-bold">Theo dõi</button>
+<button type="button" data-modal-intervention="auto_reminder" aria-pressed="false" class="delinq-modal-chip px-3 py-1.5 rounded-lg border border-blue-100 bg-blue-50 text-blue-700 text-xs font-bold">Nhắc hạn tự động</button>
+<button type="button" data-modal-intervention="structured_outreach" aria-pressed="false" class="delinq-modal-chip px-3 py-1.5 rounded-lg border border-amber-100 bg-amber-50 text-amber-700 text-xs font-bold">Tiếp cận có cấu trúc</button>
+<button type="button" data-modal-intervention="field_audit" aria-pressed="false" class="delinq-modal-chip px-3 py-1.5 rounded-lg border border-orange-100 bg-orange-50 text-orange-700 text-xs font-bold">Kiểm tra thực địa</button>
+<button type="button" data-modal-intervention="escalated_enforcement" aria-pressed="false" class="delinq-modal-chip px-3 py-1.5 rounded-lg border border-rose-100 bg-rose-50 text-rose-700 text-xs font-bold">Cưỡng chế tăng cường</button>
+<button type="button" data-modal-intervention="priority_hot" aria-pressed="false" class="delinq-modal-chip px-3 py-1.5 rounded-lg border border-violet-100 bg-violet-50 text-violet-700 text-xs font-bold">Ưu tiên nóng (P≥70)</button>
+</div>
+</div>
+
+<div id="delinq-modal-sort-section" class="rounded-xl border border-slate-100 bg-slate-50 p-4">
+<h4 class="text-xs font-bold text-slate-600 tracking-wide">Sắp xếp</h4>
+<div class="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-2">
+<label class="delinq-modal-radio rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 flex items-center gap-2">
+<input type="radio" name="delinq-modal-sort" value="risk_desc" class="text-primary-container focus:ring-primary-container/40" checked>
+<span>Rủi ro (mặc định)</span>
+</label>
+<label class="delinq-modal-radio rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 flex items-center gap-2">
+<input type="radio" name="delinq-modal-sort" value="intervention_priority_desc" class="text-primary-container focus:ring-primary-container/40">
+<span>Ưu tiên can thiệp giảm dần</span>
+</label>
+<label class="delinq-modal-radio rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 flex items-center gap-2">
+<input type="radio" name="delinq-modal-sort" value="intervention_priority_asc" class="text-primary-container focus:ring-primary-container/40">
+<span>Ưu tiên can thiệp tăng dần</span>
+</label>
+<label class="delinq-modal-radio rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 flex items-center gap-2">
+<input type="radio" name="delinq-modal-sort" value="expected_risk_reduction_desc" class="text-primary-container focus:ring-primary-container/40">
+<span>Giảm rủi ro kỳ vọng</span>
+</label>
+<label class="delinq-modal-radio rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 flex items-center gap-2 sm:col-span-2">
+<input type="radio" name="delinq-modal-sort" value="expected_collection_uplift_desc" class="text-primary-container focus:ring-primary-container/40">
+<span>Tăng thu hồi kỳ vọng</span>
+</label>
+</div>
+</div>
+</div>
+
+<footer class="px-5 py-3 border-t border-slate-100 bg-white flex items-center justify-between gap-3">
+<button id="delinq-modal-reset-btn" type="button" class="text-xs font-bold text-slate-500 hover:text-primary-container transition-colors">Đặt lại</button>
+<div class="flex items-center gap-2">
+<button type="button" data-filter-modal-close class="px-3 py-2 rounded-lg border border-slate-200 text-xs font-bold text-slate-600 hover:bg-slate-50 transition-colors">Hủy</button>
+<button id="delinq-modal-apply-btn" type="button" class="px-4 py-2 rounded-lg bg-primary-container text-white text-xs font-bold hover:opacity-90 transition-all">Áp dụng</button>
+</div>
+</footer>
+</section>
 </div>
 </div>
 </main>
@@ -357,7 +476,7 @@
 </div>
 </footer>
 <script src="../js/api.js?v=3.2"></script>
-<script src="../js/delinquency.js?v=3.3"></script>
+<script src="../js/delinquency.js?v=3.4"></script>
 <script>
 document.addEventListener("DOMContentLoaded", function() {
     const currentPage = window.location.pathname.split("/").pop() || 'dashboard.html';

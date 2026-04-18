@@ -25,6 +25,13 @@ const ALLOWED_SORT = new Set([
     "expected_risk_reduction_desc",
     "expected_collection_uplift_desc",
 ]);
+const SORT_LABELS = {
+    risk_desc: "Rủi ro",
+    intervention_priority_desc: "Ưu tiên ↓",
+    intervention_priority_asc: "Ưu tiên ↑",
+    expected_risk_reduction_desc: "Giảm rủi ro",
+    expected_collection_uplift_desc: "Tăng thu hồi",
+};
 
 const state = {
     currentPage: 1,
@@ -35,6 +42,18 @@ const state = {
     interventionFilter: "",
     sortBy: "risk_desc",
     splitTriggerGate: null,
+};
+
+const filterModalState = {
+    isOpen: false,
+    focusTarget: "basic",
+    previousFocusedElement: null,
+    draft: {
+        searchKeyword: "",
+        freshnessFilter: "",
+        interventionFilter: "",
+        sortBy: "risk_desc",
+    },
 };
 
 let latestRequestId = 0;
@@ -174,28 +193,17 @@ function applyDelinquencySplitTriggerGate(rawStatus) {
     }
 
     const batchButton = document.getElementById("delinq-batch-predict-btn");
-    const interventionFilter = document.getElementById("delinq-intervention-filter");
-    const sortSelect = document.getElementById("delinq-sort-by");
-
-    if (interventionFilter) {
-        interventionFilter.value = state.interventionFilter;
-    }
-    if (sortSelect) {
-        sortSelect.value = state.sortBy;
-    }
+    const openSortButton = document.getElementById("delinq-open-sort-btn");
 
     setElementDisabled(batchButton, lockInterventionActions);
-    setElementDisabled(interventionFilter, lockInterventionActions);
-    setElementDisabled(sortSelect, lockInterventionActions);
 
     if (batchButton) {
         batchButton.title = lockInterventionActions ? lockReason : "Chạy dự báo hàng loạt trễ hạn nộp thuế";
     }
-    if (interventionFilter) {
-        interventionFilter.title = lockInterventionActions ? lockReason : "Lọc theo can thiệp";
-    }
-    if (sortSelect) {
-        sortSelect.title = lockInterventionActions ? lockReason : "Sắp xếp theo can thiệp";
+    if (openSortButton) {
+        openSortButton.title = lockInterventionActions
+            ? `${lockReason} (chỉ giữ sắp xếp rủi ro mặc định)`
+            : "Mở cấu hình sắp xếp";
     }
 
     document.querySelectorAll("#delinq-intervention-legend [data-legend-intervention]").forEach((button) => {
@@ -204,6 +212,8 @@ function applyDelinquencySplitTriggerGate(rawStatus) {
     });
 
     syncInterventionLegendState();
+    syncModalGovernanceState();
+    renderFilterToolbarState();
 }
 
 
@@ -248,6 +258,435 @@ function normalizeInterventionFilterValue(value) {
 function normalizeSortValue(value) {
     const normalized = (value || "").toString().trim().toLowerCase();
     return ALLOWED_SORT.has(normalized) ? normalized : "risk_desc";
+}
+
+
+function getSortLabel(sortBy) {
+    const key = normalizeSortValue(sortBy);
+    return SORT_LABELS[key] || SORT_LABELS.risk_desc;
+}
+
+
+function getFreshnessFilterLabel(freshness) {
+    const key = normalizeFreshnessValue(freshness);
+    if (key === "fresh") return "Mới (0-7 ngày)";
+    if (key === "aging") return "Đang cũ (8-30 ngày)";
+    if (key === "stale") return "Cũ (>30 ngày)";
+    if (key === "unknown") return "Không rõ";
+    return "Tất cả";
+}
+
+
+function getInterventionFilterLabel(intervention) {
+    const key = normalizeInterventionFilterValue(intervention);
+    if (key === "priority_hot") return "Ưu tiên nóng (P≥70)";
+    return getInterventionActionLabel(key);
+}
+
+
+function getActiveFilterItems() {
+    const chips = [];
+
+    if (state.searchKeyword) {
+        chips.push({ key: "search", label: `Từ khóa: ${state.searchKeyword}` });
+    }
+    if (state.freshnessFilter) {
+        chips.push({ key: "freshness", label: `Độ mới: ${getFreshnessFilterLabel(state.freshnessFilter)}` });
+    }
+    if (state.interventionFilter) {
+        chips.push({ key: "intervention", label: `Can thiệp: ${getInterventionFilterLabel(state.interventionFilter)}` });
+    }
+    if (state.sortBy !== "risk_desc") {
+        chips.push({ key: "sort", label: `Sắp xếp: ${getSortLabel(state.sortBy)}` });
+    }
+
+    return chips;
+}
+
+
+function renderFilterToolbarState() {
+    const activeItems = getActiveFilterItems();
+    const countElement = document.getElementById("delinq-active-filter-count");
+    if (countElement) {
+        countElement.textContent = String(activeItems.length);
+    }
+
+    const sortLabel = document.getElementById("delinq-sort-label");
+    if (sortLabel) {
+        sortLabel.textContent = getSortLabel(state.sortBy);
+    }
+
+    const summaryContainer = document.getElementById("delinq-active-filter-summary");
+    const chipsContainer = document.getElementById("delinq-active-filter-chips");
+    if (!summaryContainer || !chipsContainer) {
+        return;
+    }
+
+    if (!activeItems.length) {
+        chipsContainer.innerHTML = "";
+        summaryContainer.classList.add("hidden");
+        summaryContainer.classList.remove("flex");
+        return;
+    }
+
+    chipsContainer.innerHTML = activeItems.map((item) => `
+        <button type="button" data-remove-filter="${item.key}" class="delinq-active-filter-chip inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white px-2 py-1 text-[10px] font-bold text-slate-600 hover:text-primary-container hover:border-primary-container/40 transition-colors">
+            <span>${escapeHtml(item.label)}</span>
+            <span class="material-symbols-outlined text-[12px]">close</span>
+        </button>`).join("");
+
+    summaryContainer.classList.remove("hidden");
+    summaryContainer.classList.add("flex");
+}
+
+
+function syncModalDraftFromState() {
+    filterModalState.draft.searchKeyword = state.searchKeyword;
+    filterModalState.draft.freshnessFilter = state.freshnessFilter;
+    filterModalState.draft.interventionFilter = state.interventionFilter;
+    filterModalState.draft.sortBy = state.sortBy;
+}
+
+
+function syncModalInterventionButtons() {
+    const selected = normalizeInterventionFilterValue(filterModalState.draft.interventionFilter);
+    document.querySelectorAll("#delinq-modal-intervention-group [data-modal-intervention]").forEach((button) => {
+        const value = normalizeInterventionFilterValue(button.getAttribute("data-modal-intervention") || "");
+        button.setAttribute("aria-pressed", selected === value ? "true" : "false");
+    });
+}
+
+
+function syncModalSortRadios() {
+    const selected = normalizeSortValue(filterModalState.draft.sortBy);
+    document.querySelectorAll('input[name="delinq-modal-sort"]').forEach((radio) => {
+        radio.checked = normalizeSortValue(radio.value) === selected;
+    });
+}
+
+
+function syncModalGovernanceState() {
+    const gate = state.splitTriggerGate;
+    const lockInterventionActions = Boolean(gate && !gate.ready);
+    const lockReason = gate?.reason || "Split-trigger chưa sẵn sàng.";
+
+    if (lockInterventionActions) {
+        filterModalState.draft.interventionFilter = "";
+        filterModalState.draft.sortBy = "risk_desc";
+    }
+
+    const governanceHint = document.getElementById("delinq-modal-governance-hint");
+    if (governanceHint) {
+        if (lockInterventionActions) {
+            governanceHint.textContent = lockReason;
+            governanceHint.classList.remove("hidden");
+        } else {
+            governanceHint.classList.add("hidden");
+            governanceHint.textContent = "";
+        }
+    }
+
+    document.querySelectorAll("#delinq-modal-intervention-group [data-modal-intervention]").forEach((button) => {
+        const value = normalizeInterventionFilterValue(button.getAttribute("data-modal-intervention") || "");
+        const lockButton = lockInterventionActions && value !== "";
+        setElementDisabled(button, lockButton);
+        button.title = lockButton ? lockReason : "Chọn mức can thiệp";
+    });
+
+    document.querySelectorAll('input[name="delinq-modal-sort"]').forEach((radio) => {
+        const lockRadio = lockInterventionActions && normalizeSortValue(radio.value) !== "risk_desc";
+        radio.disabled = lockRadio;
+        radio.title = lockRadio ? lockReason : "Chọn kiểu sắp xếp";
+    });
+
+    syncModalInterventionButtons();
+    syncModalSortRadios();
+}
+
+
+function renderFilterModalDraft() {
+    const modalSearch = document.getElementById("delinq-modal-search-keyword");
+    if (modalSearch) {
+        modalSearch.value = filterModalState.draft.searchKeyword;
+    }
+
+    const modalFreshness = document.getElementById("delinq-modal-freshness");
+    if (modalFreshness) {
+        modalFreshness.value = filterModalState.draft.freshnessFilter;
+    }
+
+    syncModalInterventionButtons();
+    syncModalSortRadios();
+    syncModalGovernanceState();
+}
+
+
+function getFilterModalFocusableElements() {
+    const modal = document.getElementById("delinq-filter-modal");
+    if (!modal) return [];
+
+    return Array.from(
+        modal.querySelectorAll(
+            'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+        )
+    ).filter((element) => element.offsetParent !== null);
+}
+
+
+function focusFilterModalTarget(target = "basic") {
+    if (target === "sort") {
+        const sortSection = document.getElementById("delinq-modal-sort-section");
+        if (sortSection) {
+            sortSection.scrollIntoView({ behavior: "smooth", block: "nearest" });
+        }
+        const radio = document.querySelector('input[name="delinq-modal-sort"]:not([disabled])');
+        if (radio) {
+            radio.focus();
+            return;
+        }
+    }
+
+    const searchInput = document.getElementById("delinq-modal-search-keyword");
+    if (searchInput) {
+        searchInput.focus();
+    }
+}
+
+
+function trapFilterModalTab(event) {
+    const focusables = getFilterModalFocusableElements();
+    if (!focusables.length) {
+        event.preventDefault();
+        return;
+    }
+
+    const first = focusables[0];
+    const last = focusables[focusables.length - 1];
+    const active = document.activeElement;
+
+    if (event.shiftKey && active === first) {
+        event.preventDefault();
+        last.focus();
+    } else if (!event.shiftKey && active === last) {
+        event.preventDefault();
+        first.focus();
+    }
+}
+
+
+function openFilterModal(target = "basic") {
+    const modal = document.getElementById("delinq-filter-modal");
+    if (!modal) return;
+
+    filterModalState.isOpen = true;
+    filterModalState.focusTarget = target;
+    filterModalState.previousFocusedElement = document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null;
+
+    syncModalDraftFromState();
+    renderFilterModalDraft();
+
+    modal.classList.remove("hidden");
+    modal.setAttribute("aria-hidden", "false");
+    document.body.classList.add("overflow-hidden");
+
+    window.requestAnimationFrame(() => {
+        focusFilterModalTarget(target);
+    });
+}
+
+
+function closeFilterModal({ restoreFocus = true } = {}) {
+    const modal = document.getElementById("delinq-filter-modal");
+    if (!modal) return;
+
+    filterModalState.isOpen = false;
+    modal.classList.add("hidden");
+    modal.setAttribute("aria-hidden", "true");
+    document.body.classList.remove("overflow-hidden");
+
+    if (restoreFocus && filterModalState.previousFocusedElement) {
+        filterModalState.previousFocusedElement.focus();
+    }
+}
+
+
+function applyFilterModalDraft() {
+    state.searchKeyword = normalizeSearchKeywordValue(filterModalState.draft.searchKeyword);
+    state.freshnessFilter = normalizeFreshnessValue(filterModalState.draft.freshnessFilter);
+    state.interventionFilter = normalizeInterventionFilterValue(filterModalState.draft.interventionFilter);
+    state.sortBy = normalizeSortValue(filterModalState.draft.sortBy);
+
+    if (state.splitTriggerGate && !state.splitTriggerGate.ready) {
+        state.interventionFilter = "";
+        state.sortBy = "risk_desc";
+    }
+
+    const mainSearch = document.getElementById("delinq-search-keyword");
+    if (mainSearch) {
+        mainSearch.value = state.searchKeyword;
+    }
+
+    state.currentPage = 1;
+    closeFilterModal();
+    syncInterventionLegendState();
+    renderFilterToolbarState();
+    loadDelinquencyData(1);
+}
+
+
+function resetFilterModalDraft() {
+    filterModalState.draft.searchKeyword = "";
+    filterModalState.draft.freshnessFilter = "";
+    filterModalState.draft.interventionFilter = "";
+    filterModalState.draft.sortBy = "risk_desc";
+    renderFilterModalDraft();
+}
+
+
+function applyQuickFilterUpdate() {
+    if (state.splitTriggerGate && !state.splitTriggerGate.ready) {
+        state.interventionFilter = "";
+        state.sortBy = "risk_desc";
+    }
+
+    const searchInput = document.getElementById("delinq-search-keyword");
+    if (searchInput) {
+        searchInput.value = state.searchKeyword;
+    }
+
+    state.currentPage = 1;
+    syncInterventionLegendState();
+    syncModalDraftFromState();
+    renderFilterModalDraft();
+    renderFilterToolbarState();
+    loadDelinquencyData(1);
+}
+
+
+function removeActiveFilterByKey(filterKey) {
+    if (filterKey === "search") {
+        state.searchKeyword = "";
+    } else if (filterKey === "freshness") {
+        state.freshnessFilter = "";
+    } else if (filterKey === "intervention") {
+        state.interventionFilter = "";
+    } else if (filterKey === "sort") {
+        state.sortBy = "risk_desc";
+    }
+    applyQuickFilterUpdate();
+}
+
+
+function attachFilterToolbarHandlers() {
+    const openFilterButton = document.getElementById("delinq-open-filter-btn");
+    if (openFilterButton) {
+        openFilterButton.addEventListener("click", () => openFilterModal("basic"));
+    }
+
+    const openSortButton = document.getElementById("delinq-open-sort-btn");
+    if (openSortButton) {
+        openSortButton.addEventListener("click", () => openFilterModal("sort"));
+    }
+
+    const activeFilterSummary = document.getElementById("delinq-active-filter-summary");
+    if (activeFilterSummary) {
+        activeFilterSummary.addEventListener("click", (event) => {
+            const clearButton = event.target.closest("#delinq-clear-filters-btn");
+            if (clearButton) {
+                state.searchKeyword = "";
+                state.freshnessFilter = "";
+                state.interventionFilter = "";
+                state.sortBy = "risk_desc";
+                applyQuickFilterUpdate();
+                return;
+            }
+
+            const removeChip = event.target.closest("button[data-remove-filter]");
+            if (!removeChip) {
+                return;
+            }
+
+            removeActiveFilterByKey(removeChip.getAttribute("data-remove-filter") || "");
+        });
+    }
+}
+
+
+function attachFilterModalHandlers() {
+    const modal = document.getElementById("delinq-filter-modal");
+    if (!modal) return;
+
+    modal.addEventListener("click", (event) => {
+        const closeTarget = event.target.closest("[data-filter-modal-close]");
+        if (closeTarget) {
+            closeFilterModal();
+        }
+    });
+
+    modal.addEventListener("keydown", (event) => {
+        if (event.key === "Tab") {
+            trapFilterModalTab(event);
+        }
+        if (event.key === "Enter") {
+            const tagName = String(event.target?.tagName || "").toLowerCase();
+            if (tagName === "input" || tagName === "select") {
+                event.preventDefault();
+                applyFilterModalDraft();
+            }
+        }
+    });
+
+    document.addEventListener("keydown", (event) => {
+        if (event.key === "Escape" && filterModalState.isOpen) {
+            event.preventDefault();
+            closeFilterModal();
+        }
+    });
+
+    const modalSearch = document.getElementById("delinq-modal-search-keyword");
+    if (modalSearch) {
+        modalSearch.addEventListener("input", (event) => {
+            filterModalState.draft.searchKeyword = normalizeSearchKeywordValue(event.target.value);
+        });
+    }
+
+    const modalFreshness = document.getElementById("delinq-modal-freshness");
+    if (modalFreshness) {
+        modalFreshness.addEventListener("change", (event) => {
+            filterModalState.draft.freshnessFilter = normalizeFreshnessValue(event.target.value);
+        });
+    }
+
+    const interventionGroup = document.getElementById("delinq-modal-intervention-group");
+    if (interventionGroup) {
+        interventionGroup.addEventListener("click", (event) => {
+            const button = event.target.closest("button[data-modal-intervention]");
+            if (!button || button.disabled) return;
+
+            filterModalState.draft.interventionFilter = normalizeInterventionFilterValue(button.getAttribute("data-modal-intervention") || "");
+            syncModalInterventionButtons();
+        });
+    }
+
+    modal.querySelectorAll('input[name="delinq-modal-sort"]').forEach((radio) => {
+        radio.addEventListener("change", (event) => {
+            if (!event.target.checked) return;
+            filterModalState.draft.sortBy = normalizeSortValue(event.target.value);
+            syncModalSortRadios();
+        });
+    });
+
+    const resetButton = document.getElementById("delinq-modal-reset-btn");
+    if (resetButton) {
+        resetButton.addEventListener("click", resetFilterModalDraft);
+    }
+
+    const applyButton = document.getElementById("delinq-modal-apply-btn");
+    if (applyButton) {
+        applyButton.addEventListener("click", applyFilterModalDraft);
+    }
 }
 
 
@@ -323,6 +762,11 @@ function syncInterventionLegendState() {
 
 
 function applyInterventionLegendSelection(rawValue) {
+    if (state.splitTriggerGate && !state.splitTriggerGate.ready) {
+        setBatchStatus(state.splitTriggerGate.reason || "Split-trigger chưa sẵn sàng.", "warning");
+        return;
+    }
+
     state.interventionFilter = normalizeInterventionFilterValue(rawValue);
     state.currentPage = 1;
 
@@ -330,17 +774,10 @@ function applyInterventionLegendSelection(rawValue) {
         state.sortBy = "intervention_priority_desc";
     }
 
-    const interventionFilterSelect = document.getElementById("delinq-intervention-filter");
-    if (interventionFilterSelect) {
-        interventionFilterSelect.value = state.interventionFilter;
-    }
-
-    const sortSelect = document.getElementById("delinq-sort-by");
-    if (sortSelect) {
-        sortSelect.value = state.sortBy;
-    }
-
     syncInterventionLegendState();
+    syncModalDraftFromState();
+    renderFilterModalDraft();
+    renderFilterToolbarState();
     loadDelinquencyData(1);
 }
 
@@ -354,6 +791,15 @@ function attachInterventionLegendHandler() {
         if (!button) return;
         applyInterventionLegendSelection(button.getAttribute("data-legend-intervention") || "");
     });
+
+    const legendToggleButton = document.getElementById("delinq-legend-toggle-btn");
+    const legendScroll = document.getElementById("delinq-intervention-legend-scroll");
+    if (legendToggleButton && legendScroll) {
+        legendToggleButton.addEventListener("click", () => {
+            const collapsed = legendScroll.classList.toggle("hidden");
+            legendToggleButton.textContent = collapsed ? "Hiện chú giải" : "Ẩn chú giải";
+        });
+    }
 }
 
 
@@ -724,6 +1170,9 @@ function renderDelinquencyRows(container, items) {
         const companyName = escapeHtml(item.company_name || item.name || "---");
         const cluster = escapeHtml(item.cluster || "---");
         const modelVersion = item.model_version ? `<span class="text-[10px] text-slate-500">${escapeHtml(item.model_version)}</span>` : "";
+        const interventionSignal = normalizeInterventionUplift(item?.intervention_uplift, item);
+        const interventionLabel = getInterventionActionLabel(interventionSignal.action);
+        const interventionClass = getInterventionActionClass(interventionSignal.action);
 
         const paymentSummary = renderPaymentSummary(item.payment_history_summary);
         const predictionMeta = renderPredictionMeta(item);
@@ -737,52 +1186,108 @@ function renderDelinquencyRows(container, items) {
         const detailHref = taxCodeRaw === "---" ? "" : buildDetailUrl(taxCodeRaw);
 
         return `
-            <article class="px-8 py-5 ${index % 2 === 0 ? "bg-white" : "bg-slate-50/40"} hover:bg-slate-50 transition-colors duration-200">
-                <div class="grid grid-cols-12 gap-3 items-start">
-                    <div class="col-span-12 md:col-span-2">
-                        <p class="text-[10px] uppercase tracking-wider text-slate-400 font-bold">MST</p>
+            <article data-expandable-row class="px-8 py-4 ${index % 2 === 0 ? "bg-white" : "bg-slate-50/40"} hover:bg-slate-50 transition-colors duration-200">
+                <div class="grid grid-cols-12 gap-3 items-center">
+                    <div class="col-span-6 sm:col-span-4 md:col-span-2">
+                        <p class="text-[10px] tracking-wide text-slate-400 font-bold">MST</p>
                         <p class="font-mono text-sm text-slate-600 mt-1">${taxCode}</p>
                     </div>
-                    <div class="col-span-12 md:col-span-3">
+                    <div class="col-span-12 sm:col-span-8 md:col-span-3">
                         <h4 class="font-bold text-primary-container text-[15px] leading-tight">${companyName}</h4>
-                        ${paymentSummary}
-                    </div>
-                    <div class="col-span-12 md:col-span-2">
-                        <p class="text-[10px] uppercase tracking-wider text-slate-400 font-bold">Nhóm rủi ro</p>
-                        <p class="text-sm font-semibold text-slate-700 mt-1">${cluster}</p>
-                        ${modelVersion}
-                        ${predictionMeta}
-                        ${earlyWarning}
-                        ${intervention}
+                        <p class="mt-1 text-[11px] text-slate-500 font-semibold">${cluster}</p>
                     </div>
                     <div class="col-span-12 md:col-span-3">
-                        <p class="text-[10px] uppercase tracking-wider text-slate-400 font-bold">Xác suất tổng</p>
+                        <p class="text-[10px] tracking-wide text-slate-400 font-bold">Xác suất tổng</p>
                         <div class="flex items-center gap-2 mt-1.5">
-                            <div class="w-24 h-2 bg-slate-100 rounded-full overflow-hidden">
+                            <div class="w-28 h-2 bg-slate-100 rounded-full overflow-hidden">
                                 <div class="h-full ${riskStyle.bg} rounded-full transition-all duration-500" style="width:${widthPct}%"></div>
                             </div>
                             <span class="px-2 py-0.5 ${riskStyle.text} rounded text-[11px] font-bold min-w-[44px] text-center">${widthPct}%</span>
                         </div>
-                        ${probabilityBreakdown}
-                        ${topReasons}
                     </div>
-                    <div class="col-span-8 md:col-span-1">
-                        <p class="text-[10px] uppercase tracking-wider text-slate-400 font-bold">Phạt</p>
+                    <div class="col-span-8 md:col-span-2">
+                        <p class="text-[10px] tracking-wide text-slate-400 font-bold">Can thiệp</p>
+                        <div class="mt-1.5 flex items-center gap-1.5">
+                            <span class="text-[10px] px-2 py-0.5 rounded font-bold ${interventionClass}">${escapeHtml(interventionLabel)}</span>
+                            <span class="text-[10px] font-bold text-slate-500">P${interventionSignal.priorityScore}</span>
+                        </div>
+                    </div>
+                    <div class="col-span-4 md:col-span-1">
+                        <p class="text-[10px] tracking-wide text-slate-400 font-bold">Phạt</p>
                         <p class="font-bold text-primary-container mt-1 text-sm">${escapeHtml(penaltyText)}</p>
                     </div>
-                    <div class="col-span-4 md:col-span-1 flex md:justify-end">
-                        ${detailHref ? `
-                        <a href="${escapeHtml(detailHref)}" class="bg-primary-container text-white px-3 py-1.5 rounded-lg text-xs font-bold hover:opacity-90 transition-all duration-200 inline-flex items-center gap-1">
-                            <span class="material-symbols-outlined text-[14px]">visibility</span>
-                            Chi tiết
-                        </a>
-                        ` : `
-                        <span class="text-xs text-slate-400 font-semibold">Không có</span>
-                        `}
+                    <div class="col-span-12 md:col-span-1 flex md:flex-col md:items-end gap-2">
+                        ${detailHref
+            ? `<a href="${escapeHtml(detailHref)}" class="bg-primary-container text-white px-3 py-1.5 rounded-lg text-xs font-bold hover:opacity-90 transition-all duration-200 inline-flex items-center gap-1">
+                                <span class="material-symbols-outlined text-[14px]">visibility</span>
+                                Chi tiết
+                            </a>`
+            : `<span class="text-xs text-slate-400 font-semibold">Không có</span>`}
+                        <button type="button" data-expand-toggle aria-expanded="false" class="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-[10px] font-bold text-slate-500 hover:text-primary-container hover:border-primary-container/40 transition-colors">
+                            <span data-expand-label>Mở thêm</span>
+                            <span data-expand-icon class="material-symbols-outlined text-[14px]">expand_more</span>
+                        </button>
+                    </div>
+                </div>
+
+                <div data-expand-body class="hidden mt-3 pt-3 border-t border-slate-100">
+                    <div class="grid grid-cols-1 xl:grid-cols-3 gap-3">
+                        <section class="rounded-lg border border-slate-100 bg-slate-50 px-3 py-2">
+                            <p class="text-[10px] font-bold tracking-wide text-slate-400">Thông tin mô hình</p>
+                            <div class="mt-1 flex items-center gap-1.5 flex-wrap">
+                                <span class="text-[10px] px-2 py-0.5 rounded bg-slate-100 text-slate-600 font-semibold">Nhóm: ${cluster}</span>
+                                ${modelVersion}
+                            </div>
+                            ${predictionMeta}
+                            ${paymentSummary}
+                        </section>
+
+                        <section class="rounded-lg border border-slate-100 bg-slate-50 px-3 py-2">
+                            <p class="text-[10px] font-bold tracking-wide text-slate-400">Cảnh báo sớm</p>
+                            ${earlyWarning}
+                        </section>
+
+                        <section class="rounded-lg border border-slate-100 bg-slate-50 px-3 py-2">
+                            <p class="text-[10px] font-bold tracking-wide text-slate-400">Chi tiết xác suất</p>
+                            ${probabilityBreakdown}
+                            ${topReasons}
+                            ${intervention}
+                        </section>
                     </div>
                 </div>
             </article>`;
     }).join("");
+}
+
+
+function attachDelinquencyRowExpandHandler() {
+    const listContainer = document.getElementById("delinq-list");
+    if (!listContainer || listContainer.dataset.expandBound === "true") {
+        return;
+    }
+
+    listContainer.dataset.expandBound = "true";
+    listContainer.addEventListener("click", (event) => {
+        const toggleButton = event.target.closest("button[data-expand-toggle]");
+        if (!toggleButton) return;
+
+        const row = toggleButton.closest("article[data-expandable-row]");
+        const expandBody = row ? row.querySelector("[data-expand-body]") : null;
+        if (!expandBody) return;
+
+        const expanded = toggleButton.getAttribute("aria-expanded") === "true";
+        toggleButton.setAttribute("aria-expanded", expanded ? "false" : "true");
+        expandBody.classList.toggle("hidden", expanded);
+
+        const label = toggleButton.querySelector("[data-expand-label]");
+        const icon = toggleButton.querySelector("[data-expand-icon]");
+        if (label) {
+            label.textContent = expanded ? "Mở thêm" : "Thu gọn";
+        }
+        if (icon) {
+            icon.textContent = expanded ? "expand_more" : "expand_less";
+        }
+    });
 }
 
 
@@ -837,8 +1342,8 @@ function updateKPIs(data, visibleCount = null) {
         const hasInterventionControls = hasClientSideInterventionControls();
 
         if (hasInterventionControls) {
-            const keywordSuffix = state.searchKeyword ? ` • từ khóa: "${state.searchKeyword}"` : "";
-            paginationInfo.textContent = `Trang ${state.currentPage}: ${visible}/${pageCount} hồ sơ sau lọc/sắp xếp can thiệp • Tổng ${total.toLocaleString("vi-VN")} hồ sơ${keywordSuffix}`;
+            const keywordSuffix = state.searchKeyword ? ` • "${state.searchKeyword}"` : "";
+            paginationInfo.textContent = `Trang ${state.currentPage} • ${visible}/${pageCount} hồ sơ hiển thị • Tổng ${total.toLocaleString("vi-VN")}${keywordSuffix}`;
             return;
         }
 
@@ -1124,39 +1629,11 @@ document.addEventListener("DOMContentLoaded", () => {
             searchDebounce = window.setTimeout(() => {
                 state.searchKeyword = normalizeSearchKeywordValue(event.target.value);
                 state.currentPage = 1;
+                syncModalDraftFromState();
+                renderFilterModalDraft();
+                renderFilterToolbarState();
                 loadDelinquencyData(1);
             }, 220);
-        });
-    }
-
-    const freshnessSelect = document.getElementById("delinq-freshness-filter");
-    if (freshnessSelect) {
-        freshnessSelect.value = state.freshnessFilter;
-        freshnessSelect.addEventListener("change", (event) => {
-            state.freshnessFilter = normalizeFreshnessValue(event.target.value);
-            state.currentPage = 1;
-            loadDelinquencyData(1);
-        });
-    }
-
-    const interventionFilterSelect = document.getElementById("delinq-intervention-filter");
-    if (interventionFilterSelect) {
-        interventionFilterSelect.value = state.interventionFilter;
-        interventionFilterSelect.addEventListener("change", (event) => {
-            state.interventionFilter = normalizeInterventionFilterValue(event.target.value);
-            state.currentPage = 1;
-            syncInterventionLegendState();
-            loadDelinquencyData(1);
-        });
-    }
-
-    const sortSelect = document.getElementById("delinq-sort-by");
-    if (sortSelect) {
-        sortSelect.value = state.sortBy;
-        sortSelect.addEventListener("change", (event) => {
-            state.sortBy = normalizeSortValue(event.target.value);
-            state.currentPage = 1;
-            loadDelinquencyData(1);
         });
     }
 
@@ -1165,7 +1642,14 @@ document.addEventListener("DOMContentLoaded", () => {
         batchButton.addEventListener("click", runDelinquencyBatchPredict);
     }
 
+    attachFilterToolbarHandlers();
+    attachFilterModalHandlers();
     attachInterventionLegendHandler();
+    attachDelinquencyRowExpandHandler();
+
+    syncModalDraftFromState();
+    renderFilterModalDraft();
+    renderFilterToolbarState();
     syncInterventionLegendState();
     attachPaginationHandler();
     fetchDelinquencySplitTriggerGate();
