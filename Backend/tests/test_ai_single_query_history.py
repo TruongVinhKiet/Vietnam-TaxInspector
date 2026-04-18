@@ -210,3 +210,262 @@ def test_build_single_red_flags_timeline_detects_feature_flags():
     assert "f2_ratio_limit" in detected_flags
     assert "f3_vat_structure" in detected_flags
     assert "f4_peer_comparison" in detected_flags
+
+
+def test_build_vat_refund_signals_payload_priority_case():
+    payload = ai_analysis._build_vat_refund_signals_payload(
+        risk_score=82,
+        anomaly_score=0.92,
+        red_flags=[
+            {"feature": "f3_vat_structure", "reason": "Hoa don VAT dau vao dot bien"},
+            {"title": "VAT mismatch", "description": "Input VAT > output VAT"},
+        ],
+        yearly_feature_scores=[
+            {"year": 2023, "f3_vat_structure": 0.54, "risk_score": 61},
+            {"year": 2024, "f3_vat_structure": 0.74, "risk_score": 84},
+        ],
+        f2_ratio_limit=1.28,
+        f3_vat_structure=0.74,
+        revenue=1500,
+        total_expenses=1800,
+    )
+
+    assert payload["has_signal"] is True
+    assert payload["queue"] == "priority_refund_audit"
+    assert payload["level"] in {"high", "critical"}
+    assert payload["score"] >= 60
+    assert isinstance(payload["indicators"], list)
+    assert payload["indicators"]
+
+
+def test_build_vat_refund_signals_payload_monitor_case():
+    payload = ai_analysis._build_vat_refund_signals_payload(
+        risk_score=22,
+        anomaly_score=0.18,
+        red_flags=[],
+        yearly_feature_scores=[
+            {"year": 2023, "f3_vat_structure": 0.18, "risk_score": 20},
+            {"year": 2024, "f3_vat_structure": 0.20, "risk_score": 24},
+        ],
+        f2_ratio_limit=0.82,
+        f3_vat_structure=0.20,
+        revenue=2200,
+        total_expenses=1100,
+    )
+
+    assert payload["queue"] == "monitor"
+    assert payload["level"] == "low"
+    assert payload["has_signal"] is False
+
+
+def test_build_intervention_uplift_payload_high_risk_case():
+    payload = ai_analysis._build_intervention_uplift_payload(
+        risk_score=88,
+        anomaly_score=0.93,
+        red_flags=[
+            {"severity": "high", "feature": "f1_divergence"},
+            {"severity": "critical", "feature": "f3_vat_structure"},
+        ],
+        yearly_feature_scores=[
+            {"year": 2023, "risk_score": 66},
+            {"year": 2024, "risk_score": 88},
+        ],
+        model_confidence=78,
+        revenue=1200,
+        total_expenses=1700,
+    )
+
+    assert payload["recommended_action"] in {"field_audit", "escalated_enforcement"}
+    assert payload["priority_score"] >= 70
+    assert payload["expected_risk_reduction_pp"] > 0
+    assert payload["expected_collection_uplift"] > 0
+    assert isinstance(payload["next_steps"], list)
+    assert payload["next_steps"]
+
+
+def test_harmonize_decision_intelligence_with_intervention_maps_to_urgent():
+    decision_payload = {
+        "recommended_action": "enhanced_monitoring",
+        "action_label": "Giam sat tang cuong",
+        "action_deadline_days": 30,
+        "priority_score": 52,
+        "rationale": "Base rationale",
+        "next_steps": ["Base step"],
+        "top_signals": [
+            {
+                "key": "risk_score",
+                "label": "Tong diem rui ro",
+                "value": 82,
+                "severity": "high",
+                "summary": "High score",
+            }
+        ],
+        "should_escalate": False,
+    }
+    intervention_payload = {
+        "recommended_action": "escalated_enforcement",
+        "priority_score": 91,
+        "rationale": "Intervention rationale",
+        "next_steps": ["Escalation step"],
+    }
+
+    merged = ai_analysis._harmonize_decision_intelligence_with_intervention(
+        decision_payload,
+        intervention_payload,
+    )
+
+    assert merged["recommended_action"] == "urgent_audit"
+    assert merged["action_deadline_days"] == 7
+    assert merged["priority_score"] == 91
+    assert merged["rationale"] == "Intervention rationale"
+    assert merged["next_steps"] == ["Escalation step"]
+    assert merged["should_escalate"] is True
+    assert any(signal.get("key") == "intervention_uplift" for signal in merged["top_signals"])
+
+
+def test_build_audit_value_payload_priority_case():
+    payload = ai_analysis._build_audit_value_payload(
+        risk_score=86,
+        anomaly_score=0.9,
+        model_confidence=82,
+        red_flags=[
+            {"severity": "high", "feature": "f1_divergence"},
+            {"severity": "critical", "feature": "f3_vat_structure"},
+        ],
+        yearly_feature_scores=[
+            {"year": 2022, "risk_score": 54},
+            {"year": 2023, "risk_score": 68},
+            {"year": 2024, "risk_score": 86},
+        ],
+        revenue=1_800_000_000,
+        total_expenses=2_950_000_000,
+    )
+
+    assert payload["priority_score"] >= 60
+    assert payload["recommended_lane"] in {"targeted_audit", "priority_audit"}
+    assert payload["estimated_recovery"] > payload["estimated_audit_cost"]
+    assert payload["expected_net_recovery"] > 0
+    assert payload["confidence"] in {"medium", "high"}
+    assert isinstance(payload["drivers"], list)
+    assert payload["drivers"]
+
+
+def test_build_audit_value_payload_monitor_case():
+    payload = ai_analysis._build_audit_value_payload(
+        risk_score=18,
+        anomaly_score=0.12,
+        model_confidence=48,
+        red_flags=[],
+        yearly_feature_scores=[
+            {"year": 2023, "risk_score": 15},
+            {"year": 2024, "risk_score": 18},
+        ],
+        revenue=2_400_000_000,
+        total_expenses=1_100_000_000,
+    )
+
+    assert payload["recommended_lane"] == "monitor"
+    assert payload["priority_score"] < 45
+    assert payload["estimated_recovery"] >= 0
+    assert payload["expected_net_recovery"] >= 0
+    assert payload["confidence"] in {"low", "medium"}
+
+
+def test_build_vat_refund_signals_payload_blends_specialized_model(monkeypatch):
+    def _fake_predict(track_name, feature_map):
+        if track_name != "vat_refund":
+            return None
+        assert isinstance(feature_map, dict)
+        return {
+            "probability": 0.84,
+            "raw_probability": 0.79,
+            "model_version": "vat-refund-v1",
+        }
+
+    monkeypatch.setattr(ai_analysis, "_predict_specialized_probability", _fake_predict)
+
+    payload = ai_analysis._build_vat_refund_signals_payload(
+        risk_score=22,
+        anomaly_score=0.18,
+        red_flags=[],
+        yearly_feature_scores=[
+            {"year": 2023, "f3_vat_structure": 0.18, "risk_score": 20},
+            {"year": 2024, "f3_vat_structure": 0.20, "risk_score": 24},
+        ],
+        f2_ratio_limit=0.82,
+        f3_vat_structure=0.20,
+        revenue=2200,
+        total_expenses=1100,
+        f1_divergence=0.08,
+        f4_peer_comparison=0.07,
+    )
+
+    assert payload["queue"] == "priority_refund_audit"
+    assert payload["level"] == "critical"
+    assert any(item.get("key") == "vat_model_probability" for item in payload["indicators"])
+
+
+def test_build_audit_value_payload_blends_specialized_model(monkeypatch):
+    def _fake_predict(track_name, feature_map):
+        if track_name != "audit_value":
+            return None
+        assert isinstance(feature_map, dict)
+        return {
+            "probability": 0.88,
+            "raw_probability": 0.81,
+            "model_version": "audit-value-v1",
+        }
+
+    monkeypatch.setattr(ai_analysis, "_predict_specialized_probability", _fake_predict)
+
+    payload = ai_analysis._build_audit_value_payload(
+        risk_score=18,
+        anomaly_score=0.12,
+        model_confidence=48,
+        red_flags=[],
+        yearly_feature_scores=[
+            {"year": 2023, "risk_score": 15},
+            {"year": 2024, "risk_score": 18},
+        ],
+        revenue=2_400_000_000,
+        total_expenses=1_100_000_000,
+        f1_divergence=0.09,
+        f2_ratio_limit=0.84,
+        f3_vat_structure=0.22,
+        f4_peer_comparison=0.08,
+    )
+
+    assert payload["recommended_lane"] == "priority_audit"
+    assert payload["confidence"] in {"medium", "high"}
+    assert any(item.get("key") == "audit_model_probability" for item in payload["drivers"])
+
+
+def test_predict_specialized_probability_uses_calibrator(monkeypatch):
+    class _FakeModel:
+        def predict_proba(self, _vector):
+            return [[0.2, 0.8]]
+
+    class _FakeCalibrator:
+        def predict(self, _scores):
+            return [0.9]
+
+    monkeypatch.setattr(
+        ai_analysis,
+        "_load_specialized_track_bundle",
+        lambda _track: {
+            "model": _FakeModel(),
+            "calibrator": _FakeCalibrator(),
+            "feature_columns": ["risk_score", "anomaly_score"],
+            "model_version": "demo-v1",
+        },
+    )
+
+    payload = ai_analysis._predict_specialized_probability(
+        "audit_value",
+        {"risk_score": 82.0, "anomaly_score": 0.91},
+    )
+
+    assert payload is not None
+    assert payload["raw_probability"] == 0.8
+    assert payload["probability"] == 0.9
+    assert payload["model_version"] == "demo-v1"

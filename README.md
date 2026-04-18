@@ -68,6 +68,21 @@ python -m http.server 3000
 ```
 Truy cập: **http://localhost:3000** để bắt đầu.
 
+### 3.1. Smoke-check tự động (khuyến nghị trước khi test tay)
+Sau khi backend đã chạy ở port `8000`, dùng 1 lệnh để kiểm tra nhanh:
+- backend endpoints quan trọng,
+- model artifacts cốt lõi,
+- wiring frontend page/script và `API_BASE`.
+
+```bash
+cd Backend
+python -m app.scripts.run_local_readiness_smoke --base-url http://127.0.0.1:8000
+```
+
+Tùy chọn:
+- Chỉ check files/artifacts: `python -m app.scripts.run_local_readiness_smoke --skip-api-checks`
+- Chỉ check API: `python -m app.scripts.run_local_readiness_smoke --skip-file-checks`
+
 ### 4. Quên mật khẩu / Đổi mật khẩu (Local mode)
 - Tại trang đăng nhập có nút **Quên mật khẩu**.
 - Hệ thống tạo link reset và ghi vào file nội bộ: `Backend/.otp_outbox.log` (dùng để test khi chưa có mailbox `@gdt.gov.vn` thật).
@@ -149,6 +164,45 @@ Biến môi trường tùy chọn:
 - `PASSWORD_OUTBOX_PATH` (mặc định: Backend/.otp_outbox.log)
 - `SMTP_ENABLED` (mặc định: false)
 - `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM`, `SMTP_USE_TLS`
+
+---
+
+## ✅ Kế Hoạch Hoàn Thiện Dự Án (Model + UI + Ops)
+
+### Mục tiêu chốt dự án
+- Model: hoàn tất quality gate, pilot gate, và go/no-go gate cho specialized tracks (Audit Value + VAT Refund).
+- UI: dashboard hiển thị đầy đủ KPI governance và rollout specialized để đội vận hành theo dõi release readiness.
+- Ops: có endpoint tổng hợp, test regression và command pipeline chuẩn để chạy định kỳ.
+
+### Checklist hiện tại
+- [x] Specialized training pipeline đã có đầy đủ stage: train -> pilot -> go/no-go.
+- [x] Báo cáo go/no-go (`specialized_go_no_go_report.json`) + history (`specialized_go_no_go_history.jsonl`) đã tự động sinh.
+- [x] Dashboard có widget KPI split-trigger governance.
+- [x] Dashboard có widget Specialized Rollout Status (hard/soft gates, pilot delta, decision, action).
+- [x] Monitoring API có endpoint tổng hợp rollout: `GET /api/monitoring/specialized_rollout_status`.
+- [x] Regression tests cho monitoring + rollout endpoint đã chạy xanh.
+
+### Lệnh chuẩn để vận hành
+```bash
+# 1) Chạy pipeline specialized (không seed lại)
+Backend/venv/Scripts/python.exe Backend/app/scripts/run_specialized_training_pipeline.py --skip-seed
+
+# 2) Kiểm tra go/no-go artifact mới nhất
+Backend/venv/Scripts/python.exe Backend/app/scripts/run_specialized_go_no_go_review.py
+
+# 3) Chạy regression test monitoring/governance
+Backend/venv/Scripts/python.exe -m pytest Backend/tests/test_monitoring_kpi_workflow.py -q
+
+# 4) Chạy regression test go/no-go decision logic
+Backend/venv/Scripts/python.exe -m pytest Backend/tests/test_specialized_go_no_go_review.py -q
+```
+
+### Tiêu chí "Done" để đóng dự án
+- `quality_report` của Audit và VAT đều `overall_pass=true`.
+- `specialized_pilot_report.json` có đủ sample theo ngưỡng và delta ổn định theo chính sách.
+- `specialized_go_no_go_report.json` được cập nhật định kỳ và có decision rõ ràng (`no_go` / `conditional_go` / `go_phase_d_candidate`).
+- Dashboard hiển thị đầy đủ trạng thái rollout mà không cần truy vấn thủ công nhiều endpoint.
+- Bộ test monitoring + go/no-go pass ổn định sau mỗi lần cập nhật policy/model.
 
 ---
 

@@ -85,6 +85,36 @@
         .no-line { border: none !important; }
         .ghost-border { outline: 1px solid rgba(196, 198, 207, 0.15); }
 
+        .delinq-filter-control {
+            transition: transform var(--motion-duration-fast, 0.24s) var(--motion-ease-standard, cubic-bezier(0.2, 0, 0, 1)),
+                        box-shadow var(--motion-duration-fast, 0.24s) var(--motion-ease-standard, cubic-bezier(0.2, 0, 0, 1));
+        }
+
+        .delinq-filter-control:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 8px 18px rgba(0, 33, 71, 0.08);
+        }
+
+        .delinq-legend-chip {
+            transition: transform var(--motion-duration-fast, 0.24s) var(--motion-ease-standard, cubic-bezier(0.2, 0, 0, 1)),
+                        box-shadow var(--motion-duration-fast, 0.24s) var(--motion-ease-standard, cubic-bezier(0.2, 0, 0, 1)),
+                        filter var(--motion-duration-fast, 0.24s) var(--motion-ease-standard, cubic-bezier(0.2, 0, 0, 1));
+        }
+
+        .delinq-legend-chip:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 8px 16px rgba(0, 33, 71, 0.1);
+        }
+
+        .delinq-legend-chip[aria-pressed="false"] {
+            filter: saturate(0.85);
+        }
+
+        .delinq-legend-chip[aria-pressed="true"] {
+            transform: translateY(-1px);
+            box-shadow: 0 10px 18px rgba(0, 33, 71, 0.12);
+        }
+
         .delinq-modal-enter {
             animation: fadeSlideUp var(--motion-duration-modal, 0.32s) var(--motion-ease-emphasis, cubic-bezier(0.16, 1, 0.3, 1)) both;
         }
@@ -141,11 +171,11 @@
 <div class="mt-auto px-6 pt-6 border-t border-white/5">
 <div class="flex items-center gap-3 p-2 rounded-lg bg-white/5">
 <div class="w-8 h-8 rounded bg-primary-fixed-dim/20 flex items-center justify-center overflow-hidden shrink-0">
-<img id="user-avatar-image" alt="Avatar" class="w-full h-full object-cover hidden" />
+<img id="user-avatar-image" alt="Ảnh đại diện" class="w-full h-full object-cover hidden" />
 <span id="user-avatar-fallback" class="text-primary-fixed-dim text-[10px] font-black tracking-tight">AD</span>
 </div>
 <div id="user-profile-badge">
-<p class="text-xs font-bold" id="user-full-name">Admin Profile</p>
+<p class="text-xs font-bold" id="user-full-name">Hồ sơ quản trị</p>
 <p class="text-[10px] text-slate-500" id="user-current-role">Quản trị viên</p>
 </div>
 </div>
@@ -182,7 +212,7 @@
 <!-- Page Header -->
 <div class="mb-10 max-w-6xl mx-auto">
 <h2 class="text-[2rem] font-extrabold tracking-[-0.02em] text-primary mb-2">Dự báo Rủi ro Trễ hạn Nộp thuế</h2>
-<p class="text-on-surface-variant font-medium text-sm uppercase tracking-widest">Temporal Compliance Intelligence – Phân tích dữ liệu thanh toán thực tế bằng AI</p>
+<p class="text-on-surface-variant font-medium text-sm uppercase tracking-widest">Trí tuệ tuân thủ theo thời gian – Phân tích dữ liệu thanh toán thực tế bằng AI</p>
 </div>
 <!-- KPI Row -->
 <div class="grid grid-cols-1 md:grid-cols-3 gap-8 max-w-6xl mx-auto mb-10">
@@ -211,7 +241,7 @@
 <span class="material-symbols-outlined text-emerald-600" data-weight="fill">verified</span>
 </div>
 <div class="text-4xl font-extrabold tracking-tighter text-emerald-600" data-kpi="model-accuracy">---</div>
-<div class="mt-2 text-xs font-medium text-slate-400">Program A – Temporal Compliance Intelligence</div>
+<div class="mt-2 text-xs font-medium text-slate-400">Chương trình A – Trí tuệ tuân thủ theo thời gian</div>
 </div>
 </div>
 <!-- Enterprise Data Grid -->
@@ -222,16 +252,36 @@
 <p class="text-xs text-slate-500 mt-1">Bấm vào Chi tiết để mở trang hồ sơ rủi ro riêng cho từng doanh nghiệp.</p>
 </div>
 <div class="flex gap-2 items-center flex-wrap">
-<label for="delinq-freshness-filter" class="text-[10px] font-bold uppercase tracking-widest text-slate-500">Freshness</label>
-<select id="delinq-freshness-filter" class="bg-surface-container-low border border-outline-variant/20 rounded-lg px-3 py-2 text-xs font-semibold text-slate-700 focus:outline-none focus:ring-2 focus:ring-primary-container/40">
+<label for="delinq-search-keyword" class="text-[10px] font-bold uppercase tracking-widest text-slate-500">Từ khóa</label>
+<input id="delinq-search-keyword" type="text" class="delinq-filter-control min-w-[220px] bg-surface-container-low border border-outline-variant/20 rounded-lg px-3 py-2 text-xs font-semibold text-slate-700 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-primary-container/40" placeholder="MST / tên DN / cụm rủi ro" autocomplete="off">
+<label for="delinq-freshness-filter" class="text-[10px] font-bold uppercase tracking-widest text-slate-500">Độ mới</label>
+<select id="delinq-freshness-filter" class="delinq-filter-control bg-surface-container-low border border-outline-variant/20 rounded-lg px-3 py-2 text-xs font-semibold text-slate-700 focus:outline-none focus:ring-2 focus:ring-primary-container/40">
 <option value="">Tất cả</option>
-<option value="stale">Stale (&gt;30 ngày)</option>
-<option value="aging">Aging (8-30 ngày)</option>
-<option value="fresh">Fresh (0-7 ngày)</option>
-<option value="unknown">Unknown</option>
+<option value="stale">Cũ (&gt;30 ngày)</option>
+<option value="aging">Đang cũ (8-30 ngày)</option>
+<option value="fresh">Mới (0-7 ngày)</option>
+<option value="unknown">Không rõ</option>
+</select>
+<label for="delinq-intervention-filter" class="text-[10px] font-bold uppercase tracking-widest text-slate-500">Can thiệp</label>
+<select id="delinq-intervention-filter" class="delinq-filter-control bg-surface-container-low border border-outline-variant/20 rounded-lg px-3 py-2 text-xs font-semibold text-slate-700 focus:outline-none focus:ring-2 focus:ring-primary-container/40">
+<option value="">Tất cả</option>
+<option value="priority_hot">Ưu tiên cao (P≥70)</option>
+<option value="escalated_enforcement">Cưỡng chế tăng cường</option>
+<option value="field_audit">Kiểm tra thực địa</option>
+<option value="structured_outreach">Tiếp cận có cấu trúc</option>
+<option value="auto_reminder">Nhắc hạn tự động</option>
+<option value="monitor">Theo dõi</option>
+</select>
+<label for="delinq-sort-by" class="text-[10px] font-bold uppercase tracking-widest text-slate-500">Sắp xếp</label>
+<select id="delinq-sort-by" class="delinq-filter-control bg-surface-container-low border border-outline-variant/20 rounded-lg px-3 py-2 text-xs font-semibold text-slate-700 focus:outline-none focus:ring-2 focus:ring-primary-container/40">
+<option value="risk_desc">Rủi ro (mặc định)</option>
+<option value="intervention_priority_desc">Ưu tiên can thiệp ↓</option>
+<option value="intervention_priority_asc">Ưu tiên can thiệp ↑</option>
+<option value="expected_risk_reduction_desc">Giảm rủi ro kỳ vọng ↓</option>
+<option value="expected_collection_uplift_desc">Tăng thu hồi kỳ vọng ↓</option>
 </select>
 <button id="delinq-batch-predict-btn" class="bg-emerald-600 text-white px-4 py-2 rounded-lg text-xs font-bold uppercase tracking-widest flex items-center gap-2 hover:bg-emerald-700 transition-colors">
-<span class="material-symbols-outlined text-[16px]">autorenew</span> Batch Predict
+<span class="material-symbols-outlined text-[16px]">autorenew</span> Dự báo hàng loạt
 </button>
 <button class="bg-primary-container text-white px-4 py-2 rounded-lg text-xs font-bold uppercase tracking-widest flex items-center gap-2 hover:opacity-90 transition-all">
 <span class="material-symbols-outlined text-[16px]">file_download</span> Xuất báo cáo
@@ -239,6 +289,33 @@
 </div>
 </div>
 <div class="px-8 py-2 bg-slate-50 border-b border-slate-100 hidden" id="delinq-batch-status"></div>
+<div id="delinq-split-gate-strip" class="px-8 py-3 bg-slate-50 border-b border-slate-100">
+<div class="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-2">
+<div>
+<p class="text-[10px] font-bold uppercase tracking-widest text-slate-500">Quản trị split-trigger</p>
+<p id="delinq-split-gate-summary" class="text-[11px] text-slate-500">Đang tải trạng thái split-trigger...</p>
+</div>
+<div class="flex items-center gap-2">
+<span id="delinq-split-gate-updated" class="text-[10px] text-slate-400 uppercase tracking-wider">Cập nhật: --</span>
+<span id="delinq-split-gate-badge" class="text-[10px] px-2 py-0.5 rounded bg-slate-100 text-slate-600 font-black uppercase tracking-wider">ĐANG TẢI</span>
+</div>
+</div>
+</div>
+<div id="delinq-intervention-legend" class="px-8 py-3 bg-white border-b border-slate-100">
+<div class="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-2">
+<p class="text-[10px] font-bold uppercase tracking-widest text-slate-500">Chú giải nhanh can thiệp (nhấn để lọc nhanh)</p>
+<p class="text-[10px] text-slate-400">Màu badge phản ánh mức độ can thiệp từ Theo dõi đến Cưỡng chế tăng cường.</p>
+</div>
+<div class="flex flex-wrap gap-2 mt-2">
+<button type="button" data-legend-intervention="" aria-pressed="true" class="delinq-legend-chip px-2.5 py-1 rounded text-[10px] font-black uppercase tracking-wider bg-slate-100 text-slate-700 border border-slate-200">Tất cả</button>
+<button type="button" data-legend-intervention="monitor" aria-pressed="false" class="delinq-legend-chip px-2.5 py-1 rounded text-[10px] font-black uppercase tracking-wider bg-slate-100 text-slate-600 border border-slate-200">Theo dõi</button>
+<button type="button" data-legend-intervention="auto_reminder" aria-pressed="false" class="delinq-legend-chip px-2.5 py-1 rounded text-[10px] font-black uppercase tracking-wider bg-blue-50 text-blue-700 border border-blue-100">Nhắc hạn tự động</button>
+<button type="button" data-legend-intervention="structured_outreach" aria-pressed="false" class="delinq-legend-chip px-2.5 py-1 rounded text-[10px] font-black uppercase tracking-wider bg-amber-50 text-amber-700 border border-amber-100">Tiếp cận có cấu trúc</button>
+<button type="button" data-legend-intervention="field_audit" aria-pressed="false" class="delinq-legend-chip px-2.5 py-1 rounded text-[10px] font-black uppercase tracking-wider bg-orange-50 text-orange-700 border border-orange-100">Kiểm tra thực địa</button>
+<button type="button" data-legend-intervention="escalated_enforcement" aria-pressed="false" class="delinq-legend-chip px-2.5 py-1 rounded text-[10px] font-black uppercase tracking-wider bg-rose-50 text-rose-700 border border-rose-100">Cưỡng chế tăng cường</button>
+<button type="button" data-legend-intervention="priority_hot" aria-pressed="false" class="delinq-legend-chip px-2.5 py-1 rounded text-[10px] font-black uppercase tracking-wider bg-violet-50 text-violet-700 border border-violet-100">Ưu tiên nóng (P≥70)</button>
+</div>
+</div>
 <div class="px-8 py-4 bg-surface-container-low border-b border-slate-100">
 <div class="grid grid-cols-12 gap-3 text-[10px] uppercase tracking-widest font-bold text-slate-500">
 <div class="col-span-12 md:col-span-2">MST</div>

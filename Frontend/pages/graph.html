@@ -477,12 +477,12 @@
             <div class="flex items-center gap-3 p-2 rounded-lg bg-white/5">
                 <div
                     class="w-8 h-8 rounded bg-primary-fixed-dim/20 flex items-center justify-center overflow-hidden shrink-0">
-                    <img id="user-avatar-image" alt="Avatar" class="w-full h-full object-cover hidden" />
+                    <img id="user-avatar-image" alt="Ảnh đại diện" class="w-full h-full object-cover hidden" />
                     <span id="user-avatar-fallback"
                         class="text-primary-fixed-dim text-[10px] font-black tracking-tight">AD</span>
                 </div>
                 <div id="user-profile-badge">
-                    <p class="text-xs font-bold" id="user-full-name">Admin Profile</p>
+                    <p class="text-xs font-bold" id="user-full-name">Hồ sơ quản trị</p>
                     <p class="text-[10px] text-slate-500" id="user-current-role">Quản trị viên</p>
                 </div>
             </div>
@@ -531,8 +531,8 @@
                 <div>
                     <h2 class="text-3xl font-black text-primary tracking-tighter -ml-0.5">Bản đồ Mạng lưới Điều tra
                     </h2>
-                    <p class="text-on-surface-variant text-sm mt-1">Phân tích chuyên sâu cụm hóa đơn xoay vòng – Powered
-                        by Graph Attention Network (GAT)</p>
+                    <p class="text-on-surface-variant text-sm mt-1">Phân tích chuyên sâu cụm hóa đơn xoay vòng, vận hành
+                        bởi Graph Attention Network (GAT)</p>
                 </div>
                 <div class="flex gap-2">
                     <button id="export-report-btn"
@@ -569,22 +569,22 @@
 
             <div id="graph-intelligence-strip"
                 class="mt-4 w-full max-w-5xl rounded-xl border border-outline-variant/20 bg-slate-50/70 px-3 py-2 flex flex-wrap items-center gap-2">
-                <div class="model-metric-chip">Mode <span id="model-mode-label" class="value">--</span></div>
-                <div class="model-metric-chip">Node Threshold <span id="node-threshold-value" class="value">--</span></div>
-                <div class="model-metric-chip">Edge Threshold <span id="edge-threshold-value" class="value">--</span></div>
-                <div class="model-metric-chip">Attention <span id="attention-count-value" class="value">--</span></div>
-                <div class="model-metric-chip">Policy <span id="policy-summary" class="value">--</span></div>
-                <div class="model-metric-chip">Depth <span id="query-depth-value" class="value">--</span></div>
+                <div class="model-metric-chip">Chế độ <span id="model-mode-label" class="value">--</span></div>
+                <div class="model-metric-chip">Ngưỡng nút <span id="node-threshold-value" class="value">--</span></div>
+                <div class="model-metric-chip">Ngưỡng cạnh <span id="edge-threshold-value" class="value">--</span></div>
+                <div class="model-metric-chip">Điểm chú ý <span id="attention-count-value" class="value">--</span></div>
+                <div class="model-metric-chip">Chính sách <span id="policy-summary" class="value">--</span></div>
+                <div class="model-metric-chip">Độ sâu <span id="query-depth-value" class="value">--</span></div>
             </div>
 
-            <div id="graph-workbench-tabs" role="tablist" aria-label="Không gian làm việc VAT Graph" class="mt-4 max-w-5xl bg-surface-container-low rounded-xl border border-outline-variant/20 px-2 py-2 flex items-center gap-1.5">
+            <div id="graph-workbench-tabs" role="tablist" aria-label="Không gian làm việc đồ thị VAT" class="mt-4 max-w-5xl bg-surface-container-low rounded-xl border border-outline-variant/20 px-2 py-2 flex items-center gap-1.5">
                 <button id="workbench-tab-graph" class="workbench-tab" role="tab" aria-selected="false" aria-controls="investigation-section" tabindex="-1" data-mode="graph" aria-label="Chuyển sang không gian bản đồ đồ thị">
                     <span class="material-symbols-outlined text-[14px]">hub</span>
                     Bản đồ
                 </button>
-                <button id="workbench-tab-forensic" class="workbench-tab" role="tab" aria-selected="false" aria-controls="forensic-side-panel" tabindex="-1" data-mode="forensic" aria-label="Chuyển sang không gian forensic">
+                <button id="workbench-tab-forensic" class="workbench-tab" role="tab" aria-selected="false" aria-controls="forensic-side-panel" tabindex="-1" data-mode="forensic" aria-label="Chuyển sang không gian điều tra số">
                     <span class="material-symbols-outlined text-[14px]">policy</span>
-                    Forensic
+                    Điều tra số
                 </button>
                 <button id="workbench-tab-companies" class="workbench-tab" role="tab" aria-selected="false" aria-controls="companies-section" tabindex="-1" data-mode="companies" aria-label="Chuyển sang bảng doanh nghiệp">
                     <span class="material-symbols-outlined text-[14px]">corporate_fare</span>
@@ -593,9 +593,9 @@
             </div>
             <p id="workbench-shortcut-hint" class="mt-2 text-[10px] font-semibold text-slate-500 tracking-wide">
                 Phím tắt: <span class="font-black text-primary-container">G</span> Bản đồ,
-                <span class="font-black text-primary-container">F</span> Forensic,
+                <span class="font-black text-primary-container">F</span> Điều tra số,
                 <span class="font-black text-primary-container">C</span> Doanh nghiệp,
-                <span class="font-black text-primary-container">Esc</span> xóa focus.
+                <span class="font-black text-primary-container">Esc</span> xóa tiêu điểm.
             </p>
 
             <div id="investigation-summary" aria-live="polite" class="mt-4 w-full max-w-5xl hidden">
@@ -608,12 +608,12 @@
                     <div class="investigation-summary-card">
                         <p class="label">Chủ thể vỏ bọc</p>
                         <p id="summary-shell-count" class="value text-error">--</p>
-                        <p class="hint">Ước lượng theo ngưỡng model</p>
+                        <p class="hint">Ước lượng theo ngưỡng mô hình</p>
                     </div>
                     <div class="investigation-summary-card">
                         <p class="label">Chuỗi luân chuyển</p>
                         <p id="summary-cycle-count" class="value text-amber-700">--</p>
-                        <p class="hint">Số cạnh nghi vấn circular</p>
+                        <p class="hint">Số cạnh nghi vấn quay vòng</p>
                     </div>
                     <div class="investigation-summary-card">
                         <p class="label">Mức độ điều tra</p>
@@ -672,17 +672,17 @@
                     class="absolute top-6 right-[26rem] px-3 py-1.5 bg-white/10 backdrop-blur-md rounded-lg border border-white/10 flex items-center gap-2 z-30"
                     id="model-status-badge">
                     <div class="w-2 h-2 rounded-full bg-amber-500"></div>
-                    <span class="text-[10px] text-slate-300 font-bold">Đang tải Model...</span>
+                    <span class="text-[10px] text-slate-300 font-bold">Đang tải mô hình...</span>
                 </div>
 
                 <div id="graph-canvas-controls" class="absolute top-6 right-6 px-2 py-2 bg-white/10 backdrop-blur-md rounded-lg border border-white/10 flex items-center gap-1.5 z-30">
-                    <button id="graph-fit-btn" class="graph-canvas-control-btn" title="Fit graph vào khung" aria-label="Fit graph vào khung">
+                    <button id="graph-fit-btn" class="graph-canvas-control-btn" title="Căn vừa đồ thị vào khung" aria-label="Căn vừa đồ thị vào khung">
                         <span class="material-symbols-outlined text-[16px]">fit_screen</span>
                     </button>
-                    <button id="graph-reset-btn" class="graph-canvas-control-btn" title="Reset zoom" aria-label="Reset zoom">
+                    <button id="graph-reset-btn" class="graph-canvas-control-btn" title="Đặt lại thu phóng" aria-label="Đặt lại thu phóng">
                         <span class="material-symbols-outlined text-[16px]">restart_alt</span>
                     </button>
-                    <button id="graph-clear-focus-btn" class="graph-canvas-control-btn" title="Xóa highlight" aria-label="Xóa highlight">
+                    <button id="graph-clear-focus-btn" class="graph-canvas-control-btn" title="Xóa đánh dấu" aria-label="Xóa đánh dấu">
                         <span class="material-symbols-outlined text-[16px]">visibility</span>
                     </button>
                 </div>
@@ -694,13 +694,13 @@
                     </div>
                     <div class="flex items-center gap-2 text-[10px] text-[#dc2626] font-bold uppercase">
                         <div class="w-5 h-0.5 bg-[#dc2626]" style="border-top: 2px dashed #dc2626;"></div> Luồng xoay
-                        vòng (Circular)
+                        vòng
                     </div>
                     <div class="flex items-center gap-2 text-[10px] text-amber-400 font-bold uppercase">
                         <div class="w-3 h-3 rounded-full border-2 border-amber-400 bg-transparent"></div> Nút nghi vấn
                     </div>
                     <div class="flex items-center gap-2 text-[10px] text-red-400 font-bold uppercase">
-                        <div class="w-3 h-3 rounded-full bg-red-800 border-2 border-red-400"></div> Chủ thể vỏ bọc (Shell)
+                        <div class="w-3 h-3 rounded-full bg-red-800 border-2 border-red-400"></div> Chủ thể vỏ bọc
                     </div>
                 </div>
 
@@ -800,12 +800,20 @@
                 </div>
                 <div class="px-6 py-3 border-b border-surface-container bg-surface-container-low/30">
                     <div class="flex flex-wrap items-center gap-1.5">
-                        <span id="quality-overall-pill" class="quality-pill" data-state="unknown">MODEL: --</span>
-                        <span id="quality-serving-pill" class="quality-pill" data-state="unknown">SERVING</span>
-                        <span id="quality-stress-pill" class="quality-pill" data-state="unknown">STRESS</span>
-                        <span id="quality-drift-pill" class="quality-pill" data-state="unknown">DRIFT</span>
+                        <span id="quality-overall-pill" class="quality-pill" data-state="unknown">MÔ HÌNH: --</span>
+                        <span id="quality-serving-pill" class="quality-pill" data-state="unknown">VẬN HÀNH</span>
+                        <span id="quality-stress-pill" class="quality-pill" data-state="unknown">ÁP LỰC</span>
+                        <span id="quality-drift-pill" class="quality-pill" data-state="unknown">TRÔI</span>
                     </div>
-                    <p id="quality-updated-at" aria-live="polite" class="mt-2 text-[10px] text-slate-400 font-medium">Quality snapshot chưa sẵn sàng</p>
+                    <p id="quality-updated-at" aria-live="polite" class="mt-2 text-[10px] text-slate-400 font-medium">Ảnh chụp chất lượng chưa sẵn sàng</p>
+                </div>
+                <div id="graph-split-gate-strip" class="px-6 py-3 border-b border-surface-container bg-surface-container-low/30">
+                    <div class="flex items-center justify-between gap-2">
+                        <p class="text-[10px] font-black uppercase tracking-widest text-slate-500">Quản trị split-trigger</p>
+                        <span id="graph-split-gate-badge" class="text-[10px] px-2 py-0.5 rounded bg-slate-100 text-slate-600 font-black uppercase tracking-wider">ĐANG TẢI</span>
+                    </div>
+                    <p id="graph-split-gate-summary" class="mt-2 text-[11px] text-slate-500 font-medium">Đang tải trạng thái split-trigger...</p>
+                    <p id="graph-split-gate-updated" class="mt-1 text-[10px] text-slate-400 font-medium uppercase tracking-wider">Cập nhật: --</p>
                 </div>
                 <div class="p-6 text-center border-b border-surface-container bg-surface-container-low">
                     <div class="flex justify-between items-center mb-2">
@@ -818,7 +826,29 @@
                     <p id="suspicious-invoice-count" class="text-xs text-error font-medium italic mt-2">Đang phân tích
                         dữ liệu mạng lưới...</p>
                 </div>
-                <div class="px-6 border-b border-surface-container flex gap-6 bg-white pt-2" role="tablist" aria-label="Chế độ forensic panel">
+                <div id="forensic-intel-strip" class="hidden px-6 py-3 border-b border-surface-container bg-surface-container-low/50">
+                    <p class="text-[10px] font-black uppercase tracking-widest text-slate-500">Tín hiệu tổng hợp Sở hữu + Vòng</p>
+                    <div class="mt-2 grid grid-cols-2 gap-2">
+                        <div class="bg-white border border-outline-variant/20 rounded-lg px-2.5 py-2">
+                            <p class="text-[9px] font-bold uppercase tracking-wider text-slate-400">Vòng nghi vấn</p>
+                            <p id="forensic-ring-total" class="text-sm font-black text-primary-container">--</p>
+                        </div>
+                        <div class="bg-white border border-outline-variant/20 rounded-lg px-2.5 py-2">
+                            <p class="text-[9px] font-bold uppercase tracking-wider text-slate-400">Vòng nghiêm trọng</p>
+                            <p id="forensic-ring-critical" class="text-sm font-black text-error">--</p>
+                        </div>
+                        <div class="bg-white border border-outline-variant/20 rounded-lg px-2.5 py-2">
+                            <p class="text-[9px] font-bold uppercase tracking-wider text-slate-400">Cụm sở hữu</p>
+                            <p id="forensic-ownership-clusters" class="text-sm font-black text-primary-container">--</p>
+                        </div>
+                        <div class="bg-white border border-outline-variant/20 rounded-lg px-2.5 py-2">
+                            <p class="text-[9px] font-bold uppercase tracking-wider text-slate-400">Giao dịch liên đới</p>
+                            <p id="forensic-cross-trades" class="text-sm font-black text-amber-700">--</p>
+                        </div>
+                    </div>
+                    <p id="forensic-intel-updated" class="mt-2 text-[10px] text-slate-400 font-medium">Đang đồng bộ dữ liệu sở hữu/vòng...</p>
+                </div>
+                <div class="px-6 border-b border-surface-container flex gap-6 bg-white pt-2" role="tablist" aria-label="Chế độ bảng điều tra số">
                     <button id="tab-logs" role="tab" aria-selected="true" aria-controls="investigation-logs" tabindex="0" class="py-2 text-[10px] font-black uppercase text-primary-container border-b-2 border-primary-container tracking-widest transition-colors">NHẬT KÝ TRUY VẾT</button>
                     <button id="tab-paths" role="tab" aria-selected="false" aria-controls="evidence-paths-container" tabindex="-1" class="py-2 text-[10px] font-black uppercase text-slate-400 border-b-2 border-transparent hover:text-primary-container tracking-widest transition-colors">CHUỖI BẰNG CHỨNG
                          <span id="path-badge" class="ml-1 bg-error text-white px-1.5 py-0.5 rounded-full text-[8px] hidden">0</span>

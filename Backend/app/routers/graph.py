@@ -14,6 +14,7 @@ from typing import Optional, Any
 
 from ..database import get_db
 from ..observability import get_structured_logger, log_event
+from . import monitoring as monitoring_router
 
 router = APIRouter(prefix="/api", tags=["VAT Invoice Graph (GNN)"])
 logger = get_structured_logger("taxinspector.graph")
@@ -185,6 +186,24 @@ def _enrich_graph_result(result: dict, engine: Any, tax_code: Optional[str], dep
     return result
 
 
+def _build_split_trigger_status_context(snapshot_source: str = "graph_main") -> dict[str, Any]:
+    payload = monitoring_router.get_split_trigger_status_snapshot(
+        persist_snapshot=False,
+        snapshot_source=snapshot_source,
+    )
+    if isinstance(payload, dict):
+        return payload
+    return {
+        "ready": False,
+        "schema_ready": False,
+        "readiness_score": 0,
+        "reason": "Không thể tải split-trigger status.",
+        "track_status": {},
+        "totals": {"enabled_rules": 0, "passed_rules": 0},
+        "generated_at": "",
+    }
+
+
 @router.get("/graph")
 def get_vat_invoice_graph(
     tax_code: Optional[str] = Query(None, description="Tax code tâm điểm để dựng subgraph"),
@@ -276,6 +295,9 @@ def get_vat_invoice_graph(
             )
 
         result = _enrich_graph_result(result, engine=engine, tax_code=tax_code, depth=depth)
+        result["split_trigger_status"] = _build_split_trigger_status_context(
+            snapshot_source="graph_main",
+        )
 
     return result
 

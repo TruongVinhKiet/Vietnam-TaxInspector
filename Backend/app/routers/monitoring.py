@@ -1,15 +1,18 @@
-from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
-from typing import Optional
+from fastapi import APIRouter, HTTPException, Depends, Request
+from pydantic import BaseModel, Field
+from typing import Optional, Any, Literal
 import json
+import math
 from datetime import datetime, timedelta
 from pathlib import Path
 import psycopg2
 import os
 import numpy as np
+from sqlalchemy.orm import Session
 
 from ..observability import get_structured_logger, log_event
-from .. import schemas
+from .. import schemas, auth, models
+from ..database import get_db
 
 router = APIRouter(prefix="/api/monitoring", tags=["MLOps"])
 
@@ -18,6 +21,11 @@ logger = get_structured_logger("taxinspector.monitoring")
 LOG_DIR = Path(__file__).resolve().parent.parent.parent / "data" / "logs"
 LOG_DIR.mkdir(parents=True, exist_ok=True)
 MODEL_DIR = Path(__file__).resolve().parent.parent.parent / "data" / "models"
+
+AUDIT_QUALITY_REPORT_FILE = "audit_value_quality_report.json"
+VAT_QUALITY_REPORT_FILE = "vat_refund_quality_report.json"
+SPECIALIZED_PILOT_REPORT_FILE = "specialized_pilot_report.json"
+SPECIALIZED_GO_NO_GO_REPORT_FILE = "specialized_go_no_go_report.json"
 
 DRIFT_FEATURES = (
     "company_age_days",
@@ -45,6 +53,12 @@ DELINQUENCY_DRIFT_FEATURES = (
     "prob_90d",
 )
 
+VALID_POLICY_COMPARATORS = {">=", ">", "<=", "<", "=="}
+ADMIN_POLICY_ROLES = {"admin"}
+KPI_BLOCKING_STATUSES = {"fail", "insufficient_data", "no_metric", "cooldown_active"}
+KPI_FAILLIKE_STATUSES = {"fail", "insufficient_data", "no_metric", "cooldown_active"}
+TERMINAL_OUTCOME_STATUSES = ("recovered", "partial_recovered", "unrecoverable", "dismissed")
+
 
 class FeedbackData(BaseModel):
     tax_code: Optional[str] = None
@@ -58,6 +72,60 @@ class MetricLog(BaseModel):
     metric_name: str
     value: float
     labels: dict = {}
+
+
+class KPIPolicyInput(BaseModel):
+    track_name: str
+    metric_name: str
+    comparator: Literal[">=", ">", "<=", "<", "=="] = ">="
+    threshold: float
+    min_sample: int = Field(default=50, ge=1)
+    window_days: int = Field(default=28, ge=7, le=365)
+    cooldown_days: int = Field(default=14, ge=0, le=365)
+    enabled: bool = True
+    rationale: Optional[str] = None
+
+
+class KPIPolicyUpsertRequest(BaseModel):
+    policies: list[KPIPolicyInput]
+    replace_existing: bool = False
+
+
+def _normalize_role(value: Any) -> str:
+    return str(value or "").strip().lower()
+
+
+def _require_policy_admin(current_user: models.User) -> None:
+    role = _normalize_role(getattr(current_user, "role", ""))
+    if role not in ADMIN_POLICY_ROLES:
+        raise HTTPException(
+            status_code=403,
+            detail="Chỉ tài khoản admin mới được cập nhật KPI policy hoặc capture snapshots thủ công.",
+        )
+
+
+def _safe_log_monitoring_audit(
+    db: Any,
+    *,
+    action: str,
+    request: Optional[Request],
+    current_user: Optional[models.User],
+    detail: Optional[str] = None,
+) -> None:
+    """Best-effort immutable audit logging for monitoring governance actions."""
+    if db is None or not hasattr(db, "add") or not hasattr(db, "commit"):
+        return
+    try:
+        auth.log_audit(
+            db,
+            action=action,
+            request=request,
+            user_id=getattr(current_user, "id", None) if current_user is not None else None,
+            badge_id=getattr(current_user, "badge_id", None) if current_user is not None else None,
+            detail=detail,
+        )
+    except Exception as exc:
+        logger.warning("Monitoring audit logging skipped: %s", str(exc))
 
 
 def _parse_iso_timestamp(raw: str):
@@ -135,6 +203,31 @@ def _safe_read_json(path: Path) -> dict:
             return payload if isinstance(payload, dict) else {}
     except Exception:
         return {}
+
+
+def _artifact_report(path: Path) -> dict[str, Any]:
+    payload = _safe_read_json(path)
+    return {
+        "exists": bool(path.exists()),
+        "updated_at": _file_updated_at(path),
+        "payload": payload,
+    }
+
+
+def _track_payload(pilot_payload: dict[str, Any], track_name: str) -> dict[str, Any]:
+    tracks = pilot_payload.get("tracks")
+    if not isinstance(tracks, dict):
+        return {}
+    value = tracks.get(track_name)
+    return value if isinstance(value, dict) else {}
+
+
+def _float_or_none(value: Any) -> Optional[float]:
+    return float(value) if isinstance(value, (int, float)) else None
+
+
+def _int_or_none(value: Any) -> Optional[int]:
+    return int(value) if isinstance(value, (int, float)) else None
 
 
 def _file_updated_at(path: Path) -> Optional[str]:
@@ -612,6 +705,10 @@ async def mlops_health_check():
             "fraud_isolation_forest": (model_dir / "isolation_forest.joblib").exists(),
             "fraud_calibrator": (model_dir / "fraud_calibrator.joblib").exists(),
             "fraud_manifest": (model_dir / "fraud_model_manifest.json").exists(),
+            "audit_value_model": (model_dir / "audit_value_model.joblib").exists(),
+            "audit_value_calibrator": (model_dir / "audit_value_calibrator.joblib").exists(),
+            "vat_refund_model": (model_dir / "vat_refund_model.joblib").exists(),
+            "vat_refund_calibrator": (model_dir / "vat_refund_calibrator.joblib").exists(),
         },
         "db_connection": False,
     }
@@ -1005,6 +1102,276 @@ def get_data_quality_gate():
             "guidance": None if dp_count > 0 else "Chạy batch prediction để populate cache.",
         })
 
+        # Check 9: ai_risk_assessments lineage completeness (model_version)
+        assessment_columns = _table_columns(cur, "ai_risk_assessments")
+        if {"model_version", "created_at"}.issubset(assessment_columns):
+            cur.execute(
+                """
+                SELECT
+                    COUNT(*) AS total_rows,
+                    COUNT(*) FILTER (
+                        WHERE model_version IS NOT NULL AND btrim(model_version) <> ''
+                    ) AS with_model_version,
+                    COUNT(*) FILTER (
+                        WHERE created_at >= (NOW() - interval '30 days')
+                    ) AS recent_rows,
+                    COUNT(*) FILTER (
+                        WHERE created_at >= (NOW() - interval '30 days')
+                          AND model_version IS NOT NULL
+                          AND btrim(model_version) <> ''
+                    ) AS recent_with_model_version
+                FROM ai_risk_assessments
+                """
+            )
+            (
+                assessments_total,
+                assessments_with_version,
+                assessments_recent,
+                assessments_recent_with_version,
+            ) = cur.fetchone()
+            assessments_total = int(assessments_total or 0)
+            assessments_with_version = int(assessments_with_version or 0)
+            assessments_recent = int(assessments_recent or 0)
+            assessments_recent_with_version = int(assessments_recent_with_version or 0)
+
+            overall_coverage = _safe_div(assessments_with_version, assessments_total)
+            recent_coverage = _safe_div(assessments_recent_with_version, assessments_recent)
+            coverage_for_status = recent_coverage if assessments_recent >= 20 else overall_coverage
+
+            if assessments_total == 0:
+                status_lineage = "warning"
+            elif coverage_for_status is None:
+                status_lineage = "fail"
+            elif coverage_for_status >= 0.95:
+                status_lineage = "pass"
+            elif coverage_for_status >= 0.80:
+                status_lineage = "warning"
+            else:
+                status_lineage = "fail"
+
+            checks.append(
+                {
+                    "source": "ai_risk_assessments_lineage",
+                    "status": status_lineage,
+                    "row_count": assessments_total,
+                    "program": "B/C – Data Readiness",
+                    "details": {
+                        "overall_model_version_coverage": overall_coverage,
+                        "recent_30d_model_version_coverage": recent_coverage,
+                        "recent_30d_rows": assessments_recent,
+                    },
+                    "guidance": None
+                    if status_lineage == "pass"
+                    else "Bắt buộc ghi model_version cho mỗi bản ghi ai_risk_assessments để đảm bảo lineage.",
+                }
+            )
+
+        # Check 10-13: inspector_labels completeness/lag/outlier + lineage
+        inspector_columns = _table_columns(cur, "inspector_labels")
+
+        if {"assessment_id", "model_version"}.issubset(inspector_columns):
+            cur.execute(
+                """
+                SELECT
+                    COUNT(*) FILTER (WHERE assessment_id IS NOT NULL) AS linked_rows,
+                    COUNT(*) FILTER (
+                        WHERE assessment_id IS NOT NULL
+                          AND model_version IS NOT NULL
+                          AND btrim(model_version) <> ''
+                    ) AS linked_with_model_version
+                FROM inspector_labels
+                """
+            )
+            linked_rows, linked_with_model_version = cur.fetchone()
+            linked_rows = int(linked_rows or 0)
+            linked_with_model_version = int(linked_with_model_version or 0)
+            linked_coverage = _safe_div(linked_with_model_version, linked_rows)
+
+            if linked_rows == 0:
+                status_label_lineage = "building"
+            elif linked_coverage is None:
+                status_label_lineage = "fail"
+            elif linked_coverage >= 0.85:
+                status_label_lineage = "pass"
+            elif linked_coverage >= 0.65:
+                status_label_lineage = "warning"
+            else:
+                status_label_lineage = "fail"
+
+            checks.append(
+                {
+                    "source": "inspector_labels_lineage",
+                    "status": status_label_lineage,
+                    "row_count": linked_rows,
+                    "program": "B/C – Data Readiness",
+                    "details": {
+                        "linked_label_rows": linked_rows,
+                        "linked_model_version_coverage": linked_coverage,
+                    },
+                    "guidance": None
+                    if status_label_lineage in {"pass", "building"}
+                    else "Backfill model_version cho inspector_labels đã gắn assessment_id.",
+                }
+            )
+
+        if {"intervention_attempted", "outcome_status", "created_at"}.issubset(inspector_columns):
+            cur.execute(
+                """
+                SELECT
+                    COUNT(*) FILTER (
+                        WHERE COALESCE(intervention_attempted, FALSE)
+                          AND COALESCE(outcome_status, 'pending') IN ('pending', 'in_progress')
+                    ) AS open_attempts,
+                    COUNT(*) FILTER (
+                        WHERE COALESCE(intervention_attempted, FALSE)
+                          AND COALESCE(outcome_status, 'pending') IN ('pending', 'in_progress')
+                          AND created_at < (NOW() - interval '30 days')
+                    ) AS lagging_attempts
+                FROM inspector_labels
+                """
+            )
+            open_attempts, lagging_attempts = cur.fetchone()
+            open_attempts = int(open_attempts or 0)
+            lagging_attempts = int(lagging_attempts or 0)
+            lagging_ratio = _safe_div(lagging_attempts, open_attempts)
+
+            if open_attempts == 0 or lagging_attempts == 0:
+                status_lag = "pass"
+            elif lagging_ratio is not None and lagging_ratio <= 0.25:
+                status_lag = "warning"
+            else:
+                status_lag = "fail"
+
+            checks.append(
+                {
+                    "source": "inspector_outcome_lag",
+                    "status": status_lag,
+                    "row_count": open_attempts,
+                    "program": "C – KPI Operational Loop",
+                    "details": {
+                        "open_attempts": open_attempts,
+                        "lagging_attempts_over_30d": lagging_attempts,
+                        "lagging_ratio": lagging_ratio,
+                    },
+                    "guidance": None
+                    if status_lag == "pass"
+                    else "Đóng outcome_status/outcome_recorded_at cho case pending quá 30 ngày.",
+                }
+            )
+
+        if {
+            "outcome_status",
+            "outcome_recorded_at",
+            "amount_recovered",
+            "expected_recovery",
+        }.issubset(inspector_columns):
+            cur.execute(
+                """
+                SELECT
+                    COUNT(*) FILTER (
+                        WHERE outcome_status IN %s
+                    ) AS terminal_rows,
+                    COUNT(*) FILTER (
+                        WHERE outcome_status IN %s
+                          AND (
+                                outcome_recorded_at IS NULL
+                             OR expected_recovery IS NULL
+                             OR (
+                                    outcome_status IN ('recovered', 'partial_recovered')
+                                AND amount_recovered IS NULL
+                                )
+                          )
+                    ) AS incomplete_terminal_rows
+                FROM inspector_labels
+                """,
+                (TERMINAL_OUTCOME_STATUSES, TERMINAL_OUTCOME_STATUSES),
+            )
+            terminal_rows, incomplete_terminal_rows = cur.fetchone()
+            terminal_rows = int(terminal_rows or 0)
+            incomplete_terminal_rows = int(incomplete_terminal_rows or 0)
+            incomplete_ratio = _safe_div(incomplete_terminal_rows, terminal_rows)
+
+            if terminal_rows == 0:
+                status_terminal = "building"
+            elif incomplete_terminal_rows == 0:
+                status_terminal = "pass"
+            elif incomplete_ratio is not None and incomplete_ratio <= 0.10:
+                status_terminal = "warning"
+            else:
+                status_terminal = "fail"
+
+            checks.append(
+                {
+                    "source": "inspector_terminal_completeness",
+                    "status": status_terminal,
+                    "row_count": terminal_rows,
+                    "program": "C – KPI Operational Loop",
+                    "details": {
+                        "terminal_rows": terminal_rows,
+                        "incomplete_terminal_rows": incomplete_terminal_rows,
+                        "incomplete_ratio": incomplete_ratio,
+                    },
+                    "guidance": None
+                    if status_terminal in {"pass", "building"}
+                    else "Bổ sung expected_recovery / amount_recovered / outcome_recorded_at cho các case đã có outcome cuối.",
+                }
+            )
+
+        numeric_columns = {
+            "amount_recovered",
+            "expected_recovery",
+            "estimated_audit_cost",
+            "actual_audit_cost",
+        }
+        if numeric_columns.issubset(inspector_columns):
+            cur.execute(
+                """
+                SELECT
+                    COUNT(*) AS total_rows,
+                    COUNT(*) FILTER (
+                        WHERE COALESCE(amount_recovered, 0) < 0
+                           OR COALESCE(expected_recovery, 0) < 0
+                           OR COALESCE(estimated_audit_cost, 0) < 0
+                           OR COALESCE(actual_audit_cost, 0) < 0
+                    ) AS negative_rows,
+                    COUNT(*) FILTER (
+                        WHERE COALESCE(amount_recovered, 0) > 1e12
+                           OR COALESCE(expected_recovery, 0) > 1e12
+                    ) AS extreme_rows
+                FROM inspector_labels
+                """
+            )
+            total_rows, negative_rows, extreme_rows = cur.fetchone()
+            total_rows = int(total_rows or 0)
+            negative_rows = int(negative_rows or 0)
+            extreme_rows = int(extreme_rows or 0)
+            anomaly_rows = negative_rows + extreme_rows
+            anomaly_ratio = _safe_div(anomaly_rows, total_rows)
+
+            if total_rows == 0 or anomaly_rows == 0:
+                status_numeric = "pass"
+            elif anomaly_ratio is not None and anomaly_ratio <= 0.01:
+                status_numeric = "warning"
+            else:
+                status_numeric = "fail"
+
+            checks.append(
+                {
+                    "source": "inspector_numeric_outliers",
+                    "status": status_numeric,
+                    "row_count": total_rows,
+                    "program": "B/C – Data Readiness",
+                    "details": {
+                        "negative_rows": negative_rows,
+                        "extreme_rows_over_1e12": extreme_rows,
+                        "anomaly_ratio": anomaly_ratio,
+                    },
+                    "guidance": None
+                    if status_numeric == "pass"
+                    else "Rà soát các bản ghi có giá trị âm/đột biến trong amount_recovered và expected_recovery.",
+                }
+            )
+
         cur.close()
         conn.close()
 
@@ -1047,58 +1414,1087 @@ def get_data_quality_gate():
     }
 
 
+def _safe_div(numerator: Any, denominator: Any) -> Optional[float]:
+    try:
+        num = float(numerator)
+        den = float(denominator)
+    except (TypeError, ValueError):
+        return None
+    if den == 0:
+        return None
+    return num / den
+
+
+def _table_columns(cur, table_name: str) -> set[str]:
+    cur.execute(
+        """
+        SELECT column_name
+        FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = %s
+        """,
+        (table_name,),
+    )
+    return {str(row[0]) for row in cur.fetchall()}
+
+
+def _normalize_policy_token(raw: Any) -> str:
+    value = str(raw or "").strip().lower()
+    value = value.replace("-", "_").replace(" ", "_").replace("/", "_")
+    while "__" in value:
+        value = value.replace("__", "_")
+    return value.strip("_")
+
+
+def _normalize_kpi_policy_payload(policies: list[KPIPolicyInput]) -> list[dict[str, Any]]:
+    if not policies:
+        raise HTTPException(status_code=422, detail="policies không được rỗng.")
+
+    normalized: list[dict[str, Any]] = []
+    seen_keys: set[tuple[str, str]] = set()
+
+    for policy in policies:
+        track_name = _normalize_policy_token(policy.track_name)
+        metric_name = _normalize_policy_token(policy.metric_name)
+        if not track_name or not metric_name:
+            raise HTTPException(status_code=422, detail="track_name và metric_name là bắt buộc.")
+
+        comparator = str(policy.comparator or "").strip()
+        if comparator not in VALID_POLICY_COMPARATORS:
+            raise HTTPException(status_code=422, detail=f"comparator không hợp lệ: {comparator}")
+
+        threshold = float(policy.threshold)
+        if np.isnan(threshold) or np.isinf(threshold):
+            raise HTTPException(status_code=422, detail="threshold phải là số hữu hạn.")
+
+        key = (track_name, metric_name)
+        if key in seen_keys:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Policy bị trùng cho track/metric: {track_name}/{metric_name}",
+            )
+        seen_keys.add(key)
+
+        rationale = str(policy.rationale).strip() if policy.rationale is not None else None
+        if rationale == "":
+            rationale = None
+
+        normalized.append(
+            {
+                "track_name": track_name,
+                "metric_name": metric_name,
+                "comparator": comparator,
+                "threshold": threshold,
+                "min_sample": max(1, int(policy.min_sample)),
+                "window_days": max(7, min(365, int(policy.window_days))),
+                "cooldown_days": max(0, min(365, int(policy.cooldown_days))),
+                "enabled": bool(policy.enabled),
+                "rationale": rationale,
+            }
+        )
+
+    return normalized
+
+
+def _upsert_kpi_policies(cur, policies: list[dict[str, Any]], replace_existing: bool = False) -> int:
+    if replace_existing:
+        cur.execute("SELECT track_name, metric_name FROM kpi_trigger_policies")
+        existing = {(str(row[0]), str(row[1])) for row in cur.fetchall()}
+        keep = {(p["track_name"], p["metric_name"]) for p in policies}
+        for track_name, metric_name in sorted(existing - keep):
+            cur.execute(
+                "DELETE FROM kpi_trigger_policies WHERE track_name=%s AND metric_name=%s",
+                (track_name, metric_name),
+            )
+
+    for policy in policies:
+        cur.execute(
+            """
+            INSERT INTO kpi_trigger_policies (
+                track_name, metric_name, comparator, threshold, min_sample,
+                window_days, cooldown_days, enabled, rationale
+            )
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+            ON CONFLICT (track_name, metric_name)
+            DO UPDATE SET
+                comparator = EXCLUDED.comparator,
+                threshold = EXCLUDED.threshold,
+                min_sample = EXCLUDED.min_sample,
+                window_days = EXCLUDED.window_days,
+                cooldown_days = EXCLUDED.cooldown_days,
+                enabled = EXCLUDED.enabled,
+                rationale = EXCLUDED.rationale,
+                updated_at = CURRENT_TIMESTAMP
+            """,
+            (
+                policy["track_name"],
+                policy["metric_name"],
+                policy["comparator"],
+                policy["threshold"],
+                policy["min_sample"],
+                policy["window_days"],
+                policy["cooldown_days"],
+                policy["enabled"],
+                policy["rationale"],
+            ),
+        )
+
+    return len(policies)
+
+
+def _normalize_snapshot_source(source: Optional[str]) -> str:
+    normalized = _normalize_policy_token(source or "split_trigger_status")
+    return normalized[:80] if normalized else "split_trigger_status"
+
+
+def _default_kpi_policies() -> list[dict[str, Any]]:
+    return [
+        {
+            "track_name": "audit_value",
+            "metric_name": "precision_top_50",
+            "comparator": ">=",
+            "threshold": 0.70,
+            "min_sample": 50,
+            "window_days": 28,
+            "cooldown_days": 14,
+            "enabled": True,
+            "rationale": "Top-50 hồ sơ Audit Value cần precision ổn định trước khi cân nhắc split.",
+        },
+        {
+            "track_name": "audit_value",
+            "metric_name": "roi_positive_rate",
+            "comparator": ">=",
+            "threshold": 0.80,
+            "min_sample": 50,
+            "window_days": 28,
+            "cooldown_days": 14,
+            "enabled": True,
+            "rationale": "Tối thiểu 80% case can thiệp phải cho net recovery dương.",
+        },
+        {
+            "track_name": "vat_refund",
+            "metric_name": "precision_top_100",
+            "comparator": ">=",
+            "threshold": 0.65,
+            "min_sample": 80,
+            "window_days": 28,
+            "cooldown_days": 14,
+            "enabled": True,
+            "rationale": "Top-100 VAT queue cần precision đủ mạnh trước khi tách flow.",
+        },
+        {
+            "track_name": "vat_refund",
+            "metric_name": "false_negative_rate_high_risk",
+            "comparator": "<=",
+            "threshold": 0.12,
+            "min_sample": 50,
+            "window_days": 28,
+            "cooldown_days": 14,
+            "enabled": True,
+            "rationale": "Giữ FN high-risk VAT ở mức thấp để tránh bỏ sót hồ sơ trọng điểm.",
+        },
+    ]
+
+
+def _fetch_kpi_policies(cur) -> list[dict[str, Any]]:
+    table_names = _table_columns(cur, "kpi_trigger_policies")
+    if not table_names:
+        return _default_kpi_policies()
+
+    cur.execute(
+        """
+        SELECT track_name, metric_name, comparator, threshold, min_sample, window_days,
+               cooldown_days, enabled, rationale
+        FROM kpi_trigger_policies
+        ORDER BY track_name, metric_name
+        """
+    )
+    rows = cur.fetchall()
+    if not rows:
+        return _default_kpi_policies()
+
+    return [
+        {
+            "track_name": r[0],
+            "metric_name": r[1],
+            "comparator": r[2],
+            "threshold": float(r[3]),
+            "min_sample": int(r[4]),
+            "window_days": int(r[5]),
+            "cooldown_days": int(r[6]),
+            "enabled": bool(r[7]),
+            "rationale": r[8],
+        }
+        for r in rows
+    ]
+
+
+def _evaluate_threshold(actual: Optional[float], comparator: str, threshold: float) -> Optional[bool]:
+    if actual is None:
+        return None
+    if comparator == ">=":
+        return actual >= threshold
+    if comparator == ">":
+        return actual > threshold
+    if comparator == "<=":
+        return actual <= threshold
+    if comparator == "<":
+        return actual < threshold
+    if comparator == "==":
+        return abs(actual - threshold) < 1e-9
+    return None
+
+
+def _fetch_recent_rule_failures(cur, policies: list[dict[str, Any]]) -> dict[tuple[str, str], datetime]:
+    if not policies:
+        return {}
+    if not _table_columns(cur, "kpi_metric_snapshots"):
+        return {}
+
+    max_cooldown_days = 0
+    for policy in policies:
+        try:
+            max_cooldown_days = max(max_cooldown_days, int(policy.get("cooldown_days") or 0))
+        except (TypeError, ValueError):
+            continue
+
+    if max_cooldown_days <= 0:
+        return {}
+
+    cur.execute(
+        """
+        SELECT
+            COALESCE(track_name, '') AS track_name,
+            COALESCE(metric_name, '') AS metric_name,
+            MAX(generated_at) AS last_failed_at
+        FROM kpi_metric_snapshots
+        WHERE generated_at >= (NOW() - (%s || ' days')::interval)
+                    AND status IN ('fail', 'insufficient_data', 'no_metric')
+        GROUP BY COALESCE(track_name, ''), COALESCE(metric_name, '')
+        """,
+        (max_cooldown_days,),
+    )
+
+    failures: dict[tuple[str, str], datetime] = {}
+    for raw_track_name, raw_metric_name, last_failed_at in cur.fetchall():
+        if not isinstance(last_failed_at, datetime):
+            continue
+
+        track_name = _normalize_policy_token(raw_track_name) or "unknown"
+        metric_name = _normalize_policy_token(raw_metric_name)
+        if not metric_name:
+            continue
+
+        normalized_ts = last_failed_at.replace(tzinfo=None) if last_failed_at.tzinfo else last_failed_at
+        failures[(track_name, metric_name)] = normalized_ts
+
+    return failures
+
+
+def _compute_precision_at_k(cur, window_days: int, k: int) -> tuple[Optional[float], int]:
+    if k <= 0:
+        return None, 0
+
+    cur.execute(
+        """
+        WITH ranked AS (
+            SELECT
+                COALESCE(expected_recovery, predicted_collection_uplift, 0) AS expected_value,
+                COALESCE(amount_recovered, 0) AS recovered_value,
+                COALESCE(label_type, '') AS label_type
+            FROM inspector_labels
+            WHERE created_at >= (NOW() - (%s || ' days')::interval)
+            ORDER BY COALESCE(expected_recovery, predicted_collection_uplift, 0) DESC, created_at DESC
+            LIMIT %s
+        )
+        SELECT
+            COUNT(*) AS sample_count,
+            COUNT(*) FILTER (
+                WHERE recovered_value > 0
+                   OR label_type IN ('fraud_confirmed', 'delinquency_confirmed')
+            ) AS positive_count
+        FROM ranked
+        """,
+        (int(window_days), int(k)),
+    )
+    sample_count, positive_count = cur.fetchone()
+    sample_count = int(sample_count or 0)
+    positive_count = int(positive_count or 0)
+    return _safe_div(positive_count, sample_count), sample_count
+
+
+def _compute_vat_precision_at_k(cur, window_days: int, k: int) -> tuple[Optional[float], int]:
+    if k <= 0:
+        return None, 0
+
+    cur.execute(
+        """
+        WITH vat_cases AS (
+            SELECT
+                COALESCE(expected_recovery, predicted_collection_uplift, 0) AS expected_value,
+                COALESCE(amount_recovered, 0) AS recovered_value,
+                LOWER(COALESCE(label_type, '')) AS label_norm,
+                COALESCE(outcome_status, '') AS outcome_status
+            FROM inspector_labels
+            WHERE created_at >= (NOW() - (%s || ' days')::interval)
+              AND (
+                          LOWER(COALESCE(label_type, '')) LIKE '%%vat%%'
+                      OR LOWER(COALESCE(label_type, '')) LIKE '%%refund%%'
+                      OR LOWER(COALESCE(label_type, '')) LIKE '%%invoice%%'
+              )
+            ORDER BY COALESCE(expected_recovery, predicted_collection_uplift, 0) DESC, created_at DESC
+            LIMIT %s
+        )
+        SELECT
+            COUNT(*) AS sample_count,
+            COUNT(*) FILTER (
+                WHERE recovered_value > 0
+                   OR outcome_status IN ('recovered', 'partial_recovered')
+                   OR label_norm LIKE '%%confirmed%%'
+            ) AS positive_count
+        FROM vat_cases
+        """,
+        (int(window_days), int(k)),
+    )
+    sample_count, positive_count = cur.fetchone()
+    sample_count = int(sample_count or 0)
+    positive_count = int(positive_count or 0)
+    return _safe_div(positive_count, sample_count), sample_count
+
+
+def _estimate_metric_sample_size(track_name: str, metric_name: str, summary: dict[str, Any]) -> int:
+    total_labels = int(summary.get("total_labels") or 0)
+    attempted_labels = int(summary.get("attempted_labels") or 0)
+    confirmed_fraud_labels = int(summary.get("confirmed_fraud_labels") or 0)
+    high_risk_labels = int(summary.get("high_risk_labels") or 0)
+
+    if metric_name == "false_negative_rate_high_risk":
+        return high_risk_labels if track_name == "vat_refund" else confirmed_fraud_labels
+    if metric_name in {
+        "roi_positive_rate",
+        "expected_vs_actual_uplift_ratio",
+        "expected_vs_actual_recovery_ratio",
+        "terminal_rate",
+        "recovered_rate",
+    }:
+        return attempted_labels
+    return total_labels
+
+
+def _compute_intervention_effectiveness(cur, window_days: int = 90, top_k: int = 50) -> dict[str, Any]:
+    columns = _table_columns(cur, "inspector_labels")
+    required = {
+        "intervention_action",
+        "intervention_attempted",
+        "outcome_status",
+        "predicted_collection_uplift",
+        "expected_recovery",
+        "expected_net_recovery",
+        "estimated_audit_cost",
+        "actual_audit_cost",
+        "amount_recovered",
+    }
+    missing_columns = sorted(required - columns)
+
+    if missing_columns:
+        return {
+            "window_days": int(window_days),
+            "top_k": int(top_k),
+            "schema_ready": False,
+            "missing_columns": missing_columns,
+            "message": "Schema KPI chưa sẵn sàng. Cần chạy migration mới cho inspector_labels.",
+            "generated_at": datetime.utcnow().isoformat(),
+        }
+
+    cur.execute(
+        """
+        SELECT
+            COUNT(*) AS total_labels,
+            COUNT(*) FILTER (WHERE intervention_attempted) AS attempted_labels,
+            COUNT(*) FILTER (
+                WHERE outcome_status IN ('recovered', 'partial_recovered', 'unrecoverable', 'dismissed')
+            ) AS terminal_labels,
+            COUNT(*) FILTER (WHERE COALESCE(amount_recovered, 0) > 0) AS positive_recovery_labels,
+            SUM(COALESCE(predicted_collection_uplift, 0)) AS total_predicted_uplift,
+            SUM(COALESCE(expected_recovery, 0)) AS total_expected_recovery,
+            SUM(COALESCE(expected_net_recovery, 0)) AS total_expected_net_recovery,
+            SUM(COALESCE(amount_recovered, 0)) AS total_actual_recovered,
+            SUM(COALESCE(actual_audit_cost, estimated_audit_cost, 0)) AS total_audit_cost,
+            COUNT(*) FILTER (
+                WHERE intervention_attempted
+                  AND (COALESCE(amount_recovered, 0) - COALESCE(actual_audit_cost, estimated_audit_cost, 0)) > 0
+            ) AS roi_positive_labels,
+            COUNT(*) FILTER (WHERE label_type = 'fraud_confirmed') AS confirmed_fraud_labels,
+            COUNT(*) FILTER (
+                WHERE label_type = 'fraud_confirmed'
+                  AND COALESCE(intervention_action, 'monitor') IN ('monitor', 'auto_reminder')
+            ) AS low_intensity_confirmed
+        FROM inspector_labels
+        WHERE created_at >= (NOW() - (%s || ' days')::interval)
+        """,
+        (int(window_days),),
+    )
+    (
+        total_labels,
+        attempted_labels,
+        terminal_labels,
+        positive_recovery_labels,
+        total_predicted_uplift,
+        total_expected_recovery,
+        total_expected_net_recovery,
+        total_actual_recovered,
+        total_audit_cost,
+        roi_positive_labels,
+        confirmed_fraud_labels,
+        low_intensity_confirmed,
+    ) = cur.fetchone()
+
+    total_labels = int(total_labels or 0)
+    attempted_labels = int(attempted_labels or 0)
+    terminal_labels = int(terminal_labels or 0)
+    positive_recovery_labels = int(positive_recovery_labels or 0)
+    total_predicted_uplift = float(total_predicted_uplift or 0)
+    total_expected_recovery = float(total_expected_recovery or 0)
+    total_expected_net_recovery = float(total_expected_net_recovery or 0)
+    total_actual_recovered = float(total_actual_recovered or 0)
+    total_audit_cost = float(total_audit_cost or 0)
+    roi_positive_labels = int(roi_positive_labels or 0)
+    confirmed_fraud_labels = int(confirmed_fraud_labels or 0)
+    low_intensity_confirmed = int(low_intensity_confirmed or 0)
+
+    cur.execute(
+        """
+        SELECT
+            COALESCE(intervention_action, 'unassigned') AS action,
+            COUNT(*) AS sample_count,
+            COUNT(*) FILTER (
+                WHERE COALESCE(amount_recovered, 0) > 0
+                   OR label_type IN ('fraud_confirmed', 'delinquency_confirmed')
+            ) AS positive_count,
+            SUM(COALESCE(predicted_collection_uplift, 0)) AS expected_uplift,
+            SUM(COALESCE(amount_recovered, 0)) AS actual_recovered,
+            SUM(COALESCE(actual_audit_cost, estimated_audit_cost, 0)) AS audit_cost
+        FROM inspector_labels
+        WHERE created_at >= (NOW() - (%s || ' days')::interval)
+        GROUP BY COALESCE(intervention_action, 'unassigned')
+        ORDER BY sample_count DESC
+        """,
+        (int(window_days),),
+    )
+    by_action = []
+    for action, sample_count, positive_count, expected_uplift, actual_recovered, audit_cost in cur.fetchall():
+        sample_count = int(sample_count or 0)
+        positive_count = int(positive_count or 0)
+        expected_uplift = float(expected_uplift or 0)
+        actual_recovered = float(actual_recovered or 0)
+        audit_cost = float(audit_cost or 0)
+        by_action.append(
+            {
+                "intervention_action": action,
+                "sample_count": sample_count,
+                "positive_count": positive_count,
+                "precision": _safe_div(positive_count, sample_count),
+                "expected_uplift": expected_uplift,
+                "actual_recovered": actual_recovered,
+                "uplift_realization_ratio": _safe_div(actual_recovered, expected_uplift),
+                "avg_net_recovery": _safe_div(actual_recovered - audit_cost, sample_count),
+            }
+        )
+
+    precision_at_top_k, top_k_count = _compute_precision_at_k(cur, window_days=window_days, k=top_k)
+    false_negative_rate_high_risk = _safe_div(low_intensity_confirmed, confirmed_fraud_labels)
+
+    return {
+        "window_days": int(window_days),
+        "top_k": int(top_k),
+        "schema_ready": True,
+        "summary": {
+            "total_labels": total_labels,
+            "attempted_labels": attempted_labels,
+            "terminal_labels": terminal_labels,
+            "positive_recovery_labels": positive_recovery_labels,
+            "confirmed_fraud_labels": confirmed_fraud_labels,
+        },
+        "metrics": {
+            "precision_at_top_k": precision_at_top_k,
+            "precision_top_k_sample": top_k_count,
+            "roi_positive_rate": _safe_div(roi_positive_labels, attempted_labels),
+            "expected_vs_actual_uplift_ratio": _safe_div(total_actual_recovered, total_predicted_uplift),
+            "expected_vs_actual_recovery_ratio": _safe_div(total_actual_recovered, total_expected_recovery),
+            "false_negative_rate_high_risk": false_negative_rate_high_risk,
+            "average_recovery_per_label": _safe_div(total_actual_recovered, total_labels),
+            "total_predicted_uplift": total_predicted_uplift,
+            "total_expected_recovery": total_expected_recovery,
+            "total_expected_net_recovery": total_expected_net_recovery,
+            "total_actual_recovered": total_actual_recovered,
+            "total_audit_cost": total_audit_cost,
+            "net_recovery": total_actual_recovered - total_audit_cost,
+        },
+        "by_intervention_action": by_action,
+        "generated_at": datetime.utcnow().isoformat(),
+    }
+
+
+def _compute_vat_refund_effectiveness(cur, window_days: int = 90, top_k: int = 100) -> dict[str, Any]:
+    columns = _table_columns(cur, "inspector_labels")
+    required = {
+        "label_type",
+        "intervention_action",
+        "intervention_attempted",
+        "outcome_status",
+        "predicted_collection_uplift",
+        "expected_recovery",
+        "expected_net_recovery",
+        "estimated_audit_cost",
+        "actual_audit_cost",
+        "amount_recovered",
+    }
+    missing_columns = sorted(required - columns)
+
+    if missing_columns:
+        return {
+            "window_days": int(window_days),
+            "top_k": int(top_k),
+            "schema_ready": False,
+            "missing_columns": missing_columns,
+            "message": "Schema KPI VAT chưa sẵn sàng. Cần chạy migration mới cho inspector_labels.",
+            "generated_at": datetime.utcnow().isoformat(),
+        }
+
+    cur.execute(
+        """
+        WITH vat_cases AS (
+            SELECT *, LOWER(COALESCE(label_type, '')) AS label_norm
+            FROM inspector_labels
+            WHERE created_at >= (NOW() - (%s || ' days')::interval)
+              AND (
+                          LOWER(COALESCE(label_type, '')) LIKE '%%vat%%'
+                      OR LOWER(COALESCE(label_type, '')) LIKE '%%refund%%'
+                      OR LOWER(COALESCE(label_type, '')) LIKE '%%invoice%%'
+              )
+        )
+        SELECT
+            COUNT(*) AS total_labels,
+            COUNT(*) FILTER (WHERE intervention_attempted) AS attempted_labels,
+            COUNT(*) FILTER (
+                WHERE outcome_status IN ('recovered', 'partial_recovered', 'unrecoverable', 'dismissed')
+            ) AS terminal_labels,
+            COUNT(*) FILTER (
+                WHERE COALESCE(amount_recovered, 0) > 0
+                   OR outcome_status IN ('recovered', 'partial_recovered')
+            ) AS recovered_labels,
+            COUNT(*) FILTER (WHERE label_norm LIKE '%%confirmed%%') AS confirmed_vat_labels,
+            COUNT(*) FILTER (
+                WHERE label_norm LIKE '%%high_risk%%'
+                   OR label_norm LIKE '%%confirmed%%'
+            ) AS high_risk_labels,
+            COUNT(*) FILTER (
+                WHERE (label_norm LIKE '%%high_risk%%' OR label_norm LIKE '%%confirmed%%')
+                  AND COALESCE(intervention_action, 'monitor') IN ('monitor', 'auto_reminder')
+            ) AS low_intensity_high_risk,
+            SUM(COALESCE(predicted_collection_uplift, 0)) AS total_predicted_uplift,
+            SUM(COALESCE(expected_recovery, 0)) AS total_expected_recovery,
+            SUM(COALESCE(expected_net_recovery, 0)) AS total_expected_net_recovery,
+            SUM(COALESCE(amount_recovered, 0)) AS total_actual_recovered,
+            SUM(COALESCE(actual_audit_cost, estimated_audit_cost, 0)) AS total_audit_cost,
+            COUNT(*) FILTER (
+                WHERE intervention_attempted
+                  AND (COALESCE(amount_recovered, 0) - COALESCE(actual_audit_cost, estimated_audit_cost, 0)) > 0
+            ) AS roi_positive_labels
+        FROM vat_cases
+        """,
+        (int(window_days),),
+    )
+    (
+        total_labels,
+        attempted_labels,
+        terminal_labels,
+        recovered_labels,
+        confirmed_vat_labels,
+        high_risk_labels,
+        low_intensity_high_risk,
+        total_predicted_uplift,
+        total_expected_recovery,
+        total_expected_net_recovery,
+        total_actual_recovered,
+        total_audit_cost,
+        roi_positive_labels,
+    ) = cur.fetchone()
+
+    total_labels = int(total_labels or 0)
+    attempted_labels = int(attempted_labels or 0)
+    terminal_labels = int(terminal_labels or 0)
+    recovered_labels = int(recovered_labels or 0)
+    confirmed_vat_labels = int(confirmed_vat_labels or 0)
+    high_risk_labels = int(high_risk_labels or 0)
+    low_intensity_high_risk = int(low_intensity_high_risk or 0)
+    total_predicted_uplift = float(total_predicted_uplift or 0)
+    total_expected_recovery = float(total_expected_recovery or 0)
+    total_expected_net_recovery = float(total_expected_net_recovery or 0)
+    total_actual_recovered = float(total_actual_recovered or 0)
+    total_audit_cost = float(total_audit_cost or 0)
+    roi_positive_labels = int(roi_positive_labels or 0)
+
+    precision_at_top_k, top_k_count = _compute_vat_precision_at_k(cur, window_days=window_days, k=top_k)
+    false_negative_rate_high_risk = _safe_div(low_intensity_high_risk, high_risk_labels)
+
+    cur.execute(
+        """
+        WITH vat_cases AS (
+            SELECT *, LOWER(COALESCE(label_type, '')) AS label_norm
+            FROM inspector_labels
+            WHERE created_at >= (NOW() - (%s || ' days')::interval)
+              AND (
+                          LOWER(COALESCE(label_type, '')) LIKE '%%vat%%'
+                      OR LOWER(COALESCE(label_type, '')) LIKE '%%refund%%'
+                      OR LOWER(COALESCE(label_type, '')) LIKE '%%invoice%%'
+              )
+        )
+        SELECT
+            COALESCE(intervention_action, 'unassigned') AS action,
+            COUNT(*) AS sample_count,
+            COUNT(*) FILTER (
+                WHERE COALESCE(amount_recovered, 0) > 0
+                   OR outcome_status IN ('recovered', 'partial_recovered')
+                     OR label_norm LIKE '%%confirmed%%'
+            ) AS positive_count,
+            SUM(COALESCE(expected_recovery, 0)) AS expected_recovery,
+            SUM(COALESCE(amount_recovered, 0)) AS actual_recovered,
+            SUM(COALESCE(actual_audit_cost, estimated_audit_cost, 0)) AS audit_cost
+        FROM vat_cases
+        GROUP BY COALESCE(intervention_action, 'unassigned')
+        ORDER BY sample_count DESC
+        """,
+        (int(window_days),),
+    )
+    by_action = []
+    for action, sample_count, positive_count, expected_recovery, actual_recovered, audit_cost in cur.fetchall():
+        sample_count = int(sample_count or 0)
+        positive_count = int(positive_count or 0)
+        expected_recovery = float(expected_recovery or 0)
+        actual_recovered = float(actual_recovered or 0)
+        audit_cost = float(audit_cost or 0)
+        by_action.append(
+            {
+                "intervention_action": action,
+                "sample_count": sample_count,
+                "positive_count": positive_count,
+                "precision": _safe_div(positive_count, sample_count),
+                "expected_recovery": expected_recovery,
+                "actual_recovered": actual_recovered,
+                "recovery_realization_ratio": _safe_div(actual_recovered, expected_recovery),
+                "avg_net_recovery": _safe_div(actual_recovered - audit_cost, sample_count),
+            }
+        )
+
+    return {
+        "window_days": int(window_days),
+        "top_k": int(top_k),
+        "schema_ready": True,
+        "label_scope": {
+            "match_patterns": ["%vat%", "%refund%", "%invoice%"],
+        },
+        "summary": {
+            "total_labels": total_labels,
+            "attempted_labels": attempted_labels,
+            "terminal_labels": terminal_labels,
+            "recovered_labels": recovered_labels,
+            "confirmed_vat_labels": confirmed_vat_labels,
+            "high_risk_labels": high_risk_labels,
+        },
+        "metrics": {
+            "precision_at_top_k": precision_at_top_k,
+            "precision_top_k_sample": top_k_count,
+            "false_negative_rate_high_risk": false_negative_rate_high_risk,
+            "roi_positive_rate": _safe_div(roi_positive_labels, attempted_labels),
+            "expected_vs_actual_uplift_ratio": _safe_div(total_actual_recovered, total_predicted_uplift),
+            "expected_vs_actual_recovery_ratio": _safe_div(total_actual_recovered, total_expected_recovery),
+            "total_predicted_uplift": total_predicted_uplift,
+            "total_expected_recovery": total_expected_recovery,
+            "total_expected_net_recovery": total_expected_net_recovery,
+            "total_actual_recovered": total_actual_recovered,
+            "total_audit_cost": total_audit_cost,
+            "net_recovery": total_actual_recovered - total_audit_cost,
+        },
+        "by_intervention_action": by_action,
+        "generated_at": datetime.utcnow().isoformat(),
+    }
+
+
+@router.get("/vat_effectiveness")
+@router.get("/vat_refund_effectiveness")
+def get_vat_refund_effectiveness(window_days: int = 90, top_k: int = 100):
+    """
+    Operational KPI snapshot for VAT refund effectiveness.
+    Focuses on VAT-labelled inspector outcomes and false-negative control.
+    """
+    window_days = max(7, min(int(window_days or 90), 365))
+    top_k = max(10, min(int(top_k or 100), 500))
+    db_url = _resolve_db_url()
+
+    try:
+        conn = psycopg2.connect(db_url)
+        cur = conn.cursor()
+        payload = _compute_vat_refund_effectiveness(cur, window_days=window_days, top_k=top_k)
+        cur.close()
+        conn.close()
+        return payload
+    except Exception as e:
+        return {
+            "schema_ready": False,
+            "window_days": window_days,
+            "top_k": top_k,
+            "message": f"Không thể tính KPI vat refund effectiveness: {str(e)}",
+            "generated_at": datetime.utcnow().isoformat(),
+        }
+
+
+def _build_split_trigger_status_payload(cur, policies: list[dict[str, Any]]) -> dict[str, Any]:
+    max_window = max(int(p.get("window_days", 28)) for p in policies) if policies else 28
+    max_top_k = 50
+    for policy in policies:
+        metric_name = str(policy.get("metric_name") or "")
+        if metric_name.startswith("precision_top_"):
+            try:
+                max_top_k = max(max_top_k, int(metric_name.replace("precision_top_", "")))
+            except ValueError:
+                continue
+
+    intervention_effectiveness = _compute_intervention_effectiveness(cur, window_days=max_window, top_k=max_top_k)
+    if not intervention_effectiveness.get("schema_ready"):
+        return {
+            "ready": False,
+            "schema_ready": False,
+            "reason": intervention_effectiveness.get("message", "Schema KPI chưa sẵn sàng."),
+            "track_status": {},
+            "totals": {
+                "enabled_rules": 0,
+                "passed_rules": 0,
+            },
+            "window_days": max_window,
+            "generated_at": datetime.utcnow().isoformat(),
+        }
+
+    audit_effectiveness = _compute_audit_value_effectiveness(cur, window_days=max_window, top_k=max_top_k)
+    vat_effectiveness = _compute_vat_refund_effectiveness(cur, window_days=max_window, top_k=max_top_k)
+
+    intervention_metrics = dict(intervention_effectiveness.get("metrics") or {})
+    audit_metrics = dict(audit_effectiveness.get("metrics") or {}) if audit_effectiveness.get("schema_ready") else {}
+    vat_metrics = dict(vat_effectiveness.get("metrics") or {}) if vat_effectiveness.get("schema_ready") else {}
+
+    metrics_by_track: dict[str, dict[str, Any]] = {
+        "intervention": intervention_metrics,
+        "audit_value": audit_metrics,
+        "vat_refund": vat_metrics,
+    }
+    summary_by_track: dict[str, dict[str, Any]] = {
+        "intervention": dict(intervention_effectiveness.get("summary") or {}),
+        "audit_value": dict(audit_effectiveness.get("summary") or {}),
+        "vat_refund": dict(vat_effectiveness.get("summary") or {}),
+    }
+
+    precision_cache: dict[int, tuple[Optional[float], int]] = {}
+    vat_precision_cache: dict[int, tuple[Optional[float], int]] = {}
+    recent_failures = _fetch_recent_rule_failures(cur, policies)
+    now_utc = datetime.utcnow()
+    track_rules: dict[str, list[dict[str, Any]]] = {}
+    total_enabled = 0
+    total_passed = 0
+
+    for policy in policies:
+        track_name = str(policy.get("track_name") or "unknown")
+        metric_name = str(policy.get("metric_name") or "")
+        comparator = str(policy.get("comparator") or ">=")
+        threshold = float(policy.get("threshold") or 0.0)
+        min_sample = int(policy.get("min_sample") or 0)
+        window_days = int(policy.get("window_days") or max_window)
+        cooldown_days = max(0, int(policy.get("cooldown_days") or 0))
+        enabled = bool(policy.get("enabled", True))
+
+        if metric_name.startswith("precision_top_"):
+            try:
+                k = int(metric_name.replace("precision_top_", ""))
+            except ValueError:
+                k = 50
+
+            if track_name == "vat_refund":
+                if k not in vat_precision_cache:
+                    vat_precision_cache[k] = _compute_vat_precision_at_k(cur, window_days=window_days, k=k)
+                actual, sample_size = vat_precision_cache[k]
+            else:
+                if k not in precision_cache:
+                    precision_cache[k] = _compute_precision_at_k(cur, window_days=window_days, k=k)
+                actual, sample_size = precision_cache[k]
+        else:
+            if track_name in metrics_by_track and metrics_by_track.get(track_name):
+                track_metrics = metrics_by_track.get(track_name) or {}
+                track_summary = summary_by_track.get(track_name) or {}
+            else:
+                track_metrics = metrics_by_track.get("intervention") or {}
+                track_summary = summary_by_track.get("intervention") or {}
+
+            if metric_name == "recovery_per_case":
+                actual = track_metrics.get("average_recovery_per_label")
+            else:
+                actual = track_metrics.get(metric_name)
+
+            sample_size = _estimate_metric_sample_size(track_name, metric_name, track_summary)
+
+        status = "disabled"
+        passed = None
+        cooldown_active = False
+        cooldown_until: Optional[datetime] = None
+        cooldown_remaining_days = 0
+        last_failed_at: Optional[datetime] = None
+
+        if enabled:
+            total_enabled += 1
+            if sample_size < min_sample:
+                status = "insufficient_data"
+            else:
+                passed = _evaluate_threshold(actual, comparator, threshold)
+                if passed is True:
+                    status = "pass"
+                elif passed is False:
+                    status = "fail"
+                else:
+                    status = "no_metric"
+
+            if status == "pass" and cooldown_days > 0:
+                policy_key = (_normalize_policy_token(track_name) or "unknown", _normalize_policy_token(metric_name) or "")
+                recent_failure_at = recent_failures.get(policy_key)
+                if isinstance(recent_failure_at, datetime):
+                    maybe_cooldown_until = recent_failure_at + timedelta(days=cooldown_days)
+                    if maybe_cooldown_until > now_utc:
+                        cooldown_active = True
+                        last_failed_at = recent_failure_at
+                        cooldown_until = maybe_cooldown_until
+                        cooldown_remaining_days = max(
+                            1,
+                            math.ceil((cooldown_until - now_utc).total_seconds() / 86400),
+                        )
+                        status = "cooldown_active"
+                        passed = False
+
+            if status == "pass":
+                total_passed += 1
+
+        track_rules.setdefault(track_name, []).append(
+            {
+                **policy,
+                "actual": actual,
+                "sample_size": sample_size,
+                "status": status,
+                "passed": passed,
+                "cooldown_active": cooldown_active,
+                "cooldown_until": cooldown_until.isoformat() if cooldown_until else None,
+                "cooldown_remaining_days": cooldown_remaining_days,
+                "last_failed_at": last_failed_at.isoformat() if last_failed_at else None,
+            }
+        )
+
+    track_status: dict[str, dict[str, Any]] = {}
+    for track_name, rules in track_rules.items():
+        enabled_rules = [r for r in rules if r.get("enabled")]
+        ready = bool(enabled_rules) and all(r.get("status") == "pass" for r in enabled_rules)
+        blocking_rules = [r for r in enabled_rules if r.get("status") in KPI_BLOCKING_STATUSES]
+        track_status[track_name] = {
+            "ready_for_split": ready,
+            "enabled_rule_count": len(enabled_rules),
+            "blocking_rule_count": len(blocking_rules),
+            "rules": rules,
+        }
+
+    readiness_score = round((_safe_div(total_passed, total_enabled) or 0) * 100, 1)
+    critical_tracks = ["audit_value", "vat_refund"]
+    present_critical_tracks = [track for track in critical_tracks if track in track_status]
+    split_recommendation = bool(present_critical_tracks) and all(
+        track_status[track].get("ready_for_split", False)
+        for track in present_critical_tracks
+    )
+
+    return {
+        "ready": split_recommendation,
+        "schema_ready": True,
+        "readiness_score": readiness_score,
+        "critical_tracks": critical_tracks,
+        "track_status": track_status,
+        "totals": {
+            "enabled_rules": total_enabled,
+            "passed_rules": total_passed,
+        },
+        "window_days": max_window,
+        "generated_at": datetime.utcnow().isoformat(),
+    }
+
+
+def _persist_kpi_snapshots(
+    cur,
+    split_status_payload: dict[str, Any],
+    source: str = "split_trigger_status",
+) -> int:
+    if not _table_columns(cur, "kpi_metric_snapshots"):
+        return 0
+
+    track_status = split_status_payload.get("track_status")
+    if not isinstance(track_status, dict):
+        return 0
+
+    generated_at = _parse_iso_timestamp(str(split_status_payload.get("generated_at") or ""))
+    if generated_at is None:
+        generated_at = datetime.utcnow()
+
+    snapshot_source = _normalize_snapshot_source(source)
+    inserted = 0
+
+    for raw_track_name, track_payload in track_status.items():
+        if not isinstance(track_payload, dict):
+            continue
+        track_name = _normalize_policy_token(raw_track_name) or "unknown"
+        ready_for_split = bool(track_payload.get("ready_for_split", False))
+        rules = track_payload.get("rules")
+        if not isinstance(rules, list):
+            continue
+
+        for rule in rules:
+            if not isinstance(rule, dict):
+                continue
+
+            metric_name = _normalize_policy_token(rule.get("metric_name"))
+            if not metric_name:
+                continue
+
+            actual_raw = rule.get("actual")
+            metric_value = float(actual_raw) if isinstance(actual_raw, (int, float)) else None
+            sample_size = max(0, int(rule.get("sample_size") or 0))
+            comparator = str(rule.get("comparator") or "").strip() or None
+            threshold = float(rule.get("threshold")) if isinstance(rule.get("threshold"), (int, float)) else None
+            status = str(rule.get("status") or "no_metric").strip().lower()
+            if status not in {"pass", "fail", "insufficient_data", "no_metric", "disabled", "cooldown_active"}:
+                status = "no_metric"
+
+            window_days = int(rule.get("window_days") or split_status_payload.get("window_days") or 28)
+            window_days = max(1, min(365, window_days))
+
+            details_payload = {
+                "enabled": bool(rule.get("enabled", True)),
+                "passed": rule.get("passed"),
+                "min_sample": int(rule.get("min_sample") or 0),
+                "ready_for_split": ready_for_split,
+                "readiness_score": split_status_payload.get("readiness_score"),
+                "cooldown_active": bool(rule.get("cooldown_active", False)),
+                "cooldown_days": int(rule.get("cooldown_days") or 0),
+                "cooldown_remaining_days": int(rule.get("cooldown_remaining_days") or 0),
+                "cooldown_until": rule.get("cooldown_until"),
+                "last_failed_at": rule.get("last_failed_at"),
+            }
+
+            cur.execute(
+                """
+                INSERT INTO kpi_metric_snapshots (
+                    track_name, metric_name, metric_value, sample_size,
+                    comparator, threshold, status, window_days,
+                    source, details, generated_at
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s)
+                """,
+                (
+                    track_name,
+                    metric_name,
+                    metric_value,
+                    sample_size,
+                    comparator,
+                    threshold,
+                    status,
+                    window_days,
+                    snapshot_source,
+                    json.dumps(details_payload, ensure_ascii=False),
+                    generated_at,
+                ),
+            )
+            inserted += 1
+
+    return inserted
+
+
+def _decode_json_blob(raw: Any) -> Any:
+    if isinstance(raw, (dict, list)):
+        return raw
+    if isinstance(raw, str):
+        try:
+            return json.loads(raw)
+        except json.JSONDecodeError:
+            return raw
+    return None
+
+
 @router.get("/inspector_label_stats")
 def get_inspector_label_stats():
     """
     Inspector label statistics for model retraining readiness.
-    Shows label distribution, recency, and coverage metrics.
+    Shows distribution, recency, and basic outcome coverage signals.
     """
-    import psycopg2
-
     db_url = _resolve_db_url()
 
     try:
         conn = psycopg2.connect(db_url)
         cur = conn.cursor()
 
-        cur.execute("""
+        cur.execute(
+            """
             SELECT label_type, confidence, COUNT(*) as cnt
             FROM inspector_labels
             GROUP BY label_type, confidence
             ORDER BY cnt DESC
-        """)
-        label_dist = [
-            {"label_type": r[0], "confidence": r[1], "count": r[2]}
-            for r in cur.fetchall()
-        ]
+            """
+        )
+        label_dist = [{"label_type": r[0], "confidence": r[1], "count": int(r[2])} for r in cur.fetchall()]
 
-        cur.execute("""
+        cur.execute(
+            """
             SELECT decision, COUNT(*) as cnt
             FROM inspector_labels
             WHERE decision IS NOT NULL
             GROUP BY decision
             ORDER BY cnt DESC
-        """)
-        decision_dist = [
-            {"decision": r[0], "count": r[1]}
-            for r in cur.fetchall()
-        ]
+            """
+        )
+        decision_dist = [{"decision": r[0], "count": int(r[1])} for r in cur.fetchall()]
 
-        cur.execute("SELECT COUNT(*), COUNT(DISTINCT tax_code), MAX(created_at) FROM inspector_labels")
+        cur.execute(
+            """
+            SELECT COUNT(*), COUNT(DISTINCT tax_code), MAX(created_at)
+            FROM inspector_labels
+            """
+        )
         total, companies, latest = cur.fetchone()
 
-        cur.execute("SELECT SUM(amount_recovered) FROM inspector_labels WHERE amount_recovered IS NOT NULL")
-        total_recovered = cur.fetchone()[0] or 0
+        cur.execute(
+            """
+            SELECT
+                SUM(COALESCE(amount_recovered, 0)),
+                COUNT(*) FILTER (WHERE intervention_attempted),
+                COUNT(*) FILTER (WHERE outcome_status IN ('recovered', 'partial_recovered', 'unrecoverable', 'dismissed'))
+            FROM inspector_labels
+            """
+        )
+        total_recovered, attempted_count, terminal_count = cur.fetchone()
 
         cur.close()
         conn.close()
 
+        total = int(total or 0)
+        companies = int(companies or 0)
+        attempted_count = int(attempted_count or 0)
+        terminal_count = int(terminal_count or 0)
         retrain_ready = total >= 50
+
         return {
             "total_labels": total,
             "distinct_companies": companies,
             "latest_label": str(latest) if latest else None,
-            "total_amount_recovered": float(total_recovered),
+            "total_amount_recovered": float(total_recovered or 0),
+            "attempted_labels": attempted_count,
+            "terminal_outcomes": terminal_count,
             "retrain_ready": retrain_ready,
             "retrain_message": "Đủ dữ liệu để retrain model." if retrain_ready else f"Cần thêm {50 - total} nhãn.",
             "label_distribution": label_dist,
@@ -1113,4 +2509,1254 @@ def get_inspector_label_stats():
             "label_distribution": [],
             "generated_at": datetime.utcnow().isoformat(),
         }
+
+
+@router.get("/intervention_effectiveness")
+def get_intervention_effectiveness(window_days: int = 90, top_k: int = 50):
+    """
+    Operational KPI snapshot for intervention and recovery effectiveness.
+    Used as a readiness gate before split-trigger decisions.
+    """
+    window_days = max(7, min(int(window_days or 90), 365))
+    top_k = max(10, min(int(top_k or 50), 500))
+    db_url = _resolve_db_url()
+
+    try:
+        conn = psycopg2.connect(db_url)
+        cur = conn.cursor()
+        payload = _compute_intervention_effectiveness(cur, window_days=window_days, top_k=top_k)
+        cur.close()
+        conn.close()
+        return payload
+    except Exception as e:
+        return {
+            "schema_ready": False,
+            "window_days": window_days,
+            "top_k": top_k,
+            "message": f"Không thể tính KPI effectiveness: {str(e)}",
+            "generated_at": datetime.utcnow().isoformat(),
+        }
+
+
+def _compute_audit_value_effectiveness(cur, window_days: int = 90, top_k: int = 50) -> dict[str, Any]:
+    columns = _table_columns(cur, "inspector_labels")
+    required = {
+        "expected_recovery",
+        "expected_net_recovery",
+        "estimated_audit_cost",
+        "actual_audit_cost",
+        "amount_recovered",
+        "intervention_action",
+        "intervention_attempted",
+        "outcome_status",
+    }
+    missing_columns = sorted(required - columns)
+
+    if missing_columns:
+        return {
+            "schema_ready": False,
+            "window_days": int(window_days),
+            "top_k": int(top_k),
+            "missing_columns": missing_columns,
+            "message": "Schema KPI audit value chưa sẵn sàng. Cần chạy migration mới cho inspector_labels.",
+            "generated_at": datetime.utcnow().isoformat(),
+        }
+
+    cur.execute(
+        """
+        SELECT
+            COUNT(*) AS total_labels,
+            COUNT(*) FILTER (WHERE expected_recovery IS NOT NULL) AS expected_labeled,
+            COUNT(*) FILTER (WHERE intervention_attempted) AS attempted_labels,
+            COUNT(*) FILTER (
+                WHERE outcome_status IN ('recovered', 'partial_recovered', 'unrecoverable', 'dismissed')
+            ) AS terminal_labels,
+            COUNT(*) FILTER (
+                WHERE COALESCE(amount_recovered, 0) > 0
+                   OR outcome_status IN ('recovered', 'partial_recovered')
+            ) AS recovered_labels,
+            SUM(COALESCE(expected_recovery, 0)) AS total_expected_recovery,
+            SUM(COALESCE(expected_net_recovery, 0)) AS total_expected_net_recovery,
+            SUM(COALESCE(amount_recovered, 0)) AS total_actual_recovered,
+            SUM(COALESCE(actual_audit_cost, estimated_audit_cost, 0)) AS total_audit_cost,
+            COUNT(*) FILTER (
+                WHERE intervention_attempted
+                  AND (COALESCE(amount_recovered, 0) - COALESCE(actual_audit_cost, estimated_audit_cost, 0)) > 0
+            ) AS roi_positive_labels
+        FROM inspector_labels
+        WHERE created_at >= (NOW() - (%s || ' days')::interval)
+        """,
+        (int(window_days),),
+    )
+    (
+        total_labels,
+        expected_labeled,
+        attempted_labels,
+        terminal_labels,
+        recovered_labels,
+        total_expected_recovery,
+        total_expected_net_recovery,
+        total_actual_recovered,
+        total_audit_cost,
+        roi_positive_labels,
+    ) = cur.fetchone()
+
+    total_labels = int(total_labels or 0)
+    expected_labeled = int(expected_labeled or 0)
+    attempted_labels = int(attempted_labels or 0)
+    terminal_labels = int(terminal_labels or 0)
+    recovered_labels = int(recovered_labels or 0)
+    total_expected_recovery = float(total_expected_recovery or 0)
+    total_expected_net_recovery = float(total_expected_net_recovery or 0)
+    total_actual_recovered = float(total_actual_recovered or 0)
+    total_audit_cost = float(total_audit_cost or 0)
+    roi_positive_labels = int(roi_positive_labels or 0)
+
+    precision_at_top_k, top_k_sample = _compute_precision_at_k(cur, window_days=window_days, k=top_k)
+
+    cur.execute(
+        """
+        SELECT
+            COALESCE(intervention_action, 'unassigned') AS lane,
+            COUNT(*) AS sample_count,
+            COUNT(*) FILTER (
+                WHERE COALESCE(amount_recovered, 0) > 0
+                   OR outcome_status IN ('recovered', 'partial_recovered')
+            ) AS recovered_count,
+            SUM(COALESCE(expected_recovery, 0)) AS expected_recovery,
+            SUM(COALESCE(amount_recovered, 0)) AS actual_recovered,
+            SUM(COALESCE(actual_audit_cost, estimated_audit_cost, 0)) AS audit_cost
+        FROM inspector_labels
+        WHERE created_at >= (NOW() - (%s || ' days')::interval)
+        GROUP BY COALESCE(intervention_action, 'unassigned')
+        ORDER BY sample_count DESC
+        """,
+        (int(window_days),),
+    )
+    by_lane = []
+    for lane, sample_count, recovered_count, expected_recovery, actual_recovered, audit_cost in cur.fetchall():
+        sample_count = int(sample_count or 0)
+        recovered_count = int(recovered_count or 0)
+        expected_recovery = float(expected_recovery or 0)
+        actual_recovered = float(actual_recovered or 0)
+        audit_cost = float(audit_cost or 0)
+        by_lane.append(
+            {
+                "lane": lane,
+                "sample_count": sample_count,
+                "recovered_count": recovered_count,
+                "success_rate": _safe_div(recovered_count, sample_count),
+                "expected_recovery": expected_recovery,
+                "actual_recovered": actual_recovered,
+                "recovery_realization_ratio": _safe_div(actual_recovered, expected_recovery),
+                "avg_net_recovery": _safe_div(actual_recovered - audit_cost, sample_count),
+            }
+        )
+
+    return {
+        "schema_ready": True,
+        "window_days": int(window_days),
+        "top_k": int(top_k),
+        "summary": {
+            "total_labels": total_labels,
+            "expected_labeled": expected_labeled,
+            "attempted_labels": attempted_labels,
+            "terminal_labels": terminal_labels,
+            "recovered_labels": recovered_labels,
+        },
+        "metrics": {
+            "precision_at_top_k": precision_at_top_k,
+            "precision_top_k_sample": top_k_sample,
+            "attempt_rate": _safe_div(attempted_labels, total_labels),
+            "terminal_rate": _safe_div(terminal_labels, attempted_labels),
+            "recovered_rate": _safe_div(recovered_labels, attempted_labels),
+            "roi_positive_rate": _safe_div(roi_positive_labels, attempted_labels),
+            "expected_vs_actual_recovery_ratio": _safe_div(total_actual_recovered, total_expected_recovery),
+            "total_expected_recovery": total_expected_recovery,
+            "total_expected_net_recovery": total_expected_net_recovery,
+            "total_actual_recovered": total_actual_recovered,
+            "total_audit_cost": total_audit_cost,
+            "net_recovery": total_actual_recovered - total_audit_cost,
+        },
+        "by_lane": by_lane,
+        "generated_at": datetime.utcnow().isoformat(),
+    }
+
+
+@router.get("/audit_value_effectiveness")
+def get_audit_value_effectiveness(window_days: int = 90, top_k: int = 50):
+    """
+    Operational KPI snapshot for Audit Value lane effectiveness.
+    Tracks realization of expected recovery vs actual recovery by intervention lane.
+    """
+    window_days = max(7, min(int(window_days or 90), 365))
+    top_k = max(10, min(int(top_k or 50), 500))
+    db_url = _resolve_db_url()
+
+    try:
+        conn = psycopg2.connect(db_url)
+        cur = conn.cursor()
+        payload = _compute_audit_value_effectiveness(cur, window_days=window_days, top_k=top_k)
+        cur.close()
+        conn.close()
+        return payload
+    except Exception as e:
+        return {
+            "schema_ready": False,
+            "window_days": window_days,
+            "top_k": top_k,
+            "message": f"Không thể tính KPI audit value effectiveness: {str(e)}",
+            "generated_at": datetime.utcnow().isoformat(),
+        }
+
+
+@router.get("/kpi_policy")
+def get_kpi_policy():
+    """
+    Return configured KPI split-trigger policies.
+    Falls back to baked-in defaults when policy table is empty/unavailable.
+    """
+    db_url = _resolve_db_url()
+
+    conn = None
+    cur = None
+    try:
+        conn = psycopg2.connect(db_url)
+        cur = conn.cursor()
+        has_table = bool(_table_columns(cur, "kpi_trigger_policies"))
+        policies = _fetch_kpi_policies(cur)
+        source = "database" if has_table else "default"
+        return {
+            "source": source,
+            "policies": policies,
+            "generated_at": datetime.utcnow().isoformat(),
+        }
+    except Exception as e:
+        return {
+            "source": "default",
+            "policies": _default_kpi_policies(),
+            "warning": f"Policy DB unavailable: {str(e)}",
+            "generated_at": datetime.utcnow().isoformat(),
+        }
+    finally:
+        if cur is not None:
+            cur.close()
+        if conn is not None:
+            conn.close()
+
+
+@router.put("/kpi_policy")
+def upsert_kpi_policy(
+    request: Request,
+    payload: KPIPolicyUpsertRequest,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth.get_current_user),
+):
+    """
+    Upsert KPI split-trigger policies.
+    Set replace_existing=true to replace the entire policy set.
+    """
+    role = _normalize_role(getattr(current_user, "role", ""))
+    if role not in ADMIN_POLICY_ROLES:
+        _safe_log_monitoring_audit(
+            db,
+            action="KPI_POLICY_UPDATE_DENIED",
+            request=request,
+            current_user=current_user,
+            detail="User role is not authorized to update KPI policy.",
+        )
+    _require_policy_admin(current_user)
+    normalized_policies = _normalize_kpi_policy_payload(payload.policies)
+    db_url = _resolve_db_url()
+    audit_action = "KPI_POLICY_UPDATE_FAILED"
+    audit_detail = f"replace_existing={bool(payload.replace_existing)} policies={len(normalized_policies)}"
+
+    conn = None
+    cur = None
+    try:
+        conn = psycopg2.connect(db_url)
+        cur = conn.cursor()
+
+        if not _table_columns(cur, "kpi_trigger_policies"):
+            raise HTTPException(
+                status_code=503,
+                detail="kpi_trigger_policies chưa tồn tại. Cần chạy migration trước.",
+            )
+
+        updated_count = _upsert_kpi_policies(
+            cur,
+            normalized_policies,
+            replace_existing=bool(payload.replace_existing),
+        )
+        conn.commit()
+        policies = _fetch_kpi_policies(cur)
+        audit_action = "KPI_POLICY_UPDATE"
+        audit_detail = f"updated_count={updated_count} replace_existing={bool(payload.replace_existing)}"
+
+        return {
+            "updated_count": updated_count,
+            "replace_existing": bool(payload.replace_existing),
+            "policies": policies,
+            "generated_at": datetime.utcnow().isoformat(),
+        }
+
+    except HTTPException:
+        if conn is not None:
+            conn.rollback()
+        raise
+    except Exception as e:
+        if conn is not None:
+            conn.rollback()
+        raise HTTPException(status_code=500, detail=f"Không thể cập nhật KPI policy: {str(e)}")
+    finally:
+        _safe_log_monitoring_audit(
+            db,
+            action=audit_action,
+            request=request,
+            current_user=current_user,
+            detail=audit_detail,
+        )
+        if cur is not None:
+            cur.close()
+        if conn is not None:
+            conn.close()
+
+
+def get_split_trigger_status_snapshot(
+    persist_snapshot: bool = False,
+    snapshot_source: str = "split_trigger_status",
+) -> dict[str, Any]:
+    """
+    Shared helper for split-trigger readiness payload so non-monitoring routers
+    can attach the same governance context to their own responses.
+    """
+    db_url = _resolve_db_url()
+
+    conn = None
+    cur = None
+
+    try:
+        conn = psycopg2.connect(db_url)
+        cur = conn.cursor()
+        policies = _fetch_kpi_policies(cur)
+        payload = _build_split_trigger_status_payload(cur, policies)
+
+        if persist_snapshot:
+            snapshots_captured = _persist_kpi_snapshots(
+                cur,
+                payload,
+                source=snapshot_source,
+            )
+            conn.commit()
+            payload["snapshots_captured"] = snapshots_captured
+
+        return payload
+    except Exception as e:
+        return {
+            "ready": False,
+            "schema_ready": False,
+            "readiness_score": 0,
+            "reason": f"Không thể đánh giá split-trigger: {str(e)}",
+            "track_status": {},
+            "totals": {
+                "enabled_rules": 0,
+                "passed_rules": 0,
+            },
+            "generated_at": datetime.utcnow().isoformat(),
+        }
+    finally:
+        if cur is not None:
+            cur.close()
+        if conn is not None:
+            conn.close()
+
+
+@router.get("/split_trigger_status")
+def get_split_trigger_status(
+    request: Request,
+    persist_snapshot: bool = False,
+    snapshot_source: str = "split_trigger_status",
+    db: Session = Depends(get_db),
+):
+    """
+    Evaluate split-trigger readiness using KPI policies and current outcomes.
+    """
+    current_user: Optional[models.User] = None
+    if persist_snapshot:
+        try:
+            current_user = auth.get_current_user(request=request, db=db)
+        except HTTPException:
+            _safe_log_monitoring_audit(
+                db,
+                action="KPI_SNAPSHOT_CAPTURE_DENIED",
+                request=request,
+                current_user=None,
+                detail="Unauthenticated request tried to persist split-trigger snapshots.",
+            )
+            raise
+
+        role = _normalize_role(getattr(current_user, "role", ""))
+        if role not in ADMIN_POLICY_ROLES:
+            _safe_log_monitoring_audit(
+                db,
+                action="KPI_SNAPSHOT_CAPTURE_DENIED",
+                request=request,
+                current_user=current_user,
+                detail="User role is not authorized to persist split-trigger snapshots.",
+            )
+        _require_policy_admin(current_user)
+    payload = get_split_trigger_status_snapshot(
+        persist_snapshot=persist_snapshot,
+        snapshot_source=snapshot_source,
+    )
+    if persist_snapshot:
+        _safe_log_monitoring_audit(
+            db,
+            action="KPI_SNAPSHOT_CAPTURE",
+            request=request,
+            current_user=current_user,
+            detail=f"snapshot_source={snapshot_source} via=split_trigger_status",
+        )
+    return payload
+
+
+def _build_specialized_rollout_status_payload(include_split_snapshot: bool = True) -> dict[str, Any]:
+    audit_quality = _artifact_report(MODEL_DIR / AUDIT_QUALITY_REPORT_FILE)
+    vat_quality = _artifact_report(MODEL_DIR / VAT_QUALITY_REPORT_FILE)
+    pilot_report = _artifact_report(MODEL_DIR / SPECIALIZED_PILOT_REPORT_FILE)
+    go_no_go_report = _artifact_report(MODEL_DIR / SPECIALIZED_GO_NO_GO_REPORT_FILE)
+
+    audit_quality_payload = audit_quality["payload"]
+    vat_quality_payload = vat_quality["payload"]
+    pilot_payload = pilot_report["payload"]
+    go_no_go_payload = go_no_go_report["payload"]
+
+    audit_quality_pass = bool((audit_quality_payload.get("acceptance_gates") or {}).get("overall_pass", False))
+    vat_quality_pass = bool((vat_quality_payload.get("acceptance_gates") or {}).get("overall_pass", False))
+
+    audit_track = _track_payload(pilot_payload, "audit_value")
+    vat_track = _track_payload(pilot_payload, "vat_refund")
+
+    audit_delta = _float_or_none(((audit_track.get("delta_model_minus_heuristic") or {}).get("f1_delta")))
+    vat_delta = _float_or_none(((vat_track.get("delta_model_minus_heuristic") or {}).get("f1_delta")))
+    audit_samples = _int_or_none(audit_track.get("samples_evaluated"))
+    vat_samples = _int_or_none(vat_track.get("samples_evaluated"))
+
+    go_no_go_summary = go_no_go_payload.get("summary")
+    go_no_go_summary = go_no_go_summary if isinstance(go_no_go_summary, dict) else {}
+
+    go_no_go_decision = go_no_go_payload.get("decision")
+    go_no_go_decision = go_no_go_decision if isinstance(go_no_go_decision, dict) else {}
+
+    hard_gates_pass = bool(go_no_go_summary.get("hard_gates_pass", False))
+    split_gate_pass = bool(go_no_go_summary.get("split_gate_pass", False))
+    stability_gate_pass = bool(go_no_go_summary.get("stability_gate_pass", False))
+    soft_gates_pass = bool(split_gate_pass and stability_gate_pass)
+
+    decision_status = str(go_no_go_decision.get("status") or "unavailable")
+    go_live_phase_d = bool(go_no_go_decision.get("go_live_phase_d", False))
+
+    split_snapshot = None
+    if include_split_snapshot:
+        split_snapshot = get_split_trigger_status_snapshot(
+            persist_snapshot=False,
+            snapshot_source="specialized_rollout_status",
+        )
+
+    availability_flags = {
+        "audit_quality": bool(audit_quality.get("exists")),
+        "vat_quality": bool(vat_quality.get("exists")),
+        "pilot_report": bool(pilot_report.get("exists")),
+        "go_no_go_report": bool(go_no_go_report.get("exists")),
+    }
+    available = all(availability_flags.values())
+
+    if decision_status == "go_phase_d_candidate":
+        rollout_status = "ready_for_phase_d"
+    elif decision_status == "conditional_go_continue_integrated_first":
+        rollout_status = "conditional_go"
+    elif decision_status == "no_go_tune_models_or_data":
+        rollout_status = "no_go"
+    elif available:
+        rollout_status = "review_required"
+    else:
+        rollout_status = "insufficient_artifacts"
+
+    recommended_actions = go_no_go_decision.get("recommended_actions")
+    if not isinstance(recommended_actions, list) or not recommended_actions:
+        if rollout_status == "ready_for_phase_d":
+            recommended_actions = [
+                "Open Phase D scope with controlled rollout batches.",
+                "Keep weekly pilot checks active during first release month.",
+            ]
+        elif rollout_status == "conditional_go":
+            recommended_actions = [
+                "Continue integrated-first mode and collect additional pilot cycles.",
+                "Re-evaluate split/stability soft gates after next cycle.",
+            ]
+        elif rollout_status == "no_go":
+            recommended_actions = [
+                "Tune model/data quality on failing tracks and retrain.",
+                "Re-run pilot before next go/no-go review.",
+            ]
+        else:
+            recommended_actions = [
+                "Generate missing quality/pilot/go-no-go artifacts via specialized pipeline.",
+                "Re-open rollout review when artifacts are complete.",
+            ]
+
+    return {
+        "available": available,
+        "availability": availability_flags,
+        "rollout_status": rollout_status,
+        "phase_d_candidate": bool(go_live_phase_d),
+        "summary": {
+            "hard_gates_pass": hard_gates_pass,
+            "soft_gates_pass": soft_gates_pass,
+            "split_gate_pass": split_gate_pass,
+            "stability_gate_pass": stability_gate_pass,
+            "audit_quality_pass": audit_quality_pass,
+            "vat_quality_pass": vat_quality_pass,
+        },
+        "artifacts": {
+            "audit_quality": {
+                "updated_at": audit_quality.get("updated_at"),
+                "overall_pass": audit_quality_pass,
+                "calibrated_metrics": _metric_snapshot(
+                    (audit_quality_payload.get("performance") or {}).get("calibrated") or {}
+                ),
+            },
+            "vat_quality": {
+                "updated_at": vat_quality.get("updated_at"),
+                "overall_pass": vat_quality_pass,
+                "calibrated_metrics": _metric_snapshot(
+                    (vat_quality_payload.get("performance") or {}).get("calibrated") or {}
+                ),
+            },
+            "pilot": {
+                "updated_at": pilot_report.get("updated_at"),
+                "audit_value": {
+                    "samples_evaluated": audit_samples,
+                    "f1_delta_model_minus_heuristic": audit_delta,
+                },
+                "vat_refund": {
+                    "samples_evaluated": vat_samples,
+                    "f1_delta_model_minus_heuristic": vat_delta,
+                },
+            },
+            "go_no_go": {
+                "updated_at": go_no_go_report.get("updated_at"),
+                "decision_status": decision_status,
+                "go_live_phase_d": go_live_phase_d,
+                "message": str(go_no_go_decision.get("message") or ""),
+            },
+        },
+        "recommended_actions": recommended_actions,
+        "split_trigger_snapshot": split_snapshot,
+        "generated_at": datetime.utcnow().isoformat(),
+    }
+
+
+@router.get("/specialized_rollout_status")
+def get_specialized_rollout_status(include_split_snapshot: bool = True):
+    """
+    Consolidated operational status for specialized tracks rollout:
+    quality gates + pilot deltas + go/no-go decision + optional split-trigger snapshot.
+    """
+    try:
+        return _build_specialized_rollout_status_payload(
+            include_split_snapshot=bool(include_split_snapshot),
+        )
+    except Exception as e:
+        return {
+            "available": False,
+            "rollout_status": "error",
+            "phase_d_candidate": False,
+            "summary": {
+                "hard_gates_pass": False,
+                "soft_gates_pass": False,
+                "split_gate_pass": False,
+                "stability_gate_pass": False,
+                "audit_quality_pass": False,
+                "vat_quality_pass": False,
+            },
+            "artifacts": {},
+            "recommended_actions": [
+                "Inspect specialized artifacts and monitoring logs.",
+                "Re-run specialized pipeline once underlying errors are fixed.",
+            ],
+            "error": f"Không thể tải specialized rollout status: {str(e)}",
+            "generated_at": datetime.utcnow().isoformat(),
+        }
+
+
+@router.post("/kpi_snapshots/capture")
+def capture_kpi_snapshots(
+    request: Request,
+    snapshot_source: str = "manual_capture",
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth.get_current_user),
+):
+    """
+    Capture current split-trigger KPI status into historical snapshots.
+    """
+    role = _normalize_role(getattr(current_user, "role", ""))
+    if role not in ADMIN_POLICY_ROLES:
+        _safe_log_monitoring_audit(
+            db,
+            action="KPI_SNAPSHOT_CAPTURE_DENIED",
+            request=request,
+            current_user=current_user,
+            detail="User role is not authorized to capture KPI snapshots.",
+        )
+    _require_policy_admin(current_user)
+    db_url = _resolve_db_url()
+    audit_action = "KPI_SNAPSHOT_CAPTURE_FAILED"
+    audit_detail = f"snapshot_source={snapshot_source}"
+
+    conn = None
+    cur = None
+
+    try:
+        conn = psycopg2.connect(db_url)
+        cur = conn.cursor()
+        policies = _fetch_kpi_policies(cur)
+        payload = _build_split_trigger_status_payload(cur, policies)
+
+        snapshots_captured = _persist_kpi_snapshots(
+            cur,
+            payload,
+            source=snapshot_source,
+        )
+        conn.commit()
+        audit_action = "KPI_SNAPSHOT_CAPTURE"
+        audit_detail = f"snapshot_source={snapshot_source} captured={snapshots_captured}"
+
+        return {
+            "captured": snapshots_captured,
+            "ready": bool(payload.get("ready", False)),
+            "schema_ready": bool(payload.get("schema_ready", False)),
+            "readiness_score": float(payload.get("readiness_score") or 0),
+            "window_days": int(payload.get("window_days") or 28),
+            "reason": payload.get("reason") if not payload.get("schema_ready", True) else None,
+            "generated_at": datetime.utcnow().isoformat(),
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Không thể capture KPI snapshots: {str(e)}")
+    finally:
+        _safe_log_monitoring_audit(
+            db,
+            action=audit_action,
+            request=request,
+            current_user=current_user,
+            detail=audit_detail,
+        )
+        if cur is not None:
+            cur.close()
+        if conn is not None:
+            conn.close()
+
+
+@router.get("/kpi_snapshots")
+def get_kpi_snapshots(
+    track_name: Optional[str] = None,
+    metric_name: Optional[str] = None,
+    days: int = 30,
+    limit: int = 200,
+):
+    """
+    Return historical KPI snapshots for split-trigger governance reviews.
+    """
+    days = max(1, min(int(days or 30), 365))
+    limit = max(1, min(int(limit or 200), 500))
+    normalized_track = _normalize_policy_token(track_name) if track_name else None
+    normalized_metric = _normalize_policy_token(metric_name) if metric_name else None
+
+    db_url = _resolve_db_url()
+    conn = None
+    cur = None
+
+    try:
+        conn = psycopg2.connect(db_url)
+        cur = conn.cursor()
+
+        if not _table_columns(cur, "kpi_metric_snapshots"):
+            return {
+                "available": False,
+                "reason": "kpi_metric_snapshots chưa tồn tại. Cần chạy migration trước.",
+                "snapshots": [],
+                "generated_at": datetime.utcnow().isoformat(),
+            }
+
+        where_clauses = ["generated_at >= (NOW() - (%s || ' days')::interval)"]
+        params: list[Any] = [days]
+        if normalized_track:
+            where_clauses.append("track_name = %s")
+            params.append(normalized_track)
+        if normalized_metric:
+            where_clauses.append("metric_name = %s")
+            params.append(normalized_metric)
+
+        where_sql = " AND ".join(where_clauses)
+        params.append(limit)
+
+        cur.execute(
+            f"""
+            SELECT
+                track_name,
+                metric_name,
+                metric_value,
+                sample_size,
+                comparator,
+                threshold,
+                status,
+                window_days,
+                source,
+                details,
+                generated_at
+            FROM kpi_metric_snapshots
+            WHERE {where_sql}
+            ORDER BY generated_at DESC, id DESC
+            LIMIT %s
+            """,
+            tuple(params),
+        )
+        rows = cur.fetchall()
+
+        snapshots = []
+        for row in rows:
+            snapshots.append(
+                {
+                    "track_name": row[0],
+                    "metric_name": row[1],
+                    "metric_value": float(row[2]) if isinstance(row[2], (int, float)) else None,
+                    "sample_size": int(row[3] or 0),
+                    "comparator": row[4],
+                    "threshold": float(row[5]) if isinstance(row[5], (int, float)) else None,
+                    "status": row[6],
+                    "window_days": int(row[7] or 0),
+                    "source": row[8],
+                    "details": _decode_json_blob(row[9]),
+                    "generated_at": row[10].isoformat() if row[10] else None,
+                }
+            )
+
+        status_breakdown = {
+            "pass": 0,
+            "fail": 0,
+            "cooldown_active": 0,
+            "insufficient_data": 0,
+            "no_metric": 0,
+            "disabled": 0,
+            "other": 0,
+        }
+        for snapshot in snapshots:
+            status = str(snapshot.get("status") or "").lower()
+            if status in status_breakdown:
+                status_breakdown[status] += 1
+            else:
+                status_breakdown["other"] += 1
+
+        latest_by_metric: dict[tuple[str, str], dict[str, Any]] = {}
+        for snapshot in snapshots:
+            key = (snapshot["track_name"], snapshot["metric_name"])
+            if key not in latest_by_metric:
+                latest_by_metric[key] = {
+                    "track_name": snapshot["track_name"],
+                    "metric_name": snapshot["metric_name"],
+                    "metric_value": snapshot["metric_value"],
+                    "status": snapshot["status"],
+                    "sample_size": snapshot["sample_size"],
+                    "generated_at": snapshot["generated_at"],
+                }
+
+        pass_fail_total = status_breakdown["pass"] + status_breakdown["fail"] + status_breakdown["cooldown_active"]
+        pass_rate = _safe_div(status_breakdown["pass"], pass_fail_total)
+
+        return {
+            "available": True,
+            "filters": {
+                "track_name": normalized_track,
+                "metric_name": normalized_metric,
+                "days": days,
+                "limit": limit,
+            },
+            "total_snapshots": len(snapshots),
+            "status_breakdown": status_breakdown,
+            "pass_rate": pass_rate,
+            "latest_generated_at": snapshots[0]["generated_at"] if snapshots else None,
+            "latest_by_metric": list(latest_by_metric.values()),
+            "snapshots": snapshots,
+            "generated_at": datetime.utcnow().isoformat(),
+        }
+    except Exception as e:
+        return {
+            "available": False,
+            "reason": f"Không thể truy vấn KPI snapshots: {str(e)}",
+            "snapshots": [],
+            "generated_at": datetime.utcnow().isoformat(),
+        }
+    finally:
+        if cur is not None:
+            cur.close()
+        if conn is not None:
+            conn.close()
+
+
+def _extract_active_kpi_breaches(split_payload: dict[str, Any]) -> list[dict[str, Any]]:
+    track_status = split_payload.get("track_status")
+    if not isinstance(track_status, dict):
+        return []
+
+    breaches: list[dict[str, Any]] = []
+    for track_name, track_payload in track_status.items():
+        if not isinstance(track_payload, dict):
+            continue
+        rules = track_payload.get("rules")
+        if not isinstance(rules, list):
+            continue
+
+        for rule in rules:
+            if not isinstance(rule, dict) or not bool(rule.get("enabled", True)):
+                continue
+            status = str(rule.get("status") or "").strip().lower()
+            if status not in KPI_FAILLIKE_STATUSES:
+                continue
+
+            breaches.append(
+                {
+                    "track_name": track_name,
+                    "metric_name": rule.get("metric_name"),
+                    "status": status,
+                    "actual": rule.get("actual"),
+                    "threshold": rule.get("threshold"),
+                    "comparator": rule.get("comparator"),
+                    "sample_size": int(rule.get("sample_size") or 0),
+                    "min_sample": int(rule.get("min_sample") or 0),
+                    "window_days": int(rule.get("window_days") or 0),
+                }
+            )
+    return breaches
+
+
+@router.get("/split_trigger_alerts")
+def get_split_trigger_alerts(
+    days: int = 14,
+    min_pass_rate: float = 0.70,
+    min_recent_pass_rate: float = 0.65,
+    min_drift_pp: float = 0.08,
+    min_track_pass_rate: float = 0.65,
+    stale_snapshot_hours: int = 12,
+):
+    """
+    Alerting and trend view for split-trigger policy breaches.
+    Helps operations teams detect pass-rate drift and blocking rules quickly.
+    """
+    days = max(1, min(int(days or 14), 90))
+    min_pass_rate = max(0.0, min(float(min_pass_rate), 1.0))
+    min_recent_pass_rate = max(0.0, min(float(min_recent_pass_rate), 1.0))
+    min_drift_pp = max(0.0, min(float(min_drift_pp), 1.0))
+    min_track_pass_rate = max(0.0, min(float(min_track_pass_rate), 1.0))
+    stale_snapshot_hours = max(1, min(int(stale_snapshot_hours or 12), 168))
+
+    split_status = get_split_trigger_status_snapshot(
+        persist_snapshot=False,
+        snapshot_source="split_trigger_alerts",
+    )
+    active_breaches = _extract_active_kpi_breaches(split_status)
+
+    db_url = _resolve_db_url()
+    conn = None
+    cur = None
+
+    try:
+        conn = psycopg2.connect(db_url)
+        cur = conn.cursor()
+
+        latest_snapshot_ts = None
+        snapshot_age_hours = None
+
+        def _build_pass_rate_summary(
+            overall_pass_rate: Optional[float],
+            recent_pass_rate: Optional[float],
+            drift_pp: Optional[float],
+        ) -> dict[str, Any]:
+            return {
+                "days": days,
+                "overall_pass_rate": overall_pass_rate,
+                "recent_3d_pass_rate": recent_pass_rate,
+                "drift_pp": drift_pp,
+                "min_pass_rate": min_pass_rate,
+                "min_recent_pass_rate": min_recent_pass_rate,
+                "min_drift_pp": min_drift_pp,
+                "min_track_pass_rate": min_track_pass_rate,
+            }
+
+        def _build_readiness_summary(
+            recent_readiness: Optional[float],
+            readiness_drift_pp: Optional[float],
+        ) -> dict[str, Any]:
+            return {
+                "current_readiness_score": float(split_status.get("readiness_score") or 0),
+                "recent_3d_readiness_score": recent_readiness,
+                "drift_pp": readiness_drift_pp,
+                "min_drift_pp": min_drift_pp,
+            }
+
+        def _build_snapshot_freshness() -> dict[str, Any]:
+            return {
+                "latest_generated_at": latest_snapshot_ts.isoformat() if latest_snapshot_ts else None,
+                "snapshot_age_hours": snapshot_age_hours,
+                "stale_snapshot_hours": stale_snapshot_hours,
+            }
+
+        if not _table_columns(cur, "kpi_metric_snapshots"):
+            alerts = [
+                {
+                    "code": "snapshot_table_missing",
+                    "severity": "critical",
+                    "message": "kpi_metric_snapshots chưa tồn tại. Không thể đánh giá pass-rate trend.",
+                }
+            ]
+            if active_breaches:
+                alerts.append(
+                    {
+                        "code": "active_rule_breaches",
+                        "severity": "high",
+                        "message": f"Hiện có {len(active_breaches)} KPI rule đang fail/insufficient_data/no_metric.",
+                    }
+                )
+
+            return {
+                "available": False,
+                "ready": bool(split_status.get("ready", False)),
+                "schema_ready": bool(split_status.get("schema_ready", False)),
+                "readiness_score": float(split_status.get("readiness_score") or 0),
+                "alert_level": "critical",
+                "alerts": alerts,
+                "active_breaches": active_breaches,
+                "pass_rate_summary": _build_pass_rate_summary(None, None, None),
+                "readiness_summary": _build_readiness_summary(None, None),
+                "snapshot_freshness": _build_snapshot_freshness(),
+                "track_pass_rates": [],
+                "trend": [],
+                "readiness_trend": [],
+                "generated_at": datetime.utcnow().isoformat(),
+            }
+
+        cur.execute("SELECT MAX(generated_at) FROM kpi_metric_snapshots")
+        latest_snapshot_ts = cur.fetchone()[0]
+        if latest_snapshot_ts is not None:
+            if getattr(latest_snapshot_ts, "tzinfo", None) is not None:
+                latest_snapshot_ts = latest_snapshot_ts.replace(tzinfo=None)
+            snapshot_age_hours = round(max(0.0, (datetime.utcnow() - latest_snapshot_ts).total_seconds() / 3600.0), 2)
+
+        cur.execute(
+            """
+            SELECT
+                date_trunc('day', generated_at)::date AS day,
+                COUNT(*) FILTER (WHERE status = 'pass') AS pass_count,
+                COUNT(*) AS total_count
+            FROM kpi_metric_snapshots
+            WHERE generated_at >= (NOW() - (%s || ' days')::interval)
+            GROUP BY date_trunc('day', generated_at)::date
+            ORDER BY day DESC
+            """,
+            (days,),
+        )
+        rows = cur.fetchall()
+
+        trend = []
+        total_pass = 0
+        total_count = 0
+        for day, pass_count, row_total in rows:
+            pass_count = int(pass_count or 0)
+            row_total = int(row_total or 0)
+            total_pass += pass_count
+            total_count += row_total
+            trend.append(
+                {
+                    "day": day.isoformat() if hasattr(day, "isoformat") else str(day),
+                    "pass_count": pass_count,
+                    "total_count": row_total,
+                    "pass_rate": _safe_div(pass_count, row_total),
+                }
+            )
+
+        overall_pass_rate = _safe_div(total_pass, total_count)
+
+        recent_rows = trend[:3]
+        recent_pass = sum(int(item.get("pass_count") or 0) for item in recent_rows)
+        recent_total = sum(int(item.get("total_count") or 0) for item in recent_rows)
+        recent_pass_rate = _safe_div(recent_pass, recent_total)
+
+        pass_rate_drift_pp = None
+        if len(trend) >= 6:
+            split_at = max(1, len(trend) // 2)
+            recent_half = trend[:split_at]
+            older_half = trend[split_at:]
+
+            recent_half_pass = sum(int(item.get("pass_count") or 0) for item in recent_half)
+            recent_half_total = sum(int(item.get("total_count") or 0) for item in recent_half)
+            older_half_pass = sum(int(item.get("pass_count") or 0) for item in older_half)
+            older_half_total = sum(int(item.get("total_count") or 0) for item in older_half)
+
+            recent_half_rate = _safe_div(recent_half_pass, recent_half_total)
+            older_half_rate = _safe_div(older_half_pass, older_half_total)
+            if recent_half_rate is not None and older_half_rate is not None:
+                pass_rate_drift_pp = float(recent_half_rate - older_half_rate)
+
+        cur.execute(
+            """
+            SELECT
+                date_trunc('day', generated_at)::date AS day,
+                AVG(
+                    CASE
+                        WHEN details IS NOT NULL
+                         AND jsonb_typeof(details) = 'object'
+                         AND details ? 'readiness_score'
+                         AND NULLIF(details->>'readiness_score', '') IS NOT NULL
+                        THEN NULLIF(details->>'readiness_score', '')::float
+                        ELSE NULL
+                    END
+                ) AS readiness_score_avg
+            FROM kpi_metric_snapshots
+            WHERE generated_at >= (NOW() - (%s || ' days')::interval)
+            GROUP BY date_trunc('day', generated_at)::date
+            ORDER BY day DESC
+            """,
+            (days,),
+        )
+        readiness_rows = cur.fetchall()
+        readiness_trend = []
+        for day, readiness_score_avg in readiness_rows:
+            readiness_trend.append(
+                {
+                    "day": day.isoformat() if hasattr(day, "isoformat") else str(day),
+                    "readiness_score": float(readiness_score_avg) if isinstance(readiness_score_avg, (int, float)) else None,
+                }
+            )
+
+        readiness_recent_values = [
+            float(item.get("readiness_score"))
+            for item in readiness_trend[:3]
+            if isinstance(item.get("readiness_score"), (int, float))
+        ]
+        recent_readiness_score = (
+            float(sum(readiness_recent_values) / len(readiness_recent_values))
+            if readiness_recent_values
+            else None
+        )
+
+        readiness_values = [
+            float(item.get("readiness_score"))
+            for item in readiness_trend
+            if isinstance(item.get("readiness_score"), (int, float))
+        ]
+        readiness_drift_pp = None
+        if len(readiness_values) >= 6:
+            split_at = max(1, len(readiness_values) // 2)
+            recent_half_values = readiness_values[:split_at]
+            older_half_values = readiness_values[split_at:]
+            if older_half_values:
+                recent_half_avg = float(sum(recent_half_values) / len(recent_half_values))
+                older_half_avg = float(sum(older_half_values) / len(older_half_values))
+                readiness_drift_pp = recent_half_avg - older_half_avg
+
+        cur.execute(
+            """
+            SELECT
+                track_name,
+                COUNT(*) FILTER (WHERE status = 'pass') AS pass_count,
+                COUNT(*) FILTER (WHERE status IN ('fail', 'cooldown_active')) AS fail_count,
+                COUNT(*) FILTER (WHERE status IN ('pass', 'fail', 'cooldown_active')) AS pass_fail_count,
+                COUNT(*) AS total_count
+            FROM kpi_metric_snapshots
+            WHERE generated_at >= (NOW() - (%s || ' days')::interval)
+            GROUP BY track_name
+            ORDER BY track_name
+            """,
+            (days,),
+        )
+        track_pass_rates = []
+        for track_name, pass_count, fail_count, pass_fail_count, total_count in cur.fetchall():
+            pass_count = int(pass_count or 0)
+            fail_count = int(fail_count or 0)
+            pass_fail_count = int(pass_fail_count or 0)
+            total_count = int(total_count or 0)
+            track_pass_rates.append(
+                {
+                    "track_name": track_name,
+                    "pass_count": pass_count,
+                    "fail_count": fail_count,
+                    "pass_fail_count": pass_fail_count,
+                    "total_count": total_count,
+                    "pass_rate": _safe_div(pass_count, pass_fail_count),
+                }
+            )
+
+        alerts = []
+        if not bool(split_status.get("schema_ready", False)):
+            alerts.append(
+                {
+                    "code": "schema_not_ready",
+                    "severity": "critical",
+                    "message": str(split_status.get("reason") or "Schema KPI chưa sẵn sàng."),
+                }
+            )
+
+        if active_breaches:
+            alerts.append(
+                {
+                    "code": "active_rule_breaches",
+                    "severity": "high",
+                    "message": f"Hiện có {len(active_breaches)} KPI rule đang fail/insufficient_data/no_metric.",
+                }
+            )
+
+        if snapshot_age_hours is not None and snapshot_age_hours > stale_snapshot_hours:
+            stale_multiplier = _safe_div(snapshot_age_hours, stale_snapshot_hours) or 1.0
+            stale_severity = "critical" if stale_multiplier >= 2.0 else "high"
+            alerts.append(
+                {
+                    "code": "snapshot_stale",
+                    "severity": stale_severity,
+                    "message": (
+                        f"Snapshot mới nhất đã {snapshot_age_hours:.1f}h, vượt ngưỡng {stale_snapshot_hours}h. "
+                        "Cần kiểm tra scheduler hoặc trigger capture thủ công."
+                    ),
+                }
+            )
+
+        if overall_pass_rate is not None and overall_pass_rate < min_pass_rate:
+            alerts.append(
+                {
+                    "code": "overall_pass_rate_low",
+                    "severity": "medium",
+                    "message": f"Overall pass-rate {overall_pass_rate:.2%} thấp hơn ngưỡng {min_pass_rate:.2%}.",
+                }
+            )
+
+        if recent_pass_rate is not None and recent_pass_rate < min_recent_pass_rate:
+            alerts.append(
+                {
+                    "code": "recent_pass_rate_low",
+                    "severity": "high",
+                    "message": f"Pass-rate 3 ngày gần nhất {recent_pass_rate:.2%} thấp hơn ngưỡng {min_recent_pass_rate:.2%}.",
+                }
+            )
+
+        if pass_rate_drift_pp is not None and pass_rate_drift_pp <= -min_drift_pp:
+            alerts.append(
+                {
+                    "code": "pass_rate_drift_down",
+                    "severity": "medium",
+                    "message": f"Pass-rate gần đây giảm {abs(pass_rate_drift_pp):.2%} so với giai đoạn trước.",
+                }
+            )
+
+        if readiness_drift_pp is not None and readiness_drift_pp <= -(min_drift_pp * 100.0):
+            alerts.append(
+                {
+                    "code": "readiness_drift_down",
+                    "severity": "high",
+                    "message": f"Readiness score gần đây giảm {abs(readiness_drift_pp):.1f} điểm so với giai đoạn trước.",
+                }
+            )
+
+        critical_tracks = set(split_status.get("critical_tracks") or ["audit_value", "vat_refund"])
+        for track_item in track_pass_rates:
+            track_name = str(track_item.get("track_name") or "")
+            pass_rate = track_item.get("pass_rate")
+            pass_fail_count = int(track_item.get("pass_fail_count") or 0)
+            if pass_fail_count <= 0 or pass_rate is None:
+                continue
+            if float(pass_rate) < min_track_pass_rate:
+                alerts.append(
+                    {
+                        "code": "track_pass_rate_low",
+                        "severity": "high" if track_name in critical_tracks else "medium",
+                        "message": (
+                            f"Track {track_name} có pass-rate {float(pass_rate):.2%} "
+                            f"thấp hơn ngưỡng {min_track_pass_rate:.2%}."
+                        ),
+                        "track_name": track_name,
+                    }
+                )
+
+        if any(alert.get("severity") == "critical" for alert in alerts):
+            alert_level = "critical"
+        elif any(alert.get("severity") == "high" for alert in alerts):
+            alert_level = "high"
+        elif any(alert.get("severity") == "medium" for alert in alerts):
+            alert_level = "medium"
+        else:
+            alert_level = "low"
+
+        return {
+            "available": True,
+            "ready": bool(split_status.get("ready", False)),
+            "schema_ready": bool(split_status.get("schema_ready", False)),
+            "readiness_score": float(split_status.get("readiness_score") or 0),
+            "alert_level": alert_level,
+            "alerts": alerts,
+            "active_breaches": active_breaches,
+            "pass_rate_summary": _build_pass_rate_summary(
+                overall_pass_rate,
+                recent_pass_rate,
+                pass_rate_drift_pp,
+            ),
+            "readiness_summary": _build_readiness_summary(recent_readiness_score, readiness_drift_pp),
+            "snapshot_freshness": _build_snapshot_freshness(),
+            "track_pass_rates": track_pass_rates,
+            "trend": trend,
+            "readiness_trend": readiness_trend,
+            "generated_at": datetime.utcnow().isoformat(),
+        }
+    except Exception as e:
+        return {
+            "available": False,
+            "ready": bool(split_status.get("ready", False)),
+            "schema_ready": bool(split_status.get("schema_ready", False)),
+            "readiness_score": float(split_status.get("readiness_score") or 0),
+            "alert_level": "critical",
+            "alerts": [
+                {
+                    "code": "split_trigger_alerts_unavailable",
+                    "severity": "critical",
+                    "message": f"Không thể tải split-trigger alerts: {str(e)}",
+                }
+            ],
+            "active_breaches": active_breaches,
+            "pass_rate_summary": {
+                "days": days,
+                "overall_pass_rate": None,
+                "recent_3d_pass_rate": None,
+                "drift_pp": None,
+                "min_pass_rate": min_pass_rate,
+                "min_recent_pass_rate": min_recent_pass_rate,
+                "min_drift_pp": min_drift_pp,
+                "min_track_pass_rate": min_track_pass_rate,
+            },
+            "readiness_summary": {
+                "current_readiness_score": float(split_status.get("readiness_score") or 0),
+                "recent_3d_readiness_score": None,
+                "drift_pp": None,
+                "min_drift_pp": min_drift_pp,
+            },
+            "snapshot_freshness": {
+                "latest_generated_at": None,
+                "snapshot_age_hours": None,
+                "stale_snapshot_hours": stale_snapshot_hours,
+            },
+            "track_pass_rates": [],
+            "trend": [],
+            "readiness_trend": [],
+            "generated_at": datetime.utcnow().isoformat(),
+        }
+    finally:
+        if cur is not None:
+            cur.close()
+        if conn is not None:
+            conn.close()
 

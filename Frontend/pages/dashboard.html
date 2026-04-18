@@ -252,7 +252,7 @@
 <div class="w-10 h-10 rounded-lg bg-surface-container flex items-center justify-center">
 <span class="material-symbols-outlined text-primary" data-icon="group">group</span>
 </div>
-<span class="text-[10px] font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded">ONLINE</span>
+<span class="text-[10px] font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded">TRỰC TUYẾN</span>
 </div>
 <p class="text-on-surface-variant text-xs font-bold uppercase tracking-wider">Người nộp thuế mới</p>
 <h4 class="text-2xl font-bold mt-1">2.845</h4>
@@ -265,7 +265,7 @@
 <div class="w-10 h-10 rounded-lg bg-surface-container flex items-center justify-center">
 <span class="material-symbols-outlined text-primary" data-icon="receipt_long">receipt_long</span>
 </div>
-<span class="text-[10px] font-bold text-blue-600 bg-blue-50 px-2 py-0.5 rounded">PENDING</span>
+<span class="text-[10px] font-bold text-blue-600 bg-blue-50 px-2 py-0.5 rounded">CHỜ XỬ LÝ</span>
 </div>
 <p class="text-on-surface-variant text-xs font-bold uppercase tracking-wider">Hóa đơn chờ duyệt</p>
 <h4 class="text-2xl font-bold mt-1">15.204</h4>
@@ -278,20 +278,155 @@
 <div class="w-10 h-10 rounded-lg bg-surface-container flex items-center justify-center">
 <span class="material-symbols-outlined text-primary" data-icon="warning">warning</span>
 </div>
-<span id="dashboard-delinquency-health-badge" class="text-[10px] font-bold text-slate-600 bg-slate-100 px-2 py-0.5 rounded">LOADING</span>
+<span id="dashboard-delinquency-health-badge" class="text-[10px] font-bold text-slate-600 bg-slate-100 px-2 py-0.5 rounded">ĐANG TẢI</span>
 </div>
 <p class="text-on-surface-variant text-xs font-bold uppercase tracking-wider">Sức khỏe Cache Delinquency</p>
 <h4 id="dashboard-delinquency-health-status" class="text-2xl font-bold mt-1">Đang tải...</h4>
 <p id="dashboard-delinquency-health-subtext" class="text-xs text-on-surface-variant mt-1">Đang đồng bộ trạng thái từ API.</p>
 <div class="mt-3 grid grid-cols-2 gap-2 text-[11px] font-semibold">
-<div class="bg-surface-container-low rounded px-2 py-1 text-slate-600">Coverage: <span id="dashboard-delinquency-health-coverage">--</span></div>
-<div class="bg-surface-container-low rounded px-2 py-1 text-slate-600">Stale: <span id="dashboard-delinquency-health-stale">--</span></div>
+<div class="bg-surface-container-low rounded px-2 py-1 text-slate-600">Độ phủ: <span id="dashboard-delinquency-health-coverage">--</span></div>
+<div class="bg-surface-container-low rounded px-2 py-1 text-slate-600">Cũ: <span id="dashboard-delinquency-health-stale">--</span></div>
 </div>
 <div class="mt-4 w-full bg-surface-container h-1 rounded-full overflow-hidden">
 <div id="dashboard-delinquency-health-progress" class="bg-slate-400 h-full transition-all duration-500" style="width: 0%"></div>
 </div>
 <p id="dashboard-delinquency-health-alert" class="mt-3 text-[11px] text-slate-500 min-h-[2.75rem]"></p>
 <p id="dashboard-delinquency-health-updated" class="text-[10px] uppercase tracking-wider text-slate-400">Cập nhật: --</p>
+</div>
+</div>
+<div id="dashboard-kpi-governance-card" class="col-span-12 bg-surface-container-lowest rounded-xl shadow-sm overflow-hidden border border-outline-variant/20 transition-all duration-300">
+<div class="p-6 border-b border-surface-container flex flex-wrap items-start justify-between gap-4">
+<div>
+<h3 class="font-bold text-primary-container flex items-center gap-2">
+<span class="material-symbols-outlined text-primary" data-icon="policy" style="font-variation-settings: 'FILL' 1;">policy</span>
+              Quản trị KPI Split Trigger
+            </h3>
+<p id="dashboard-kpi-subtext" class="text-xs text-on-surface-variant mt-1">Đang tải trạng thái split-trigger và lịch sử snapshots.</p>
+</div>
+<div class="flex items-center gap-2 flex-wrap">
+<span id="dashboard-kpi-ready-badge" class="text-[10px] font-bold px-2 py-0.5 rounded bg-slate-100 text-slate-600">ĐANG TẢI</span>
+<span id="dashboard-kpi-alert-level-badge" class="text-[10px] font-bold px-2 py-0.5 rounded bg-slate-100 text-slate-600">CẢNH BÁO: --</span>
+<span id="dashboard-kpi-freshness-badge" class="text-[10px] font-bold px-2 py-0.5 rounded bg-slate-100 text-slate-600">KHÔNG RÕ</span>
+<label class="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-surface-container-low border border-outline-variant/20 text-[11px] font-semibold text-slate-600">
+<input id="dashboard-kpi-persist-toggle" type="checkbox" class="rounded border-slate-300 text-primary-container focus:ring-primary-container/40" />
+<span>Lưu snapshot khi làm mới</span>
+</label>
+<button id="dashboard-kpi-refresh" class="px-3 py-1.5 rounded-lg bg-primary-container text-white text-[11px] font-bold uppercase tracking-widest hover:bg-primary transition-colors">Làm mới KPI</button>
+</div>
+</div>
+<div class="p-6 grid grid-cols-2 lg:grid-cols-6 gap-3 text-xs">
+<div class="rounded-lg bg-surface-container-low p-3">
+<p class="uppercase tracking-wider text-slate-400 font-bold text-[10px]">Mức sẵn sàng</p>
+<p id="dashboard-kpi-readiness-score" class="text-2xl font-black text-primary-container mt-1">--</p>
+</div>
+<div class="rounded-lg bg-surface-container-low p-3">
+<p class="uppercase tracking-wider text-slate-400 font-bold text-[10px]">Track trọng yếu đạt</p>
+<p id="dashboard-kpi-critical-pass" class="text-2xl font-black text-primary-container mt-1">--/--</p>
+</div>
+<div class="rounded-lg bg-surface-container-low p-3">
+<p class="uppercase tracking-wider text-slate-400 font-bold text-[10px]">Tỷ lệ đạt (30 ngày)</p>
+<p id="dashboard-kpi-pass-rate" class="text-2xl font-black text-primary-container mt-1">--</p>
+</div>
+<div class="rounded-lg bg-surface-container-low p-3">
+<p class="uppercase tracking-wider text-slate-400 font-bold text-[10px]">Độ lệch sẵn sàng (3 ngày)</p>
+<p id="dashboard-kpi-readiness-drift" class="text-2xl font-black text-slate-500 mt-1">--</p>
+</div>
+<div class="rounded-lg bg-surface-container-low p-3">
+<p class="uppercase tracking-wider text-slate-400 font-bold text-[10px]">Độ lệch tỷ lệ đạt (3 ngày)</p>
+<p id="dashboard-kpi-pass-drift" class="text-2xl font-black text-slate-500 mt-1">--</p>
+</div>
+<div class="rounded-lg bg-surface-container-low p-3">
+<p class="uppercase tracking-wider text-slate-400 font-bold text-[10px]">Snapshot mới nhất</p>
+<p id="dashboard-kpi-latest-snapshot" class="text-sm font-black text-primary-container mt-2">--</p>
+</div>
+</div>
+<div class="px-6 pb-6">
+<div id="dashboard-kpi-alert-codes-panel" class="rounded-lg border border-outline-variant/20 bg-surface-container-low p-4 transition-all duration-300">
+<div class="flex flex-wrap items-center justify-between gap-2 mb-2">
+<p class="text-[10px] font-bold uppercase tracking-widest text-slate-500">Mã cảnh báo quản trị</p>
+<span id="dashboard-kpi-alert-codes-summary" class="text-[10px] uppercase tracking-wider text-slate-400">Đang kích hoạt 0/3</span>
+</div>
+<div id="dashboard-kpi-alert-codes" class="grid grid-cols-1 md:grid-cols-3 gap-2 text-xs text-slate-600">
+<div class="rounded-lg border border-outline-variant/20 bg-white px-3 py-2 text-[11px] text-slate-500">Đang tải mã cảnh báo...</div>
+</div>
+</div>
+</div>
+<div class="px-6 pb-6 grid grid-cols-1 lg:grid-cols-2 gap-4">
+<div class="rounded-lg border border-outline-variant/20 bg-surface-container-low p-4">
+<p class="text-[10px] font-bold uppercase tracking-widest text-slate-500 mb-2">Trạng thái theo track</p>
+<div id="dashboard-kpi-track-status" class="space-y-2 text-xs text-slate-600">
+<p class="text-slate-400 italic">Đang tải trạng thái theo track...</p>
+</div>
+</div>
+<div class="rounded-lg border border-outline-variant/20 bg-surface-container-low p-4">
+<p class="text-[10px] font-bold uppercase tracking-widest text-slate-500 mb-2">Snapshot chỉ số mới nhất</p>
+<div id="dashboard-kpi-latest-metrics" class="space-y-2 text-xs text-slate-600">
+<p class="text-slate-400 italic">Đang tải snapshot chỉ số...</p>
+</div>
+</div>
+</div>
+<div class="px-6 pb-6 flex flex-wrap items-center justify-between gap-2 text-[10px] uppercase tracking-wider text-slate-400">
+<span id="dashboard-kpi-updated">Cập nhật: --</span>
+<span id="dashboard-kpi-snapshot-age">Tuổi snapshot: -- • SLA --</span>
+<span id="dashboard-kpi-total-snapshots">Tổng snapshot 30 ngày: --</span>
+</div>
+</div>
+<div id="dashboard-rollout-card" class="col-span-12 bg-surface-container-lowest rounded-xl shadow-sm overflow-hidden border border-outline-variant/20">
+<div class="p-6 border-b border-surface-container flex flex-wrap items-start justify-between gap-3">
+<div>
+<h3 class="font-bold text-primary-container flex items-center gap-2">
+<span class="material-symbols-outlined text-primary" data-icon="rocket_launch" style="font-variation-settings: 'FILL' 1;">rocket_launch</span>
+              Trạng thái triển khai chuyên biệt
+            </h3>
+<p id="dashboard-rollout-subtext" class="text-xs text-on-surface-variant mt-1">Đang tải trạng thái quality/pilot/go-no-go.</p>
+</div>
+<div class="flex items-center gap-2">
+<span id="dashboard-rollout-badge" class="text-[10px] font-bold px-2 py-0.5 rounded bg-slate-100 text-slate-600">ĐANG TẢI</span>
+<button id="dashboard-rollout-refresh" class="px-3 py-1.5 rounded-lg bg-primary-container text-white text-[11px] font-bold uppercase tracking-widest hover:bg-primary transition-colors">Làm mới triển khai</button>
+</div>
+</div>
+<div class="p-6 grid grid-cols-2 lg:grid-cols-6 gap-3 text-xs">
+<div class="rounded-lg bg-surface-container-low p-3">
+<p class="uppercase tracking-wider text-slate-400 font-bold text-[10px]">Gate cứng</p>
+<p id="dashboard-rollout-hard-gates" class="text-xl font-black text-slate-600 mt-1">--</p>
+</div>
+<div class="rounded-lg bg-surface-container-low p-3">
+<p class="uppercase tracking-wider text-slate-400 font-bold text-[10px]">Gate mềm</p>
+<p id="dashboard-rollout-soft-gates" class="text-xl font-black text-slate-600 mt-1">--</p>
+</div>
+<div class="rounded-lg bg-surface-container-low p-3">
+<p class="uppercase tracking-wider text-slate-400 font-bold text-[10px]">Chất lượng thanh tra</p>
+<p id="dashboard-rollout-audit-quality" class="text-xl font-black text-slate-600 mt-1">--</p>
+</div>
+<div class="rounded-lg bg-surface-container-low p-3">
+<p class="uppercase tracking-wider text-slate-400 font-bold text-[10px]">Chất lượng VAT</p>
+<p id="dashboard-rollout-vat-quality" class="text-xl font-black text-slate-600 mt-1">--</p>
+</div>
+<div class="rounded-lg bg-surface-container-low p-3">
+<p class="uppercase tracking-wider text-slate-400 font-bold text-[10px]">Pilot thanh tra F1 Δ</p>
+<p id="dashboard-rollout-audit-delta" class="text-xl font-black text-slate-600 mt-1">--</p>
+</div>
+<div class="rounded-lg bg-surface-container-low p-3">
+<p class="uppercase tracking-wider text-slate-400 font-bold text-[10px]">Pilot VAT F1 Δ</p>
+<p id="dashboard-rollout-vat-delta" class="text-xl font-black text-slate-600 mt-1">--</p>
+</div>
+</div>
+<div class="px-6 pb-6 grid grid-cols-1 lg:grid-cols-2 gap-4">
+<div class="rounded-lg border border-outline-variant/20 bg-surface-container-low p-4">
+<p class="text-[10px] font-bold uppercase tracking-widest text-slate-500 mb-2">Quyết định</p>
+<p id="dashboard-rollout-decision" class="text-sm font-black text-primary-container">--</p>
+<p id="dashboard-rollout-message" class="text-xs text-slate-500 mt-2 leading-relaxed">--</p>
+</div>
+<div class="rounded-lg border border-outline-variant/20 bg-surface-container-low p-4">
+<p class="text-[10px] font-bold uppercase tracking-widest text-slate-500 mb-2">Hành động đề xuất</p>
+<ul id="dashboard-rollout-actions" class="space-y-2 text-xs text-slate-600">
+<li class="text-slate-400 italic">Đang tải hành động triển khai...</li>
+</ul>
+</div>
+</div>
+<div class="px-6 pb-6 flex flex-wrap items-center justify-between gap-2 text-[10px] uppercase tracking-wider text-slate-400">
+<span id="dashboard-rollout-updated">Cập nhật: --</span>
+<span id="dashboard-rollout-artifacts">Tệp minh chứng: --</span>
 </div>
 </div>
 <!-- Recent Activity Table (No Borders) -->

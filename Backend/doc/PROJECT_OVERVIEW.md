@@ -86,4 +86,35 @@ Sẽ được khởi tạo với 4 bảng trung tâm:
     *   **Top Bar**: Thanh tìm kiếm mã số thuế + Notify.
     *   **Main Canvas Chuyển động**: Khi chuyển Router phải có hiệu ứng `<Slide-Up>` và `<Fade-In>` mượt mà. Nút bấm mang các yếu tố nổi khối nhẹ (Glassmorphism + Subtle shadow hover).
 
-*Document v1.0 - Generated Setup Masterplan.*
+---
+
+## 6. Completion Roadmap (Model + UI + Ops)
+
+### 6.1 Trạng thái hiện tại
+- **Model tracks**
+    - Audit Value: Model-backed v1, quality gate operational.
+    - VAT Refund: Model-backed v1, quality gate operational.
+    - Pilot: model-vs-heuristic report đã có, theo dõi thêm chu kỳ để ổn định.
+    - Go/No-Go: tự động hóa hoàn chỉnh qua script chuyên biệt + history JSONL.
+- **UI/Frontend**
+    - Dashboard đã có KPI Split Trigger Governance widget.
+    - Dashboard đã có Specialized Rollout Status widget (gates, pilot deltas, decision, actions).
+- **Ops/Governance**
+    - Monitoring endpoint tổng hợp rollout: `/api/monitoring/specialized_rollout_status`.
+    - Chính sách KPI + snapshot + alerting + cooldown semantics đã hoạt động.
+    - Regression test coverage đã bao gồm monitoring workflow và go/no-go logic.
+
+### 6.2 Kế hoạch hoàn thiện 30 ngày
+1. Chạy cadence pipeline specialized (ít nhất 2-3 chu kỳ/tuần) để tích lũy bằng chứng ổn định pilot.
+2. Review `specialized_go_no_go_history.jsonl` hàng tuần để xác nhận stability gate.
+3. Chuẩn hóa policy threshold (nếu cần) dựa trên drift/pass-rate thực tế từ dashboard.
+4. Khi decision chuyển `go_phase_d_candidate`, mở scope Phase D tách workbench theo rollout batches.
+
+### 6.3 Exit Criteria để đóng dự án V1
+1. Audit + VAT quality reports duy trì `overall_pass=true` theo chu kỳ vận hành.
+2. Pilot reports duy trì sample đủ lớn và không có regression nghiêm trọng kéo dài.
+3. Go/No-Go decision có lịch sử ổn định, sẵn sàng cho quyết định Phase D.
+4. Dashboard và monitoring endpoint phản ánh đúng trạng thái release readiness.
+5. Regression test suite chính (`test_monitoring_kpi_workflow.py`, `test_specialized_go_no_go_review.py`) luôn pass.
+
+*Document v1.1 - Updated with completion roadmap.*

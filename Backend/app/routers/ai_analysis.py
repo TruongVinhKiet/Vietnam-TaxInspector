@@ -19,6 +19,8 @@ import uuid
 import threading
 import json
 import math
+import joblib
+import numpy as np
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, Any, Literal
@@ -29,6 +31,7 @@ from sqlalchemy import text, func, and_
 
 from ..database import get_db
 from .. import auth, models, schemas
+from . import monitoring as monitoring_router
 
 import sys
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
@@ -51,6 +54,60 @@ WHATIF_HEATMAP_DEFAULT_REVENUE_STEPS = [-30, -20, -10, 0, 10, 20, 30]
 WHATIF_HEATMAP_DEFAULT_EXPENSE_STEPS = [30, 20, 10, 0, -10, -20, -30]
 WHATIF_HEATMAP_MAX_POINTS = 225
 
+SPECIALIZED_MODEL_DIR = Path(__file__).resolve().parent.parent.parent / "data" / "models"
+
+AUDIT_VALUE_FEATURE_COLUMNS = [
+    "risk_score",
+    "anomaly_score",
+    "model_confidence",
+    "revenue",
+    "total_expenses",
+    "margin_gap",
+    "expense_to_revenue_ratio",
+    "red_flag_count",
+    "high_red_flag_count",
+    "f1_divergence",
+    "f2_ratio_limit",
+    "f3_vat_structure",
+    "f4_peer_comparison",
+]
+
+VAT_REFUND_FEATURE_COLUMNS = [
+    "risk_score",
+    "anomaly_score",
+    "f2_ratio_limit",
+    "f3_vat_structure",
+    "revenue",
+    "total_expenses",
+    "vat_input_output_ratio",
+    "estimated_refund_gap",
+    "vat_flag_count",
+    "expense_to_revenue_ratio",
+    "f1_divergence",
+    "f4_peer_comparison",
+]
+
+VAT_KEYWORDS = ("vat", "hoa don", "hoan thue", "invoice", "input", "output")
+
+SPECIALIZED_MODEL_SPECS = {
+    "audit_value": {
+        "model_path": SPECIALIZED_MODEL_DIR / "audit_value_model.joblib",
+        "calibrator_path": SPECIALIZED_MODEL_DIR / "audit_value_calibrator.joblib",
+        "meta_path": SPECIALIZED_MODEL_DIR / "audit_value_model_meta.json",
+        "default_features": AUDIT_VALUE_FEATURE_COLUMNS,
+        "default_model_version": "audit-value-heuristic",
+    },
+    "vat_refund": {
+        "model_path": SPECIALIZED_MODEL_DIR / "vat_refund_model.joblib",
+        "calibrator_path": SPECIALIZED_MODEL_DIR / "vat_refund_calibrator.joblib",
+        "meta_path": SPECIALIZED_MODEL_DIR / "vat_refund_model_meta.json",
+        "default_features": VAT_REFUND_FEATURE_COLUMNS,
+        "default_model_version": "vat-refund-heuristic",
+    },
+}
+
+_specialized_model_cache: dict[str, Optional[dict[str, Any]]] = {}
+
 # ---- Singleton pipeline ----
 _pipeline = None
 
@@ -61,6 +118,117 @@ def get_pipeline() -> TaxFraudPipeline:
         _pipeline = TaxFraudPipeline()
         _pipeline.load_models()
     return _pipeline
+
+
+def _load_specialized_track_bundle(track_name: str) -> Optional[dict[str, Any]]:
+    if track_name in _specialized_model_cache:
+        return _specialized_model_cache[track_name]
+
+    spec = SPECIALIZED_MODEL_SPECS.get(track_name)
+    if not spec:
+        _specialized_model_cache[track_name] = None
+        return None
+
+    model_path = spec["model_path"]
+    if not model_path.exists():
+        _specialized_model_cache[track_name] = None
+        return None
+
+    try:
+        model_obj = joblib.load(model_path)
+    except Exception as exc:
+        print(f"[WARN] Failed to load {track_name} model artifact {model_path}: {exc}")
+        _specialized_model_cache[track_name] = None
+        return None
+
+    calibrator = None
+    calibrator_path = spec["calibrator_path"]
+    if calibrator_path.exists():
+        try:
+            calibrator = joblib.load(calibrator_path)
+        except Exception as exc:
+            print(f"[WARN] Failed to load {track_name} calibrator artifact {calibrator_path}: {exc}")
+            calibrator = None
+
+    metadata: dict[str, Any] = {}
+    meta_path = spec["meta_path"]
+    if meta_path.exists():
+        try:
+            with open(meta_path, "r", encoding="utf-8") as handle:
+                raw_meta = json.load(handle)
+                if isinstance(raw_meta, dict):
+                    metadata = raw_meta
+        except Exception as exc:
+            print(f"[WARN] Failed to read {track_name} metadata {meta_path}: {exc}")
+
+    feature_columns = metadata.get("feature_columns")
+    if not isinstance(feature_columns, list) or not feature_columns:
+        feature_columns = list(spec["default_features"])
+    feature_columns = [str(item) for item in feature_columns if str(item).strip()]
+    if not feature_columns:
+        feature_columns = list(spec["default_features"])
+
+    bundle = {
+        "model": model_obj,
+        "calibrator": calibrator,
+        "feature_columns": feature_columns,
+        "model_version": str(metadata.get("model_version") or spec["default_model_version"]),
+    }
+    _specialized_model_cache[track_name] = bundle
+    return bundle
+
+
+def _predict_specialized_probability(track_name: str, feature_map: dict[str, float]) -> Optional[dict[str, Any]]:
+    bundle = _load_specialized_track_bundle(track_name)
+    if not bundle:
+        return None
+
+    feature_columns = bundle.get("feature_columns") or []
+    vector = np.asarray(
+        [[_to_float(feature_map.get(name), 0.0) for name in feature_columns]],
+        dtype=float,
+    )
+    vector = np.nan_to_num(vector, nan=0.0, posinf=1e6, neginf=-1e6)
+
+    model_obj = bundle.get("model")
+    if model_obj is None:
+        return None
+
+    try:
+        if hasattr(model_obj, "predict_proba"):
+            proba = np.asarray(model_obj.predict_proba(vector), dtype=float)
+            if proba.ndim == 2 and proba.shape[1] >= 2:
+                raw_probability = float(proba[0, 1])
+            elif proba.ndim == 2 and proba.shape[1] == 1:
+                raw_probability = float(proba[0, 0])
+            else:
+                raw_probability = float(np.ravel(proba)[0])
+        elif hasattr(model_obj, "decision_function"):
+            decision = float(np.ravel(model_obj.decision_function(vector))[0])
+            raw_probability = 1.0 / (1.0 + math.exp(-decision))
+        else:
+            raw_probability = float(np.ravel(model_obj.predict(vector))[0])
+    except Exception as exc:
+        print(f"[WARN] Specialized model inference failed for {track_name}: {exc}")
+        return None
+
+    raw_probability = float(np.clip(raw_probability, 0.0, 1.0))
+    probability = raw_probability
+    calibrator = bundle.get("calibrator")
+    if calibrator is not None and hasattr(calibrator, "predict"):
+        try:
+            calibrated = np.asarray(calibrator.predict(np.asarray([raw_probability], dtype=float)), dtype=float)
+            if len(calibrated) > 0:
+                probability = float(np.clip(calibrated[0], 0.0, 1.0))
+        except Exception as exc:
+            print(f"[WARN] Specialized calibrator inference failed for {track_name}: {exc}")
+
+    return {
+        "probability": probability,
+        "raw_probability": raw_probability,
+        "model_version": str(bundle.get("model_version") or "unknown"),
+        "feature_columns": feature_columns,
+    }
 
 
 def _resolve_serving_model_version(explicit_version: Optional[str] = None) -> str:
@@ -91,6 +259,155 @@ def _to_int(value: Any) -> Optional[int]:
     except (TypeError, ValueError):
         return None
     return parsed
+
+
+def _coerce_json_like(value: Any) -> Any:
+    if isinstance(value, (dict, list)):
+        return value
+    if isinstance(value, str):
+        payload = value.strip()
+        if not payload:
+            return []
+        try:
+            return json.loads(payload)
+        except Exception:
+            return []
+    return []
+
+
+def _count_high_severity_red_flags(red_flags: Any) -> int:
+    rows = red_flags if isinstance(red_flags, list) else _coerce_json_like(red_flags)
+    if not isinstance(rows, list):
+        return 0
+
+    count = 0
+    for flag in rows:
+        if not isinstance(flag, dict):
+            continue
+        severity = str(flag.get("severity") or "").strip().lower()
+        if severity in {"high", "critical"}:
+            count += 1
+    return count
+
+
+def _count_vat_related_red_flags(red_flags: Any) -> int:
+    rows = red_flags if isinstance(red_flags, list) else _coerce_json_like(red_flags)
+    if not isinstance(rows, list):
+        return 0
+
+    count = 0
+    for flag in rows:
+        if not isinstance(flag, dict):
+            continue
+        blob = " ".join(
+            str(flag.get(field, ""))
+            for field in ("feature", "title", "reason", "description", "actual_value")
+        ).lower()
+        if any(keyword in blob for keyword in VAT_KEYWORDS):
+            count += 1
+    return count
+
+
+def _compute_vat_proxy_metrics(revenue: Any, total_expenses: Any) -> tuple[float, float, float, float]:
+    rev = max(0.0, _to_float(revenue, 0.0))
+    exp = max(0.0, _to_float(total_expenses, 0.0))
+    cost_of_goods = exp * 0.75
+    vat_output = rev * 0.10
+    vat_input = cost_of_goods * 0.10
+    vat_ratio = (vat_input / vat_output) if vat_output > 0 else (2.0 if vat_input > 0 else 0.0)
+    refund_gap = vat_input - vat_output
+    return float(vat_ratio), float(refund_gap), float(vat_input), float(vat_output)
+
+
+def _compute_risk_trend_delta(yearly_feature_scores: Any) -> float:
+    normalized = _normalize_yearly_feature_scores(yearly_feature_scores)
+    if len(normalized) < 2:
+        return 0.0
+    latest = _to_float(normalized[-1].get("risk_score"), 0.0)
+    previous = _to_float(normalized[-2].get("risk_score"), 0.0)
+    return latest - previous
+
+
+def _compute_f3_trend_delta(yearly_feature_scores: Any) -> float:
+    normalized = _normalize_yearly_feature_scores(yearly_feature_scores)
+    if len(normalized) < 2:
+        return 0.0
+    latest = _to_float(normalized[-1].get("f3_vat_structure"), 0.0)
+    previous = _to_float(normalized[-2].get("f3_vat_structure"), 0.0)
+    return latest - previous
+
+
+def _build_audit_model_feature_map(
+    *,
+    risk_score: Any,
+    anomaly_score: Any,
+    model_confidence: Any,
+    red_flags: Any,
+    revenue: Any,
+    total_expenses: Any,
+    f1_divergence: Any,
+    f2_ratio_limit: Any,
+    f3_vat_structure: Any,
+    f4_peer_comparison: Any,
+) -> dict[str, float]:
+    rev = max(0.0, _to_float(revenue, 0.0))
+    exp = max(0.0, _to_float(total_expenses, 0.0))
+    margin_gap = max(0.0, exp - rev)
+    expense_ratio = (exp / rev) if rev > 0 else (2.0 if exp > 0 else 0.0)
+
+    rows = red_flags if isinstance(red_flags, list) else _coerce_json_like(red_flags)
+    red_flag_count = float(len(rows)) if isinstance(rows, list) else 0.0
+    high_red_flag_count = float(_count_high_severity_red_flags(rows))
+
+    return {
+        "risk_score": max(0.0, min(100.0, _to_float(risk_score, 0.0))),
+        "anomaly_score": max(0.0, _to_float(anomaly_score, 0.0)),
+        "model_confidence": max(0.0, min(100.0, _to_float(model_confidence, 0.0))),
+        "revenue": rev,
+        "total_expenses": exp,
+        "margin_gap": margin_gap,
+        "expense_to_revenue_ratio": max(0.0, expense_ratio),
+        "red_flag_count": red_flag_count,
+        "high_red_flag_count": high_red_flag_count,
+        "f1_divergence": max(0.0, _to_float(f1_divergence, 0.0)),
+        "f2_ratio_limit": max(0.0, _to_float(f2_ratio_limit, 0.0)),
+        "f3_vat_structure": max(0.0, _to_float(f3_vat_structure, 0.0)),
+        "f4_peer_comparison": max(0.0, _to_float(f4_peer_comparison, 0.0)),
+    }
+
+
+def _build_vat_refund_model_feature_map(
+    *,
+    risk_score: Any,
+    anomaly_score: Any,
+    f1_divergence: Any,
+    f2_ratio_limit: Any,
+    f3_vat_structure: Any,
+    f4_peer_comparison: Any,
+    revenue: Any,
+    total_expenses: Any,
+    red_flags: Any,
+) -> dict[str, float]:
+    rev = max(0.0, _to_float(revenue, 0.0))
+    exp = max(0.0, _to_float(total_expenses, 0.0))
+    vat_ratio, refund_gap, _, _ = _compute_vat_proxy_metrics(rev, exp)
+    expense_ratio = (exp / rev) if rev > 0 else (2.0 if exp > 0 else 0.0)
+    vat_flag_count = float(_count_vat_related_red_flags(red_flags))
+
+    return {
+        "risk_score": max(0.0, min(100.0, _to_float(risk_score, 0.0))),
+        "anomaly_score": max(0.0, _to_float(anomaly_score, 0.0)),
+        "f2_ratio_limit": max(0.0, _to_float(f2_ratio_limit, 0.0)),
+        "f3_vat_structure": max(0.0, _to_float(f3_vat_structure, 0.0)),
+        "revenue": rev,
+        "total_expenses": exp,
+        "vat_input_output_ratio": max(0.0, vat_ratio),
+        "estimated_refund_gap": max(0.0, refund_gap),
+        "vat_flag_count": vat_flag_count,
+        "expense_to_revenue_ratio": max(0.0, expense_ratio),
+        "f1_divergence": max(0.0, _to_float(f1_divergence, 0.0)),
+        "f4_peer_comparison": max(0.0, _to_float(f4_peer_comparison, 0.0)),
+    }
 
 
 def _normalize_yearly_history(raw_history: Any) -> list[dict]:
@@ -283,6 +600,908 @@ def _compute_profit_margin(revenue: Any, total_expenses: Any) -> Optional[float]
         return None
     exp = _to_float(total_expenses, 0.0)
     return round(((rev - exp) / rev) * 100.0, 2)
+
+
+def _build_decision_intelligence_payload(
+    *,
+    risk_score: Any,
+    risk_level: Any,
+    anomaly_score: Any,
+    model_confidence: Any,
+    red_flags: Any,
+    yearly_feature_scores: Any,
+    f1_divergence: Any,
+    f2_ratio_limit: Any,
+    f3_vat_structure: Any,
+    f4_peer_comparison: Any,
+) -> dict[str, Any]:
+    score = max(0.0, min(100.0, _to_float(risk_score, 0.0)))
+    anomaly = max(0.0, _to_float(anomaly_score, 0.0))
+    confidence = _to_float(model_confidence, 0.0)
+    level = str(risk_level or _classify_risk_tier(score)).lower().strip()
+
+    level_labels = {
+        "critical": "Rui ro rat cao",
+        "high": "Rui ro cao",
+        "medium": "Rui ro trung binh",
+        "low": "An toan",
+    }
+    level_label = level_labels.get(level, "Khong xac dinh")
+
+    red_flag_items = red_flags if isinstance(red_flags, list) else []
+    high_red_flag_count = 0
+    for flag in red_flag_items:
+        if not isinstance(flag, dict):
+            continue
+        severity = str(flag.get("severity") or "").lower().strip()
+        if severity in {"high", "critical"}:
+            high_red_flag_count += 1
+
+    normalized_yearly_scores = _normalize_yearly_feature_scores(yearly_feature_scores)
+    trend_delta = 0.0
+    if len(normalized_yearly_scores) >= 2:
+        latest = _to_float(normalized_yearly_scores[-1].get("risk_score"), 0.0)
+        previous = _to_float(normalized_yearly_scores[-2].get("risk_score"), 0.0)
+        trend_delta = latest - previous
+
+    signal_entries: list[dict[str, Any]] = []
+
+    def _add_signal(key: str, label: str, value: float, severity: str, summary: str) -> None:
+        signal_entries.append({
+            "key": key,
+            "label": label,
+            "value": round(_to_float(value, 0.0), 4),
+            "severity": severity,
+            "summary": summary,
+        })
+
+    # Core score signal is always surfaced so inspectors can compare policy threshold.
+    if score >= 60:
+        score_severity = "high"
+    elif score >= 40:
+        score_severity = "medium"
+    else:
+        score_severity = "low"
+    _add_signal(
+        "risk_score",
+        "Tong diem rui ro",
+        score,
+        score_severity,
+        f"Diem tong hop hien tai {score:.1f}/100.",
+    )
+
+    if anomaly >= 0.85:
+        _add_signal(
+            "anomaly_score",
+            "Do di biet",
+            anomaly,
+            "high",
+            "Do di biet tai chinh vuot nguong canh bao cao.",
+        )
+    elif anomaly >= 0.60:
+        _add_signal(
+            "anomaly_score",
+            "Do di biet",
+            anomaly,
+            "medium",
+            "Do di biet tai chinh dang o muc can theo doi.",
+        )
+
+    f1 = _to_float(f1_divergence, 0.0)
+    if f1 >= 0.30:
+        _add_signal("f1_divergence", "F1 lech pha tang truong", f1, "high", "Doanh thu va chi phi bi lech pha ro ret.")
+    elif f1 >= 0.20:
+        _add_signal("f1_divergence", "F1 lech pha tang truong", f1, "medium", "Lech pha tang truong dang vuot muc thong thuong.")
+
+    f2 = _to_float(f2_ratio_limit, 0.0)
+    if f2 >= 1.20:
+        _add_signal("f2_ratio_limit", "F2 vuot nguong ty le", f2, "high", "Ty le chi phi/doanh thu vuot nguong quy tac.")
+    elif f2 >= 1.05:
+        _add_signal("f2_ratio_limit", "F2 vuot nguong ty le", f2, "medium", "Ty le chi phi/doanh thu can giam sat bo sung.")
+
+    f3 = _to_float(f3_vat_structure, 0.0)
+    if f3 >= 0.70:
+        _add_signal("f3_vat_structure", "F3 cau truc VAT", f3, "high", "Cau truc VAT co dau hieu bat thuong manh.")
+    elif f3 >= 0.55:
+        _add_signal("f3_vat_structure", "F3 cau truc VAT", f3, "medium", "Cau truc VAT lech khoi phan bo ky vong.")
+
+    f4 = _to_float(f4_peer_comparison, 0.0)
+    if f4 >= 0.40:
+        _add_signal("f4_peer_comparison", "F4 lech chuan nganh", f4, "high", "Bien loi nhuan va hanh vi khai thue lech xa nhom dong nganh.")
+    elif f4 >= 0.25:
+        _add_signal("f4_peer_comparison", "F4 lech chuan nganh", f4, "medium", "Doanh nghiep dang lech xu huong nganh.")
+
+    if trend_delta >= 15.0:
+        _add_signal(
+            "risk_trend",
+            "Xu huong diem rui ro",
+            trend_delta,
+            "high",
+            "Diem rui ro tang manh so voi ky gan nhat.",
+        )
+    elif trend_delta >= 8.0:
+        _add_signal(
+            "risk_trend",
+            "Xu huong diem rui ro",
+            trend_delta,
+            "medium",
+            "Diem rui ro co xu huong tang ro trong chuoi nam.",
+        )
+
+    if red_flag_items:
+        red_flag_severity = "high" if high_red_flag_count > 0 or len(red_flag_items) >= 3 else "medium"
+        _add_signal(
+            "red_flags",
+            "Cum canh bao",
+            float(len(red_flag_items)),
+            red_flag_severity,
+            f"Phat hien {len(red_flag_items)} red flag trong ket qua giai thich.",
+        )
+
+    priority_raw = (
+        score * 0.62
+        + min(20.0, high_red_flag_count * 9.0)
+        + min(12.0, len(red_flag_items) * 2.0)
+        + min(14.0, max(0.0, trend_delta) * 0.9)
+        + min(15.0, max(0.0, (anomaly - 0.5) * 35.0))
+    )
+    if 0.0 < confidence < 55.0:
+        priority_raw += 5.0
+    priority_score = int(max(0, min(100, round(priority_raw))))
+
+    recommended_action = "periodic_monitoring"
+    action_label = "Theo doi dinh ky"
+    action_deadline_days = 60
+    should_escalate = False
+
+    if score >= 80.0 or high_red_flag_count >= 2 or anomaly >= 0.90 or priority_score >= 85:
+        recommended_action = "urgent_audit"
+        action_label = "Thanh tra dot xuat"
+        action_deadline_days = 7
+        should_escalate = True
+    elif score >= 60.0 or high_red_flag_count >= 1 or priority_score >= 65:
+        recommended_action = "targeted_review"
+        action_label = "Kiem tra chuyen sau"
+        action_deadline_days = 15
+        should_escalate = priority_score >= 75
+    elif score >= 40.0 or red_flag_items or priority_score >= 45:
+        recommended_action = "enhanced_monitoring"
+        action_label = "Giam sat tang cuong"
+        action_deadline_days = 30
+
+    rationale_parts = [f"Diem rui ro hien tai {score:.1f}/100 ({level_label})."]
+    if red_flag_items:
+        rationale_parts.append(f"Co {len(red_flag_items)} red flag dang kich hoat.")
+    if high_red_flag_count > 0:
+        rationale_parts.append(f"Trong do {high_red_flag_count} red flag muc cao.")
+    if trend_delta >= 8.0:
+        rationale_parts.append(f"Xu huong diem rui ro tang {trend_delta:.1f} diem so voi ky truoc.")
+    if anomaly >= 0.70:
+        rationale_parts.append("Do di biet tai chinh o muc canh bao.")
+    if 0.0 < confidence < 55.0:
+        rationale_parts.append("Do tin cay mo hinh thap, can bo sung bang chung nghiep vu.")
+
+    action_steps = {
+        "urgent_audit": [
+            "Khoi tao ho so thanh tra dot xuat trong 24h.",
+            "Yeu cau doanh nghiep giai trinh hoa don VAT dau vao dau ra trong 7 ngay.",
+            "Doi soat cheo du lieu giao dich voi nhom doi tac lien quan.",
+        ],
+        "targeted_review": [
+            "Mo dot kiem tra chuyen de theo nhom chi so F1-F4 vuot nguong.",
+            "Uu tien doi soat to khai VAT va dieu chinh bo sung trong 3 ky gan nhat.",
+            "Danh gia canh bao moi sau khi cap nhat bo chung tu giai trinh.",
+        ],
+        "enhanced_monitoring": [
+            "Dua vao danh sach giam sat tang cuong theo chu ky thang.",
+            "Theo doi bien dong doanh thu-chi phi va cap nhat canh bao What-If.",
+            "Kich hoat kiem tra bo sung neu diem rui ro vuot 60.",
+        ],
+        "periodic_monitoring": [
+            "Duy tri theo doi dinh ky theo chu ky quy.",
+            "Cap nhat du lieu tai chinh moi truoc ky danh gia tiep theo.",
+            "Tu dong nang muc canh bao neu xuat hien red flag moi.",
+        ],
+    }
+
+    severity_rank = {"high": 3, "medium": 2, "low": 1}
+    signal_entries.sort(
+        key=lambda item: (
+            -severity_rank.get(str(item.get("severity") or "low"), 1),
+            -abs(_to_float(item.get("value"), 0.0)),
+        )
+    )
+
+    return {
+        "recommended_action": recommended_action,
+        "action_label": action_label,
+        "action_deadline_days": action_deadline_days,
+        "priority_score": priority_score,
+        "rationale": " ".join(rationale_parts),
+        "next_steps": action_steps.get(recommended_action, action_steps["periodic_monitoring"]),
+        "top_signals": signal_entries[:4],
+        "should_escalate": should_escalate,
+    }
+
+
+def _build_intervention_uplift_payload(
+    *,
+    risk_score: Any,
+    anomaly_score: Any,
+    red_flags: Any,
+    yearly_feature_scores: Any,
+    model_confidence: Any,
+    revenue: Any,
+    total_expenses: Any,
+) -> dict[str, Any]:
+    score = max(0.0, min(100.0, _to_float(risk_score, 0.0)))
+    anomaly = max(0.0, _to_float(anomaly_score, 0.0))
+    confidence_raw = max(0.0, min(100.0, _to_float(model_confidence, 0.0)))
+    rev = max(0.0, _to_float(revenue, 0.0))
+    exp = max(0.0, _to_float(total_expenses, 0.0))
+
+    red_flag_items = red_flags if isinstance(red_flags, list) else []
+    high_red_flag_count = 0
+    for flag in red_flag_items:
+        if not isinstance(flag, dict):
+            continue
+        severity = str(flag.get("severity") or "").lower().strip()
+        if severity in {"high", "critical"}:
+            high_red_flag_count += 1
+
+    normalized_yearly_scores = _normalize_yearly_feature_scores(yearly_feature_scores)
+    trend_delta = 0.0
+    if len(normalized_yearly_scores) >= 2:
+        latest = _to_float(normalized_yearly_scores[-1].get("risk_score"), 0.0)
+        previous = _to_float(normalized_yearly_scores[-2].get("risk_score"), 0.0)
+        trend_delta = latest - previous
+
+    priority_raw = (
+        score * 0.60
+        + min(20.0, high_red_flag_count * 8.0)
+        + min(12.0, len(red_flag_items) * 2.0)
+        + min(10.0, max(0.0, trend_delta) * 0.8)
+        + min(15.0, max(0.0, (anomaly - 0.55) * 35.0))
+    )
+    if 0.0 < confidence_raw < 55.0:
+        priority_raw += 5.0
+    priority_score = int(max(0, min(100, round(priority_raw))))
+
+    if score >= 82.0 or high_red_flag_count >= 2 or anomaly >= 0.90 or priority_score >= 86:
+        action = "escalated_enforcement"
+    elif score >= 65.0 or high_red_flag_count >= 1 or priority_score >= 68:
+        action = "field_audit"
+    elif score >= 45.0 or len(red_flag_items) >= 1 or priority_score >= 50:
+        action = "structured_outreach"
+    elif score >= 25.0 or anomaly >= 0.60:
+        action = "auto_reminder"
+    else:
+        action = "monitor"
+
+    impact_ratio_map = {
+        "monitor": 0.05,
+        "auto_reminder": 0.12,
+        "structured_outreach": 0.20,
+        "field_audit": 0.30,
+        "escalated_enforcement": 0.38,
+    }
+    impact_ratio = impact_ratio_map.get(action, 0.12)
+
+    expected_risk_reduction_pp = round(score * impact_ratio, 1)
+
+    estimated_penalty_exposure = max(0.0, (exp - rev) * 0.03) + high_red_flag_count * 2_500_000 + len(red_flag_items) * 800_000
+    expected_penalty_saving = round(estimated_penalty_exposure * min(0.9, impact_ratio + 0.15), 2)
+
+    estimated_collection_base = max(0.0, rev * 0.015 + exp * 0.008)
+    expected_collection_uplift = round(estimated_collection_base * impact_ratio, 2)
+
+    if confidence_raw >= 80.0:
+        confidence = "high"
+    elif confidence_raw >= 55.0:
+        confidence = "medium"
+    else:
+        confidence = "low"
+
+    if confidence == "low" and len(normalized_yearly_scores) >= 4:
+        confidence = "medium"
+
+    next_steps_map = {
+        "monitor": [
+            "Duy tri giam sat dinh ky theo chu ky quy.",
+            "Tu dong canh bao khi score vuot nguong 45 trong ky moi.",
+        ],
+        "auto_reminder": [
+            "Gui nhac han giai trinh cho doanh nghiep trong 72h.",
+            "Rang buoc doi soat bo sung neu anomaly tiep tuc tang.",
+        ],
+        "structured_outreach": [
+            "Mo phien lam viec co cau truc voi doanh nghiep theo checklist F1-F4.",
+            "Doi chieu to khai VAT va bao cao tai chinh cua 3 ky gan nhat.",
+        ],
+        "field_audit": [
+            "Phan cong to nghiep vu kiem tra tai cho theo ho so uu tien.",
+            "Yeu cau bo chung tu giai trinh va doi soat nguon hoa don lien quan.",
+        ],
+        "escalated_enforcement": [
+            "Kich hoat quy trinh xu ly cuong che theo tham quyen.",
+            "Phoi hop lien don vi de thu hoi nghia vu ton dong trong 30 ngay.",
+        ],
+    }
+
+    rationale_parts = [f"Risk score hien tai {score:.1f}/100."]
+    if high_red_flag_count > 0:
+        rationale_parts.append(f"Ghi nhan {high_red_flag_count} red flag muc cao.")
+    if trend_delta >= 8.0:
+        rationale_parts.append(f"Xu huong diem rui ro tang {trend_delta:.1f} diem.")
+    if anomaly >= 0.70:
+        rationale_parts.append("Anomaly score o muc can can thiep nghiep vu.")
+    if 0.0 < confidence_raw < 55.0:
+        rationale_parts.append("Do tin cay mo hinh thap, can bo sung bang chung thu cong.")
+
+    return {
+        "recommended_action": action,
+        "priority_score": priority_score,
+        "expected_risk_reduction_pp": expected_risk_reduction_pp,
+        "expected_penalty_saving": expected_penalty_saving,
+        "expected_collection_uplift": expected_collection_uplift,
+        "confidence": confidence,
+        "rationale": " ".join(rationale_parts),
+        "next_steps": next_steps_map.get(action, next_steps_map["monitor"]),
+    }
+
+
+def _harmonize_decision_intelligence_with_intervention(
+    decision_payload: Any,
+    intervention_payload: Any,
+) -> dict[str, Any]:
+    decision = dict(decision_payload) if isinstance(decision_payload, dict) else {}
+    intervention = dict(intervention_payload) if isinstance(intervention_payload, dict) else {}
+    if not intervention:
+        return decision
+
+    action = str(intervention.get("recommended_action") or "monitor").strip().lower()
+    priority_score = int(max(0, min(100, round(_to_float(intervention.get("priority_score"), _to_float(decision.get("priority_score"), 0))))))
+    rationale = str(intervention.get("rationale") or decision.get("rationale") or "").strip()
+
+    mapping = {
+        "monitor": {
+            "recommended_action": "periodic_monitoring",
+            "action_label": "Theo doi dinh ky",
+            "action_deadline_days": 60,
+            "should_escalate": False,
+            "severity": "low",
+        },
+        "auto_reminder": {
+            "recommended_action": "enhanced_monitoring",
+            "action_label": "Nhac han tu dong",
+            "action_deadline_days": 30,
+            "should_escalate": False,
+            "severity": "medium",
+        },
+        "structured_outreach": {
+            "recommended_action": "enhanced_monitoring",
+            "action_label": "Can thiep co cau truc",
+            "action_deadline_days": 21,
+            "should_escalate": False,
+            "severity": "medium",
+        },
+        "field_audit": {
+            "recommended_action": "targeted_review",
+            "action_label": "Kiem tra tai cho",
+            "action_deadline_days": 14,
+            "should_escalate": True,
+            "severity": "high",
+        },
+        "escalated_enforcement": {
+            "recommended_action": "urgent_audit",
+            "action_label": "Xu ly cuong che nang cao",
+            "action_deadline_days": 7,
+            "should_escalate": True,
+            "severity": "high",
+        },
+    }
+    selected = mapping.get(action, mapping["monitor"])
+
+    harmonized = {
+        **decision,
+        "recommended_action": selected["recommended_action"],
+        "action_label": selected["action_label"],
+        "action_deadline_days": selected["action_deadline_days"],
+        "priority_score": priority_score,
+        "rationale": rationale,
+        "next_steps": intervention.get("next_steps") if isinstance(intervention.get("next_steps"), list) and intervention.get("next_steps") else decision.get("next_steps", []),
+        "should_escalate": bool(selected["should_escalate"] or priority_score >= 75),
+    }
+
+    existing_signals = harmonized.get("top_signals") if isinstance(harmonized.get("top_signals"), list) else []
+    has_intervention_signal = any(
+        isinstance(signal, dict) and str(signal.get("key") or "") == "intervention_uplift"
+        for signal in existing_signals
+    )
+    if not has_intervention_signal:
+        existing_signals.append(
+            {
+                "key": "intervention_uplift",
+                "label": "Intervention/Uplift",
+                "value": float(priority_score),
+                "severity": selected["severity"],
+                "summary": rationale or "Intervention action da duoc dong bo voi Decision Intelligence.",
+            }
+        )
+    harmonized["top_signals"] = existing_signals[:4]
+    return harmonized
+
+
+def _build_vat_refund_signals_payload(
+    *,
+    risk_score: Any,
+    anomaly_score: Any,
+    red_flags: Any,
+    yearly_feature_scores: Any,
+    f2_ratio_limit: Any,
+    f3_vat_structure: Any,
+    revenue: Any,
+    total_expenses: Any,
+    f1_divergence: Any = None,
+    f4_peer_comparison: Any = None,
+) -> dict[str, Any]:
+    score = max(0.0, min(100.0, _to_float(risk_score, 0.0)))
+    anomaly = max(0.0, _to_float(anomaly_score, 0.0))
+    f2 = max(0.0, _to_float(f2_ratio_limit, 0.0))
+    f3 = max(0.0, _to_float(f3_vat_structure, 0.0))
+    rev = max(0.0, _to_float(revenue, 0.0))
+    exp = max(0.0, _to_float(total_expenses, 0.0))
+
+    vat_ratio_raw, refund_gap_raw, vat_input, vat_output = _compute_vat_proxy_metrics(rev, exp)
+    vat_ratio = round(vat_ratio_raw, 4)
+    refund_gap = round(refund_gap_raw, 2)
+
+    f3_trend_delta = _compute_f3_trend_delta(yearly_feature_scores)
+
+    red_flag_items = red_flags if isinstance(red_flags, list) else _coerce_json_like(red_flags)
+    if not isinstance(red_flag_items, list):
+        red_flag_items = []
+    vat_flag_count = _count_vat_related_red_flags(red_flag_items)
+
+    indicators: list[dict[str, Any]] = []
+
+    def _add_indicator(key: str, label: str, value: float, severity: str, summary: str) -> None:
+        indicators.append({
+            "key": key,
+            "label": label,
+            "value": round(_to_float(value, 0.0), 4),
+            "severity": severity,
+            "summary": summary,
+        })
+
+    if f3 >= 0.70:
+        _add_indicator(
+            "f3_vat_structure",
+            "Cau truc VAT bat thuong",
+            f3,
+            "high",
+            "F3 vuot nguong canh bao cao, can doi soat lai bo khau tru VAT.",
+        )
+    elif f3 >= 0.55:
+        _add_indicator(
+            "f3_vat_structure",
+            "Cau truc VAT bat thuong",
+            f3,
+            "medium",
+            "F3 dang vuot nguong theo doi trong danh gia hoan thue.",
+        )
+
+    if vat_ratio >= 1.15:
+        _add_indicator(
+            "vat_input_output_ratio",
+            "Ty le VAT dau vao/dau ra",
+            vat_ratio,
+            "high",
+            "VAT dau vao vuot dang ke VAT dau ra, co dau hieu ap luc hoan thue.",
+        )
+    elif vat_ratio >= 1.0:
+        _add_indicator(
+            "vat_input_output_ratio",
+            "Ty le VAT dau vao/dau ra",
+            vat_ratio,
+            "medium",
+            "VAT dau vao dang tiep can nguong VAT dau ra, can theo doi ky tiep theo.",
+        )
+
+    if refund_gap > 0:
+        gap_ratio = refund_gap / (vat_output + 1.0)
+        if gap_ratio >= 0.30:
+            _add_indicator(
+                "estimated_refund_gap",
+                "Chenh lech VAT dau vao-dau ra",
+                refund_gap,
+                "high",
+                "Chenh lech VAT duong lon, can doi chieu chung tu dau vao cho ho so hoan.",
+            )
+        elif gap_ratio >= 0.10:
+            _add_indicator(
+                "estimated_refund_gap",
+                "Chenh lech VAT dau vao-dau ra",
+                refund_gap,
+                "medium",
+                "Chenh lech VAT duong dang mo rong, can bo sung doi soat hoa don.",
+            )
+    else:
+        gap_ratio = 0.0
+
+    if vat_flag_count > 0:
+        _add_indicator(
+            "vat_related_flags",
+            "Cum red-flag lien quan VAT",
+            float(vat_flag_count),
+            "high" if vat_flag_count >= 2 else "medium",
+            f"Phat hien {vat_flag_count} chi bao lien quan hoa don/VAT trong danh sach red flags.",
+        )
+
+    if anomaly >= 0.90:
+        _add_indicator(
+            "anomaly_score",
+            "Do di biet tai chinh",
+            anomaly,
+            "high",
+            "Do di biet tai chinh rat cao, can xac minh bo khau tru VAT theo giao dich.",
+        )
+    elif anomaly >= 0.75:
+        _add_indicator(
+            "anomaly_score",
+            "Do di biet tai chinh",
+            anomaly,
+            "medium",
+            "Do di biet tai chinh vuot nguong theo doi cho nhom hoan thue.",
+        )
+
+    if f3_trend_delta >= 0.08:
+        _add_indicator(
+            "f3_trend",
+            "Xu huong F3 VAT",
+            f3_trend_delta,
+            "medium" if f3_trend_delta < 0.15 else "high",
+            "F3 VAT co xu huong tang, can theo doi lien tuc cac ky khai thue.",
+        )
+
+    priority_raw = (
+        f3 * 45.0
+        + min(25.0, max(0.0, (vat_ratio - 1.0) * 60.0))
+        + min(15.0, max(0.0, gap_ratio) * 10.0)
+        + min(20.0, vat_flag_count * 8.0)
+        + min(10.0, max(0.0, anomaly - 0.6) * 30.0)
+        + min(8.0, max(0.0, f3_trend_delta) * 40.0)
+        + (6.0 if score >= 60.0 else 0.0)
+        + (5.0 if f2 >= 1.20 else 0.0)
+    )
+
+    specialized_prediction = _predict_specialized_probability(
+        "vat_refund",
+        _build_vat_refund_model_feature_map(
+            risk_score=score,
+            anomaly_score=anomaly,
+            f1_divergence=f1_divergence,
+            f2_ratio_limit=f2,
+            f3_vat_structure=f3,
+            f4_peer_comparison=f4_peer_comparison,
+            revenue=rev,
+            total_expenses=exp,
+            red_flags=red_flag_items,
+        ),
+    )
+    model_probability: Optional[float] = None
+    model_version = None
+    if specialized_prediction:
+        model_probability = float(np.clip(_to_float(specialized_prediction.get("probability"), 0.0), 0.0, 1.0))
+        model_version = str(specialized_prediction.get("model_version") or "vat-refund-specialized")
+        priority_raw = (priority_raw * 0.65) + ((model_probability * 100.0) * 0.35)
+        _add_indicator(
+            "vat_model_probability",
+            "Xac suat mo hinh VAT",
+            model_probability,
+            "high" if model_probability >= 0.72 else ("medium" if model_probability >= 0.48 else "low"),
+            "Xac suat can can thiep hoan thue do mo hinh VAT chuyen biet du bao.",
+        )
+
+    priority_score = int(max(0, min(100, round(priority_raw))))
+
+    queue = "monitor"
+    level = "low"
+    has_signal = False
+    if (
+        priority_score >= 80
+        or (f3 >= 0.70 and vat_ratio >= 1.20)
+        or vat_flag_count >= 2
+        or (model_probability is not None and model_probability >= 0.80)
+    ):
+        queue = "priority_refund_audit"
+        level = "critical"
+        has_signal = True
+    elif (
+        priority_score >= 60
+        or (f3 >= 0.65 and vat_ratio >= 1.05)
+        or (model_probability is not None and model_probability >= 0.62)
+    ):
+        queue = "priority_refund_audit"
+        level = "high"
+        has_signal = True
+    elif (
+        priority_score >= 40
+        or f3 >= 0.55
+        or vat_ratio >= 1.0
+        or (model_probability is not None and model_probability >= 0.45)
+    ):
+        queue = "refund_watchlist"
+        level = "medium"
+        has_signal = True
+
+    rationale_parts = []
+    if has_signal:
+        rationale_parts.append(f"Muc uu tien hoan thue VAT duoc xep {level.upper()} ({priority_score}/100).")
+    if f3 >= 0.55:
+        rationale_parts.append(f"Chi so F3 VAT = {f3:.2f} vuot nguong theo doi.")
+    if vat_ratio >= 1.0:
+        rationale_parts.append(f"Ty le VAT dau vao/dau ra = {vat_ratio:.2f}.")
+    if refund_gap > 0:
+        rationale_parts.append(f"Chenh lech VAT dau vao-dau ra uoc tinh {refund_gap:,.0f}.")
+    if vat_flag_count > 0:
+        rationale_parts.append(f"Co {vat_flag_count} red-flag lien quan hoa don/VAT.")
+    if f3_trend_delta >= 0.08:
+        rationale_parts.append(f"F3 VAT tang {f3_trend_delta:.2f} so voi ky truoc.")
+    if model_probability is not None:
+        rationale_parts.append(
+            f"Mo hinh VAT ({model_version}) du bao xac suat can can thiep {model_probability * 100.0:.1f}%"
+        )
+    if not rationale_parts:
+        rationale_parts.append("Chua ghi nhan tin hieu hoan thue VAT bat thuong trong ky hien tai.")
+
+    recommended_checks_map = {
+        "priority_refund_audit": [
+            "Doi chieu hoa don VAT dau vao theo chuoi nha cung cap truoc khi phe duyet hoan.",
+            "Kiem tra tinh hop le bo chung tu khau tru VAT cua 3 ky gan nhat.",
+            "Rang buoc quy trinh phe duyet bo sung bang xac minh giao dich ganh VAT cao.",
+        ],
+        "refund_watchlist": [
+            "Dua ho so vao danh sach theo doi hoan thue VAT theo ky thang/quy.",
+            "Yeu cau bo sung tai lieu giai trinh cho cac hoa don dau vao co gia tri lon.",
+            "Canh bao tu dong neu F3 VAT tiep tuc tang trong ky tiep theo.",
+        ],
+        "monitor": [
+            "Duy tri giam sat thuong xuyen, chua can kich hoat quy trinh kiem tra chuyen de.",
+            "Cap nhat du lieu VAT ky moi de danh gia lai xu huong hoan thue.",
+        ],
+    }
+
+    severity_rank = {"high": 3, "medium": 2, "low": 1}
+    indicators.sort(
+        key=lambda item: (
+            -severity_rank.get(str(item.get("severity") or "low"), 1),
+            -abs(_to_float(item.get("value"), 0.0)),
+        )
+    )
+
+    return {
+        "has_signal": has_signal,
+        "queue": queue,
+        "level": level,
+        "score": priority_score,
+        "rationale": " ".join(rationale_parts),
+        "vat_input_output_ratio": round(vat_ratio, 4) if (vat_input > 0 or vat_output > 0) else None,
+        "estimated_refund_gap": round(max(0.0, refund_gap), 2),
+        "recommended_checks": recommended_checks_map.get(queue, recommended_checks_map["monitor"]),
+        "indicators": indicators[:5],
+    }
+
+
+def _build_audit_value_payload(
+    *,
+    risk_score: Any,
+    anomaly_score: Any,
+    model_confidence: Any,
+    red_flags: Any,
+    yearly_feature_scores: Any,
+    revenue: Any,
+    total_expenses: Any,
+    f1_divergence: Any = None,
+    f2_ratio_limit: Any = None,
+    f3_vat_structure: Any = None,
+    f4_peer_comparison: Any = None,
+) -> dict[str, Any]:
+    score = max(0.0, min(100.0, _to_float(risk_score, 0.0)))
+    anomaly = max(0.0, _to_float(anomaly_score, 0.0))
+    confidence_raw = max(0.0, min(100.0, _to_float(model_confidence, 0.0)))
+    rev = max(0.0, _to_float(revenue, 0.0))
+    exp = max(0.0, _to_float(total_expenses, 0.0))
+
+    red_flag_items = red_flags if isinstance(red_flags, list) else _coerce_json_like(red_flags)
+    if not isinstance(red_flag_items, list):
+        red_flag_items = []
+    high_red_flag_count = _count_high_severity_red_flags(red_flag_items)
+
+    normalized_yearly_scores = _normalize_yearly_feature_scores(yearly_feature_scores)
+    trend_delta = _compute_risk_trend_delta(normalized_yearly_scores)
+
+    margin_gap = max(0.0, exp - rev)
+    exposure_base = (
+        margin_gap * 0.08
+        + rev * 0.012
+        + len(red_flag_items) * 900_000.0
+        + high_red_flag_count * 2_200_000.0
+        + max(0.0, anomaly - 0.55) * 25_000_000.0
+        + max(0.0, trend_delta) * 450_000.0
+    )
+
+    recoverability_raw = (
+        0.18
+        + (score / 100.0) * 0.45
+        + min(0.15, max(0.0, anomaly - 0.5) * 0.45)
+        + min(0.14, high_red_flag_count * 0.04)
+        + (0.05 if trend_delta >= 10.0 else 0.0)
+    )
+    if 0.0 < confidence_raw < 55.0:
+        recoverability_raw -= 0.06
+
+    specialized_prediction = _predict_specialized_probability(
+        "audit_value",
+        _build_audit_model_feature_map(
+            risk_score=score,
+            anomaly_score=anomaly,
+            model_confidence=confidence_raw,
+            red_flags=red_flag_items,
+            revenue=rev,
+            total_expenses=exp,
+            f1_divergence=f1_divergence,
+            f2_ratio_limit=f2_ratio_limit,
+            f3_vat_structure=f3_vat_structure,
+            f4_peer_comparison=f4_peer_comparison,
+        ),
+    )
+
+    model_probability: Optional[float] = None
+    model_version = None
+    if specialized_prediction:
+        model_probability = float(np.clip(_to_float(specialized_prediction.get("probability"), 0.0), 0.0, 1.0))
+        model_version = str(specialized_prediction.get("model_version") or "audit-value-specialized")
+        recoverability_raw = (recoverability_raw * 0.55) + (model_probability * 0.45)
+
+    # Only let specialized probability fully drive lane escalation when contextual
+    # audit features are available (or baseline risk is not trivially low).
+    specialized_model_override_enabled = model_probability is not None and (
+        any(value is not None for value in (f1_divergence, f2_ratio_limit, f3_vat_structure, f4_peer_comparison))
+        or high_red_flag_count > 0
+        or score >= 35.0
+    )
+
+    recoverability_ratio = max(0.08, min(0.86, recoverability_raw))
+    estimated_recovery = round(max(0.0, exposure_base) * recoverability_ratio, 2)
+
+    audit_hours_estimate = round(
+        max(
+            8.0,
+            min(
+                120.0,
+                14.0 + score * 0.62 + high_red_flag_count * 4.5 + min(18.0, max(0.0, trend_delta) * 0.7),
+            ),
+        ),
+        1,
+    )
+    estimated_audit_cost = round(audit_hours_estimate * 650_000.0, 2)
+    expected_net_recovery = round(max(0.0, estimated_recovery - estimated_audit_cost), 2)
+
+    net_million = expected_net_recovery / 1_000_000.0
+    priority_raw = (
+        score * 0.55
+        + min(24.0, net_million * 0.75)
+        + min(12.0, high_red_flag_count * 3.0)
+        + (5.0 if recoverability_ratio >= 0.60 else 0.0)
+    )
+    if model_probability is not None:
+        priority_raw = (priority_raw * 0.70) + ((model_probability * 100.0) * 0.30)
+
+    priority_score = int(max(0, min(100, round(priority_raw))))
+
+    if (
+        expected_net_recovery >= 2_000_000_000.0
+        or priority_score >= 80
+        or (specialized_model_override_enabled and model_probability >= 0.80)
+    ):
+        recommended_lane = "priority_audit"
+    elif (
+        expected_net_recovery >= 800_000_000.0
+        or priority_score >= 62
+        or (specialized_model_override_enabled and model_probability >= 0.62)
+    ):
+        recommended_lane = "targeted_audit"
+    elif (
+        expected_net_recovery >= 200_000_000.0
+        or priority_score >= 45
+        or (specialized_model_override_enabled and model_probability >= 0.45)
+    ):
+        recommended_lane = "desk_review"
+    else:
+        recommended_lane = "monitor"
+
+    confidence_signal = confidence_raw
+    if model_probability is not None:
+        confidence_signal = max(confidence_raw, abs(model_probability - 0.5) * 200.0)
+
+    if confidence_signal >= 80.0:
+        confidence = "high"
+    elif confidence_signal >= 55.0:
+        confidence = "medium"
+    else:
+        confidence = "low"
+    if confidence == "low" and len(normalized_yearly_scores) >= 4:
+        confidence = "medium"
+
+    rationale_parts = [
+        f"Gia tri truy thu ky vong uoc tinh {estimated_recovery:,.0f} VND.",
+        f"Net recovery sau chi phi uoc tinh {expected_net_recovery:,.0f} VND.",
+        f"Risk score hien tai {score:.1f}/100 voi recoverability {recoverability_ratio * 100:.1f}%.",
+    ]
+    if high_red_flag_count > 0:
+        rationale_parts.append(f"Phat hien {high_red_flag_count} red flag muc cao can uu tien ho so.")
+    if trend_delta >= 8.0:
+        rationale_parts.append(f"Xu huong risk tang {trend_delta:.1f} diem so voi ky truoc.")
+    if model_probability is not None:
+        rationale_parts.append(
+            f"Mo hinh Audit ({model_version}) uoc tinh recoverability {model_probability * 100.0:.1f}%."
+        )
+
+    drivers = [
+        {
+            "key": "expected_recovery",
+            "label": "Gia tri truy thu uoc tinh",
+            "value": estimated_recovery,
+            "impact": "high" if estimated_recovery >= 1_000_000_000.0 else "medium",
+            "summary": "Tong gia tri co the truy thu neu mo thanh tra ho so nay.",
+        },
+        {
+            "key": "recoverability_ratio",
+            "label": "Ty le thu hoi",
+            "value": round(recoverability_ratio, 4),
+            "impact": "high" if recoverability_ratio >= 0.60 else "medium",
+            "summary": "Uoc tinh kha nang bien rui ro thanh gia tri thu hoi thuc te.",
+        },
+        {
+            "key": "audit_cost",
+            "label": "Chi phi thanh tra",
+            "value": estimated_audit_cost,
+            "impact": "low" if estimated_audit_cost <= 60_000_000.0 else "medium",
+            "summary": "Nguon luc can bo uoc tinh de hoan tat mot chu ky xu ly.",
+        },
+        {
+            "key": "risk_momentum",
+            "label": "Dong luc rui ro",
+            "value": round(trend_delta, 2),
+            "impact": "high" if trend_delta >= 12.0 else ("medium" if trend_delta >= 4.0 else "low"),
+            "summary": "Toc do tang risk score theo chuoi nam phan tich.",
+        },
+    ]
+
+    if model_probability is not None:
+        drivers.append(
+            {
+                "key": "audit_model_probability",
+                "label": "Xac suat mo hinh Audit",
+                "value": round(model_probability, 4),
+                "impact": "high" if model_probability >= 0.70 else ("medium" if model_probability >= 0.45 else "low"),
+                "summary": "Xac suat positive net recovery tu mo hinh Audit Value chuyen biet.",
+            }
+        )
+
+    return {
+        "estimated_recovery": estimated_recovery,
+        "expected_net_recovery": expected_net_recovery,
+        "recoverability_ratio": round(recoverability_ratio, 4),
+        "audit_hours_estimate": audit_hours_estimate,
+        "estimated_audit_cost": estimated_audit_cost,
+        "priority_score": priority_score,
+        "recommended_lane": recommended_lane,
+        "confidence": confidence,
+        "rationale": " ".join(rationale_parts),
+        "drivers": drivers,
+    }
 
 
 def _build_single_risk_tier_sankey(yearly_feature_scores: Any) -> dict[str, Any]:
@@ -758,6 +1977,24 @@ def _build_whatif_heatmap_values(
     return values
 
 
+def _build_split_trigger_status_context(snapshot_source: str) -> dict[str, Any]:
+    payload = monitoring_router.get_split_trigger_status_snapshot(
+        persist_snapshot=False,
+        snapshot_source=snapshot_source,
+    )
+    if isinstance(payload, dict):
+        return payload
+    return {
+        "ready": False,
+        "schema_ready": False,
+        "readiness_score": 0,
+        "reason": "Không thể tải split-trigger status.",
+        "track_status": {},
+        "totals": {"enabled_rules": 0, "passed_rules": 0},
+        "generated_at": datetime.utcnow().isoformat(),
+    }
+
+
 # ==================================================================
 # 1. SINGLE QUERY (Real-time)
 # ==================================================================
@@ -935,6 +2172,59 @@ def single_query(tax_code: str, db: Session = Depends(get_db)):
             "yearly_history": yearly_history,
             "source": "cached",
         }
+        response_payload["decision_intelligence"] = _build_decision_intelligence_payload(
+            risk_score=response_payload.get("risk_score"),
+            risk_level=response_payload.get("risk_level"),
+            anomaly_score=response_payload.get("anomaly_score"),
+            model_confidence=response_payload.get("model_confidence"),
+            red_flags=response_payload.get("red_flags"),
+            yearly_feature_scores=response_payload.get("yearly_feature_scores"),
+            f1_divergence=response_payload.get("f1_divergence"),
+            f2_ratio_limit=response_payload.get("f2_ratio_limit"),
+            f3_vat_structure=response_payload.get("f3_vat_structure"),
+            f4_peer_comparison=response_payload.get("f4_peer_comparison"),
+        )
+        response_payload["intervention_uplift"] = _build_intervention_uplift_payload(
+            risk_score=response_payload.get("risk_score"),
+            anomaly_score=response_payload.get("anomaly_score"),
+            red_flags=response_payload.get("red_flags"),
+            yearly_feature_scores=response_payload.get("yearly_feature_scores"),
+            model_confidence=response_payload.get("model_confidence"),
+            revenue=response_payload.get("revenue"),
+            total_expenses=response_payload.get("total_expenses"),
+        )
+        response_payload["decision_intelligence"] = _harmonize_decision_intelligence_with_intervention(
+            response_payload.get("decision_intelligence"),
+            response_payload.get("intervention_uplift"),
+        )
+        response_payload["vat_refund_signals"] = _build_vat_refund_signals_payload(
+            risk_score=response_payload.get("risk_score"),
+            anomaly_score=response_payload.get("anomaly_score"),
+            red_flags=response_payload.get("red_flags"),
+            yearly_feature_scores=response_payload.get("yearly_feature_scores"),
+            f2_ratio_limit=response_payload.get("f2_ratio_limit"),
+            f3_vat_structure=response_payload.get("f3_vat_structure"),
+            revenue=response_payload.get("revenue"),
+            total_expenses=response_payload.get("total_expenses"),
+            f1_divergence=response_payload.get("f1_divergence"),
+            f4_peer_comparison=response_payload.get("f4_peer_comparison"),
+        )
+        response_payload["audit_value"] = _build_audit_value_payload(
+            risk_score=response_payload.get("risk_score"),
+            anomaly_score=response_payload.get("anomaly_score"),
+            model_confidence=response_payload.get("model_confidence"),
+            red_flags=response_payload.get("red_flags"),
+            yearly_feature_scores=response_payload.get("yearly_feature_scores"),
+            revenue=response_payload.get("revenue"),
+            total_expenses=response_payload.get("total_expenses"),
+            f1_divergence=response_payload.get("f1_divergence"),
+            f2_ratio_limit=response_payload.get("f2_ratio_limit"),
+            f3_vat_structure=response_payload.get("f3_vat_structure"),
+            f4_peer_comparison=response_payload.get("f4_peer_comparison"),
+        )
+        response_payload["split_trigger_status"] = _build_split_trigger_status_context(
+            snapshot_source="ai_single_query_cached",
+        )
         _append_fraud_inference_metric(response_payload, source="cached")
         return response_payload
 
@@ -1044,6 +2334,60 @@ def single_query(tax_code: str, db: Session = Depends(get_db)):
                 revenue=result.get("revenue"),
                 total_expenses=result.get("total_expenses"),
             )
+        )
+
+        result["decision_intelligence"] = _build_decision_intelligence_payload(
+            risk_score=result.get("risk_score"),
+            risk_level=result.get("risk_level"),
+            anomaly_score=result.get("anomaly_score"),
+            model_confidence=result.get("model_confidence"),
+            red_flags=result.get("red_flags"),
+            yearly_feature_scores=result.get("yearly_feature_scores"),
+            f1_divergence=result.get("f1_divergence"),
+            f2_ratio_limit=result.get("f2_ratio_limit"),
+            f3_vat_structure=result.get("f3_vat_structure"),
+            f4_peer_comparison=result.get("f4_peer_comparison"),
+        )
+        result["intervention_uplift"] = _build_intervention_uplift_payload(
+            risk_score=result.get("risk_score"),
+            anomaly_score=result.get("anomaly_score"),
+            red_flags=result.get("red_flags"),
+            yearly_feature_scores=result.get("yearly_feature_scores"),
+            model_confidence=result.get("model_confidence"),
+            revenue=result.get("revenue"),
+            total_expenses=result.get("total_expenses"),
+        )
+        result["decision_intelligence"] = _harmonize_decision_intelligence_with_intervention(
+            result.get("decision_intelligence"),
+            result.get("intervention_uplift"),
+        )
+        result["vat_refund_signals"] = _build_vat_refund_signals_payload(
+            risk_score=result.get("risk_score"),
+            anomaly_score=result.get("anomaly_score"),
+            red_flags=result.get("red_flags"),
+            yearly_feature_scores=result.get("yearly_feature_scores"),
+            f2_ratio_limit=result.get("f2_ratio_limit"),
+            f3_vat_structure=result.get("f3_vat_structure"),
+            revenue=result.get("revenue"),
+            total_expenses=result.get("total_expenses"),
+            f1_divergence=result.get("f1_divergence"),
+            f4_peer_comparison=result.get("f4_peer_comparison"),
+        )
+        result["audit_value"] = _build_audit_value_payload(
+            risk_score=result.get("risk_score"),
+            anomaly_score=result.get("anomaly_score"),
+            model_confidence=result.get("model_confidence"),
+            red_flags=result.get("red_flags"),
+            yearly_feature_scores=result.get("yearly_feature_scores"),
+            revenue=result.get("revenue"),
+            total_expenses=result.get("total_expenses"),
+            f1_divergence=result.get("f1_divergence"),
+            f2_ratio_limit=result.get("f2_ratio_limit"),
+            f3_vat_structure=result.get("f3_vat_structure"),
+            f4_peer_comparison=result.get("f4_peer_comparison"),
+        )
+        result["split_trigger_status"] = _build_split_trigger_status_context(
+            snapshot_source="ai_single_query_realtime",
         )
 
         _append_fraud_inference_metric(result, source="realtime")
@@ -1160,14 +2504,26 @@ def list_companies(
     for row in rows:
         latest_assessment_at = row[7].isoformat() if row[7] else None
         assessment_count = int(row[6] or 0)
+        display_risk_score = round(_to_float(row[4], 0.0), 2)
+        intervention = _build_intervention_uplift_payload(
+            risk_score=display_risk_score,
+            anomaly_score=0.0,
+            red_flags=[],
+            yearly_feature_scores=[],
+            model_confidence=65.0 if assessment_count > 0 else 0.0,
+            revenue=0.0,
+            total_expenses=0.0,
+        )
         results.append(
             {
                 "tax_code": row[0],
                 "name": row[1],
                 "industry": row[2],
                 "is_active": bool(row[3]),
-                "risk_score": round(_to_float(row[4], 0.0), 2),
+                "risk_score": display_risk_score,
                 "latest_risk_score": round(_to_float(row[5], 0.0), 2) if row[5] is not None else None,
+                "intervention_action": intervention.get("recommended_action"),
+                "intervention_priority": int(intervention.get("priority_score") or 0),
                 "assessment_count": assessment_count,
                 "latest_assessment_at": latest_assessment_at,
                 "assessed": assessment_count > 0,
@@ -1657,6 +3013,21 @@ def submit_inspector_label(
                 detail="assessment_id không khớp với tax_code.",
             )
 
+    resolved_intervention_attempted = bool(label.intervention_attempted or label.decision)
+    resolved_outcome_status = label.outcome_status
+    if resolved_outcome_status is None:
+        if (label.amount_recovered or 0) > 0:
+            resolved_outcome_status = "recovered"
+        elif resolved_intervention_attempted:
+            resolved_outcome_status = "in_progress"
+        else:
+            resolved_outcome_status = "pending"
+
+    terminal_status = {"recovered", "partial_recovered", "unrecoverable", "dismissed"}
+    resolved_outcome_recorded_at = label.outcome_recorded_at
+    if resolved_outcome_recorded_at is None and resolved_outcome_status in terminal_status:
+        resolved_outcome_recorded_at = datetime.utcnow()
+
     new_label = models.InspectorLabel(
         tax_code=label.tax_code,
         inspector_id=current_user.id,
@@ -1668,6 +3039,17 @@ def submit_inspector_label(
         decision_date=label.decision_date,
         tax_period=label.tax_period,
         amount_recovered=label.amount_recovered,
+        intervention_action=label.intervention_action,
+        intervention_attempted=resolved_intervention_attempted,
+        outcome_status=resolved_outcome_status,
+        predicted_collection_uplift=label.predicted_collection_uplift,
+        expected_recovery=label.expected_recovery,
+        expected_net_recovery=label.expected_net_recovery,
+        estimated_audit_cost=label.estimated_audit_cost,
+        actual_audit_cost=label.actual_audit_cost,
+        actual_audit_hours=label.actual_audit_hours,
+        outcome_recorded_at=resolved_outcome_recorded_at,
+        kpi_window_days=label.kpi_window_days,
     )
     db.add(new_label)
     db.commit()

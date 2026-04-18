@@ -43,6 +43,50 @@ FRAUD_CALIBRATOR_FILENAME = "fraud_calibrator.joblib"
 FRAUD_MANIFEST_FILENAME = "fraud_model_manifest.json"
 
 
+def _fit_safe_pca_projection(matrix: np.ndarray) -> Optional[dict]:
+    if not PCA_AVAILABLE or matrix is None:
+        return None
+
+    try:
+        matrix_np = np.asarray(matrix, dtype=float)
+    except Exception:
+        return None
+
+    if matrix_np.ndim != 2 or matrix_np.shape[0] < 2 or matrix_np.shape[1] < 2:
+        return None
+
+    matrix_np = np.nan_to_num(matrix_np, nan=0.0, posinf=0.0, neginf=0.0)
+    non_zero_variance_cols = int(np.sum(np.var(matrix_np, axis=0) > 0.0))
+    if non_zero_variance_cols < 2:
+        return None
+
+    try:
+        from sklearn.preprocessing import StandardScaler
+
+        scaler = StandardScaler()
+        matrix_scaled = scaler.fit_transform(matrix_np)
+        matrix_scaled = np.nan_to_num(matrix_scaled, nan=0.0, posinf=0.0, neginf=0.0)
+
+        pca_model = PCA(n_components=2)
+        coords = pca_model.fit_transform(matrix_scaled)
+    except Exception:
+        return None
+
+    explained = np.nan_to_num(
+        getattr(pca_model, "explained_variance_ratio_", np.array([0.0, 0.0])),
+        nan=0.0,
+        posinf=0.0,
+        neginf=0.0,
+    )
+
+    return {
+        "coords": coords,
+        "explained_variance_ratio": explained,
+        "scaler": scaler,
+        "pca_model": pca_model,
+    }
+
+
 class TaxFraudPipeline:
     """
     Hybrid AI Pipeline for Tax Fraud Detection.
@@ -558,13 +602,13 @@ class TaxFraudPipeline:
         pca_features = ["f1_divergence", "f2_ratio_limit", "f3_vat_structure", "f4_peer_comparison"]
         pca_available_cols = [c for c in pca_features if c in df_stats.columns]
 
+        pca_projection = None
         if PCA_AVAILABLE and len(pca_available_cols) >= 2:
-            from sklearn.preprocessing import StandardScaler
             pca_matrix = df_stats[pca_available_cols].fillna(0).values
-            pca_matrix_scaled = StandardScaler().fit_transform(pca_matrix)
-            pca = PCA(n_components=2)
-            coords_2d = pca.fit_transform(pca_matrix_scaled)
-            explained = pca.explained_variance_ratio_
+            pca_projection = _fit_safe_pca_projection(pca_matrix)
+
+        if pca_projection is not None:
+            coords_2d = pca_projection["coords"]
 
             for i in range(len(df_stats)):
                 scatter_data.append({
@@ -928,14 +972,11 @@ class TaxFraudPipeline:
 
         # ---- Contour Grid (Isolation Forest decision boundary in PCA space) ----
         contour_data = None
-        if PCA_AVAILABLE and len(pca_available_cols) >= 2:
+        if pca_projection is not None:
             try:
-                from sklearn.preprocessing import StandardScaler
-                pca_matrix = df_stats[pca_available_cols].fillna(0).values
-                scaler = StandardScaler()
-                pca_matrix_scaled = scaler.fit_transform(pca_matrix)
-                pca_model = PCA(n_components=2)
-                coords = pca_model.fit_transform(pca_matrix_scaled)
+                scaler = pca_projection["scaler"]
+                pca_model = pca_projection["pca_model"]
+                coords = pca_projection["coords"]
 
                 # Build a grid over PCA space
                 x_min, x_max = coords[:, 0].min() - 1, coords[:, 0].max() + 1

@@ -215,8 +215,61 @@ class InspectorLabel(Base):
     decision_date = Column(Date, nullable=True)
     tax_period = Column(String(20), nullable=True)
     amount_recovered = Column(Numeric(18, 2), nullable=True)
+    intervention_action = Column(String(50), nullable=True)  # monitor/auto_reminder/structured_outreach/field_audit/escalated_enforcement
+    intervention_attempted = Column(Boolean, nullable=False, default=False)
+    outcome_status = Column(String(30), nullable=True)       # pending/in_progress/recovered/partial_recovered/unrecoverable/dismissed
+    predicted_collection_uplift = Column(Numeric(18, 2), nullable=True)
+    expected_recovery = Column(Numeric(18, 2), nullable=True)
+    expected_net_recovery = Column(Numeric(18, 2), nullable=True)
+    estimated_audit_cost = Column(Numeric(18, 2), nullable=True)
+    actual_audit_cost = Column(Numeric(18, 2), nullable=True)
+    actual_audit_hours = Column(Float, nullable=True)
+    outcome_recorded_at = Column(DateTime(timezone=True), nullable=True)
+    kpi_window_days = Column(Integer, nullable=False, default=90)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class KPITriggerPolicy(Base):
+    """
+    Governance rules for split-trigger readiness decisions.
+    Each row defines one metric gate for one model track.
+    """
+    __tablename__ = "kpi_trigger_policies"
+
+    id = Column(Integer, primary_key=True, index=True)
+    track_name = Column(String(50), nullable=False, index=True)      # audit_value | vat_refund | intervention
+    metric_name = Column(String(80), nullable=False, index=True)      # precision_top_50 | roi_positive_rate | fn_high_risk
+    comparator = Column(String(8), nullable=False, default=">=")     # >= | > | <= | < | ==
+    threshold = Column(Float, nullable=False)
+    min_sample = Column(Integer, nullable=False, default=50)
+    window_days = Column(Integer, nullable=False, default=28)
+    cooldown_days = Column(Integer, nullable=False, default=14)
+    enabled = Column(Boolean, nullable=False, default=True)
+    rationale = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class KPIMetricSnapshot(Base):
+    """
+    Point-in-time KPI values used to track split-trigger readiness over time.
+    """
+    __tablename__ = "kpi_metric_snapshots"
+
+    id = Column(Integer, primary_key=True, index=True)
+    track_name = Column(String(50), nullable=False, index=True)
+    metric_name = Column(String(80), nullable=False, index=True)
+    metric_value = Column(Float, nullable=True)
+    sample_size = Column(Integer, nullable=False, default=0)
+    comparator = Column(String(8), nullable=True)
+    threshold = Column(Float, nullable=True)
+    status = Column(String(30), nullable=False, default="no_metric")
+    window_days = Column(Integer, nullable=False, default=28)
+    source = Column(String(80), nullable=False, default="split_trigger_status")
+    details = Column(JSON, nullable=True)
+    generated_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
 class OwnershipLink(Base):

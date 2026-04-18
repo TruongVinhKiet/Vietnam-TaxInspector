@@ -1,6 +1,10 @@
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel as PydanticBaseModel, ConfigDict, Field
 from typing import Optional, List, Literal, Dict, Any
 from datetime import date, datetime
+
+
+class BaseModel(PydanticBaseModel):
+    model_config = ConfigDict(protected_namespaces=())
 
 
 # --- Auth/Token Schemas ---
@@ -50,7 +54,7 @@ class UserCreate(UserBase):
     password: str = Field(min_length=8, max_length=128)
 
 class UserResponse(UserBase):
-    model_config = ConfigDict(from_attributes=True)
+    model_config = ConfigDict(from_attributes=True, protected_namespaces=())
     id: int
     avatar_data: Optional[str] = None
     face_verified: bool = False
@@ -110,7 +114,7 @@ class CompanyCreate(CompanyBase):
 
 
 class CompanyResponse(CompanyBase):
-    model_config = ConfigDict(from_attributes=True)
+    model_config = ConfigDict(from_attributes=True, protected_namespaces=())
 
     risk_score: float
     is_active: bool
@@ -258,6 +262,88 @@ class SingleRedFlagsTimelinePayload(BaseModel):
     flags: List[SingleRedFlagsTimelineFlag] = Field(default_factory=list)
 
 
+class DecisionIntelligenceSignal(BaseModel):
+    key: str
+    label: str
+    value: Optional[float] = None
+    severity: Literal["low", "medium", "high"] = "medium"
+    summary: str = ""
+
+
+class DecisionIntelligencePayload(BaseModel):
+    recommended_action: Literal[
+        "periodic_monitoring",
+        "enhanced_monitoring",
+        "targeted_review",
+        "urgent_audit",
+    ] = "periodic_monitoring"
+    action_label: str = "Theo doi dinh ky"
+    action_deadline_days: int = 30
+    priority_score: int = 0
+    rationale: str = ""
+    next_steps: List[str] = Field(default_factory=list)
+    top_signals: List[DecisionIntelligenceSignal] = Field(default_factory=list)
+    should_escalate: bool = False
+
+
+class InterventionUpliftPayload(BaseModel):
+    recommended_action: Literal[
+        "monitor",
+        "auto_reminder",
+        "structured_outreach",
+        "field_audit",
+        "escalated_enforcement",
+    ] = "monitor"
+    priority_score: int = 0
+    expected_risk_reduction_pp: float = 0.0
+    expected_penalty_saving: float = 0.0
+    expected_collection_uplift: float = 0.0
+    confidence: Literal["low", "medium", "high"] = "medium"
+    rationale: str = ""
+    next_steps: List[str] = Field(default_factory=list)
+
+
+class VATRefundSignalIndicator(BaseModel):
+    key: str
+    label: str
+    value: Optional[float] = None
+    severity: Literal["low", "medium", "high"] = "medium"
+    summary: str = ""
+
+
+class VATRefundSignalsPayload(BaseModel):
+    has_signal: bool = False
+    queue: Literal["monitor", "refund_watchlist", "priority_refund_audit"] = "monitor"
+    level: Literal["low", "medium", "high", "critical"] = "low"
+    score: int = 0
+    rationale: str = ""
+    vat_input_output_ratio: Optional[float] = None
+    estimated_refund_gap: Optional[float] = None
+    recommended_checks: List[str] = Field(default_factory=list)
+    indicators: List[VATRefundSignalIndicator] = Field(default_factory=list)
+
+
+class AuditValueDriver(BaseModel):
+    key: str
+    label: str
+    value: Optional[float] = None
+    impact: Literal["low", "medium", "high"] = "medium"
+    summary: str = ""
+
+
+class AuditValuePayload(BaseModel):
+    estimated_recovery: float = 0.0
+    expected_net_recovery: float = 0.0
+    recoverability_ratio: float = 0.0
+    audit_hours_estimate: float = 0.0
+    estimated_audit_cost: float = 0.0
+    priority_score: int = 0
+    recommended_lane: Literal["monitor", "desk_review", "targeted_audit", "priority_audit"] = "monitor"
+    confidence: Literal["low", "medium", "high"] = "medium"
+    rationale: str = ""
+    drivers: List[AuditValueDriver] = Field(default_factory=list)
+
+
 class RiskAssessmentDetail(BaseModel):
     tax_code: str
     company_name: Optional[str] = None
@@ -284,6 +370,11 @@ class RiskAssessmentDetail(BaseModel):
     single_cumulative_risk_curve: SingleCumulativeRiskCurvePayload = Field(default_factory=SingleCumulativeRiskCurvePayload)
     single_margin_distribution: SingleMarginDistributionPayload = Field(default_factory=SingleMarginDistributionPayload)
     single_red_flags_timeline: SingleRedFlagsTimelinePayload = Field(default_factory=SingleRedFlagsTimelinePayload)
+    decision_intelligence: DecisionIntelligencePayload = Field(default_factory=DecisionIntelligencePayload)
+    intervention_uplift: InterventionUpliftPayload = Field(default_factory=InterventionUpliftPayload)
+    vat_refund_signals: VATRefundSignalsPayload = Field(default_factory=VATRefundSignalsPayload)
+    audit_value: AuditValuePayload = Field(default_factory=AuditValuePayload)
+    split_trigger_status: Dict[str, Any] = Field(default_factory=dict)
     source: Literal["cached", "realtime"] = "realtime"
     history_source: str = "unavailable"
     history_year_count: int = 0
@@ -296,6 +387,14 @@ class RiskCompanyListItem(BaseModel):
     is_active: bool = True
     risk_score: float = 0.0
     latest_risk_score: Optional[float] = None
+    intervention_action: Optional[Literal[
+        "monitor",
+        "auto_reminder",
+        "structured_outreach",
+        "field_audit",
+        "escalated_enforcement",
+    ]] = None
+    intervention_priority: Optional[int] = None
     assessment_count: int = 0
     latest_assessment_at: Optional[str] = None
     assessed: bool = False
@@ -427,6 +526,32 @@ class DelinquencyTopReason(BaseModel):
     reason: str
     weight: float = 0.0
 
+
+class DelinquencyEarlyWarning(BaseModel):
+    has_warning: bool = False
+    queue: Literal["monitor", "watchlist", "priority_review"] = "monitor"
+    level: Literal["low", "medium", "high", "critical"] = "low"
+    tags: List[str] = Field(default_factory=list)
+    reason: str = ""
+    metrics: Dict[str, Any] = Field(default_factory=dict)
+
+
+class DelinquencyInterventionUplift(BaseModel):
+    recommended_action: Literal[
+        "monitor",
+        "auto_reminder",
+        "structured_outreach",
+        "field_audit",
+        "escalated_enforcement",
+    ] = "monitor"
+    priority_score: int = 0
+    expected_risk_reduction_pp: float = 0.0
+    expected_penalty_saving: float = 0.0
+    expected_collection_uplift: float = 0.0
+    confidence: Literal["low", "medium", "high"] = "medium"
+    rationale: str = ""
+    next_steps: List[str] = Field(default_factory=list)
+
 class DelinquencyPredictionItem(BaseModel):
     """Single company delinquency prediction – replaces old mock DelinquencyPrediction."""
     tax_code: str
@@ -444,6 +569,9 @@ class DelinquencyPredictionItem(BaseModel):
     prediction_age_days: Optional[int] = None
     freshness: Literal["fresh", "aging", "stale", "unknown"] = "unknown"
     monotonic_adjusted: bool = False
+    early_warning: DelinquencyEarlyWarning = Field(default_factory=DelinquencyEarlyWarning)
+    intervention_uplift: DelinquencyInterventionUplift = Field(default_factory=DelinquencyInterventionUplift)
+    split_trigger_status: Dict[str, Any] = Field(default_factory=dict)
     payment_history_summary: Optional[Dict[str, Any]] = None
 
 class DelinquencyListResponse(BaseModel):
@@ -508,9 +636,33 @@ class InspectorLabelCreate(BaseModel):
     decision_date: Optional[date] = None
     tax_period: Optional[str] = None
     amount_recovered: Optional[float] = None
+    intervention_action: Optional[Literal[
+        "monitor",
+        "auto_reminder",
+        "structured_outreach",
+        "field_audit",
+        "escalated_enforcement",
+    ]] = None
+    intervention_attempted: bool = False
+    outcome_status: Optional[Literal[
+        "pending",
+        "in_progress",
+        "recovered",
+        "partial_recovered",
+        "unrecoverable",
+        "dismissed",
+    ]] = None
+    predicted_collection_uplift: Optional[float] = None
+    expected_recovery: Optional[float] = None
+    expected_net_recovery: Optional[float] = None
+    estimated_audit_cost: Optional[float] = None
+    actual_audit_cost: Optional[float] = None
+    actual_audit_hours: Optional[float] = None
+    outcome_recorded_at: Optional[datetime] = None
+    kpi_window_days: int = Field(default=90, ge=7, le=365)
 
 class InspectorLabelResponse(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
+    model_config = ConfigDict(from_attributes=True, protected_namespaces=())
     id: int
     tax_code: str
     inspector_id: Optional[int] = None
@@ -522,6 +674,17 @@ class InspectorLabelResponse(BaseModel):
     decision_date: Optional[date] = None
     tax_period: Optional[str] = None
     amount_recovered: Optional[float] = None
+    intervention_action: Optional[str] = None
+    intervention_attempted: bool = False
+    outcome_status: Optional[str] = None
+    predicted_collection_uplift: Optional[float] = None
+    expected_recovery: Optional[float] = None
+    expected_net_recovery: Optional[float] = None
+    estimated_audit_cost: Optional[float] = None
+    actual_audit_cost: Optional[float] = None
+    actual_audit_hours: Optional[float] = None
+    outcome_recorded_at: Optional[datetime] = None
+    kpi_window_days: int = 90
     created_at: Optional[datetime] = None
 
 
@@ -556,7 +719,7 @@ class MultiScenarioResponse(BaseModel):
 
 # --- Ownership / Company Network ---
 class OwnershipLinkItem(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
+    model_config = ConfigDict(from_attributes=True, protected_namespaces=())
     id: int
     parent_tax_code: str
     child_tax_code: str

@@ -56,6 +56,32 @@ class _BatchCandidateDB:
         return _StaticRowsQuery(self._rows)
 
 
+class _EarlyWarningQuery:
+    def __init__(self, rows=None, scalar_value=0):
+        self._rows = rows or []
+        self._scalar_value = scalar_value
+
+    def filter(self, *_args, **_kwargs):
+        return self
+
+    def all(self):
+        return self._rows
+
+    def scalar(self):
+        return self._scalar_value
+
+
+class _EarlyWarningDB:
+    def __init__(self, due_rows=None, filed_returns=0):
+        self._due_rows = due_rows or []
+        self._filed_returns = filed_returns
+
+    def query(self, *args, **_kwargs):
+        if len(args) >= 2:
+            return _EarlyWarningQuery(rows=self._due_rows)
+        return _EarlyWarningQuery(scalar_value=self._filed_returns)
+
+
 def test_router_normalize_horizon_probs_monotonic():
     p30, p60, p90, adjusted = delinquency._normalize_horizon_probs(0.82, 0.33, 0.25)
 
@@ -80,6 +106,103 @@ def test_baseline_prediction_no_data_contract_fields():
     assert result["freshness"] == "unknown"
     assert result["prediction_age_days"] is None
     assert result["monotonic_adjusted"] is False
+    assert "early_warning" in result
+    assert "intervention_uplift" in result
+    assert result["intervention_uplift"]["recommended_action"] == "monitor"
+
+
+def test_early_warning_non_filer_priority_review():
+    today = date.today()
+    due_rows = [
+        (today - timedelta(days=20), None),
+        (today - timedelta(days=45), None),
+        (today - timedelta(days=80), None),
+    ]
+    db = _EarlyWarningDB(due_rows=due_rows, filed_returns=0)
+    summary = {
+        "late_count": 3,
+        "avg_days_late": 18,
+    }
+
+    warning = delinquency._build_early_warning_payload(db, "010123", summary)
+
+    assert warning["has_warning"] is True
+    assert warning["queue"] == "priority_review"
+    assert warning["level"] in {"high", "critical"}
+    assert "non_filer" in warning["tags"]
+
+
+def test_early_warning_monitor_when_behavior_is_stable():
+    today = date.today()
+    due_rows = [
+        (today - timedelta(days=25), today - timedelta(days=22)),
+        (today - timedelta(days=70), today - timedelta(days=68)),
+        (today - timedelta(days=120), today - timedelta(days=118)),
+    ]
+    db = _EarlyWarningDB(due_rows=due_rows, filed_returns=3)
+    summary = {
+        "late_count": 0,
+        "avg_days_late": 0,
+    }
+
+    warning = delinquency._build_early_warning_payload(db, "010124", summary)
+
+    assert warning["has_warning"] is False
+    assert warning["queue"] == "monitor"
+    assert warning["level"] == "low"
+
+
+def test_intervention_uplift_escalated_for_priority_review_case():
+    payload = delinquency._build_intervention_uplift_payload(
+        probability=0.87,
+        prob_30d=0.72,
+        prob_60d=0.82,
+        prob_90d=0.87,
+        payment_history_summary={
+            "total_periods": 8,
+            "late_count": 5,
+            "unpaid_count": 3,
+            "avg_days_late": 22,
+            "total_penalties": 24000000,
+        },
+        early_warning={
+            "queue": "priority_review",
+            "level": "critical",
+            "reason": "Co nhieu ky qua han chua nop.",
+        },
+    )
+
+    assert payload["recommended_action"] == "escalated_enforcement"
+    assert payload["priority_score"] >= 80
+    assert payload["expected_risk_reduction_pp"] > 0
+    assert payload["expected_penalty_saving"] > 0
+    assert payload["expected_collection_uplift"] > 0
+    assert len(payload["next_steps"]) >= 2
+
+
+def test_intervention_uplift_monitor_for_low_risk_case():
+    payload = delinquency._build_intervention_uplift_payload(
+        probability=0.08,
+        prob_30d=0.05,
+        prob_60d=0.06,
+        prob_90d=0.08,
+        payment_history_summary={
+            "total_periods": 4,
+            "late_count": 0,
+            "unpaid_count": 0,
+            "avg_days_late": 0,
+            "total_penalties": 0,
+        },
+        early_warning={
+            "queue": "monitor",
+            "level": "low",
+            "reason": "Hanh vi on dinh.",
+        },
+    )
+
+    assert payload["recommended_action"] == "monitor"
+    assert payload["priority_score"] <= 20
+    assert payload["expected_risk_reduction_pp"] >= 0
 
 
 def test_model_normalize_horizon_probs_monotonic():

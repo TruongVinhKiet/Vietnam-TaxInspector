@@ -17,12 +17,13 @@ Endpoints:
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import func, desc, and_
-from typing import Optional
+from typing import Optional, Any
 from datetime import date, datetime, timedelta
 from collections import Counter
 
 from ..database import get_db
 from .. import models, schemas
+from . import monitoring as monitoring_router
 from ..risk_utils import classify_delinquency_cluster
 from ..observability import get_structured_logger, log_event
 
@@ -134,6 +135,24 @@ def _collect_model_versions(items: list[dict]) -> list[str]:
         if item.get("model_version")
     }
     return sorted(v for v in versions if v)
+
+
+def _build_split_trigger_status_context(snapshot_source: str = "delinquency_detail") -> dict[str, Any]:
+    payload = monitoring_router.get_split_trigger_status_snapshot(
+        persist_snapshot=False,
+        snapshot_source=snapshot_source,
+    )
+    if isinstance(payload, dict):
+        return payload
+    return {
+        "ready": False,
+        "schema_ready": False,
+        "readiness_score": 0,
+        "reason": "Không thể tải split-trigger status.",
+        "track_status": {},
+        "totals": {"enabled_rules": 0, "passed_rules": 0},
+        "generated_at": datetime.utcnow().isoformat(),
+    }
 
 
 def _infer_score_source_from_model_version(model_version: Optional[str]) -> str:
@@ -499,6 +518,254 @@ def _build_payment_history_summary(db: Session, tax_code: str) -> dict:
     }
 
 
+def _build_early_warning_payload(
+    db: Session,
+    tax_code: str,
+    payment_history_summary: Optional[dict[str, Any]] = None,
+) -> dict[str, Any]:
+    """
+    Build early warning signals for non-filer / under-filer workflows.
+
+    Heuristics are intentionally conservative and use recent 180-day windows so
+    they remain stable for list/detail rendering without requiring extra tables.
+    """
+    summary = payment_history_summary if isinstance(payment_history_summary, dict) else _build_payment_history_summary(db, tax_code)
+
+    lookback_days = 180
+    since = date.today() - timedelta(days=lookback_days)
+
+    due_rows = (
+        db.query(models.TaxPayment.due_date, models.TaxPayment.actual_payment_date)
+        .filter(
+            models.TaxPayment.tax_code == tax_code,
+            models.TaxPayment.due_date >= since,
+            models.TaxPayment.due_date <= date.today(),
+        )
+        .all()
+    )
+    due_periods = len(due_rows)
+    unpaid_due_periods = sum(1 for due_date, paid_date in due_rows if due_date and due_date < date.today() and paid_date is None)
+
+    filed_query = (
+        db.query(func.count(models.TaxReturn.id))
+        .filter(
+            models.TaxReturn.tax_code == tax_code,
+            models.TaxReturn.filing_date >= since,
+            models.TaxReturn.filing_date <= date.today(),
+        )
+    )
+    filed_returns = filed_query.scalar() if hasattr(filed_query, "scalar") else 0
+    filed_returns_count = int(filed_returns or 0)
+
+    filing_coverage = round(filed_returns_count / due_periods, 3) if due_periods > 0 else None
+    unpaid_ratio = round(unpaid_due_periods / due_periods, 3) if due_periods > 0 else 0.0
+
+    level_order = {"low": 0, "medium": 1, "high": 2, "critical": 3}
+    queue_order = {"monitor": 0, "watchlist": 1, "priority_review": 2}
+
+    level = "low"
+    queue = "monitor"
+    tags: list[str] = []
+    reasons: list[str] = []
+
+    def _raise_priority(next_level: str, next_queue: str, tag: str, reason: str) -> None:
+        nonlocal level, queue
+        if level_order.get(next_level, 0) > level_order.get(level, 0):
+            level = next_level
+        if queue_order.get(next_queue, 0) > queue_order.get(queue, 0):
+            queue = next_queue
+        if tag not in tags:
+            tags.append(tag)
+        if reason and reason not in reasons:
+            reasons.append(reason)
+
+    if due_periods >= 2 and filed_returns_count == 0:
+        _raise_priority(
+            "critical",
+            "priority_review",
+            "non_filer",
+            f"Không ghi nhận tờ khai trong {due_periods} kỳ nghĩa vụ gần nhất (6 tháng).",
+        )
+    elif due_periods >= 3 and filing_coverage is not None and filing_coverage < 0.5:
+        _raise_priority(
+            "high",
+            "priority_review",
+            "under_filer",
+            f"Tỷ lệ nộp tờ khai thấp ({int(round(filing_coverage * 100))}%) so với số kỳ nghĩa vụ phát sinh.",
+        )
+    elif due_periods >= 3 and filing_coverage is not None and filing_coverage < 0.8:
+        _raise_priority(
+            "medium",
+            "watchlist",
+            "filing_gap",
+            f"Tỷ lệ nộp tờ khai chưa đạt ngưỡng an toàn ({int(round(filing_coverage * 100))}%).",
+        )
+
+    if unpaid_ratio >= 0.4:
+        _raise_priority(
+            "high",
+            "priority_review",
+            "unpaid_due",
+            f"Có {unpaid_due_periods}/{due_periods} kỳ quá hạn chưa nộp tiền thuế.",
+        )
+    elif unpaid_ratio >= 0.2:
+        _raise_priority(
+            "medium",
+            "watchlist",
+            "unpaid_due",
+            f"Ghi nhận {unpaid_due_periods}/{due_periods} kỳ nghĩa vụ chưa nộp đúng hạn.",
+        )
+
+    late_count = int(summary.get("late_count") or 0)
+    avg_days_late = float(summary.get("avg_days_late") or 0)
+    if late_count >= 4 and avg_days_late >= 15:
+        _raise_priority(
+            "medium",
+            "watchlist",
+            "persistent_late",
+            f"Lịch sử trễ hạn kéo dài ({late_count} kỳ, trung bình {avg_days_late:.1f} ngày).",
+        )
+
+    has_warning = level != "low"
+    if has_warning:
+        primary_reason = reasons[0] if reasons else "Phát hiện tín hiệu non-filer/under-filer cần theo dõi."
+    else:
+        primary_reason = "Chưa ghi nhận tín hiệu non-filer/under-filer đáng kể trong kỳ gần đây."
+
+    return {
+        "has_warning": has_warning,
+        "queue": queue,
+        "level": level,
+        "tags": tags,
+        "reason": primary_reason,
+        "metrics": {
+            "lookback_days": lookback_days,
+            "due_periods": due_periods,
+            "filed_returns": filed_returns_count,
+            "filing_coverage": filing_coverage,
+            "unpaid_due_periods": unpaid_due_periods,
+            "unpaid_ratio": unpaid_ratio,
+            "late_count": late_count,
+            "avg_days_late": round(avg_days_late, 1),
+        },
+    }
+
+
+def _build_intervention_uplift_payload(
+    probability: Optional[float],
+    prob_30d: Optional[float],
+    prob_60d: Optional[float],
+    prob_90d: Optional[float],
+    payment_history_summary: Optional[dict[str, Any]] = None,
+    early_warning: Optional[dict[str, Any]] = None,
+) -> dict[str, Any]:
+    """Build intervention recommendation and expected uplift for company-level detail."""
+    p30, p60, p90, _ = _normalize_horizon_probs(prob_30d, prob_60d, prob_90d)
+    overall_probability = max(_to_probability(probability), p30, p60, p90)
+
+    summary = payment_history_summary if isinstance(payment_history_summary, dict) else {}
+    warning = early_warning if isinstance(early_warning, dict) else {}
+
+    queue = str(warning.get("queue") or "monitor").strip().lower()
+    level = str(warning.get("level") or "low").strip().lower()
+    warning_reason = str(warning.get("reason") or "").strip()
+
+    total_periods = int(summary.get("total_periods") or 0)
+    unpaid_count = int(summary.get("unpaid_count") or 0)
+    late_count = int(summary.get("late_count") or 0)
+    avg_days_late = float(summary.get("avg_days_late") or 0)
+    total_penalties = float(summary.get("total_penalties") or 0)
+
+    if queue == "priority_review" or level in {"critical", "high"} or overall_probability >= 0.8 or unpaid_count >= 4:
+        action = "escalated_enforcement"
+    elif overall_probability >= 0.65 or unpaid_count >= 2 or (late_count >= 4 and avg_days_late >= 15):
+        action = "field_audit"
+    elif overall_probability >= 0.4 or queue == "watchlist" or late_count >= 2:
+        action = "structured_outreach"
+    elif overall_probability >= 0.2 or late_count >= 1:
+        action = "auto_reminder"
+    else:
+        action = "monitor"
+
+    if total_periods >= 6:
+        confidence = "high"
+    elif total_periods >= 3:
+        confidence = "medium"
+    else:
+        confidence = "low"
+
+    queue_bonus = 15 if queue == "priority_review" else (8 if queue == "watchlist" else 0)
+    priority_score = int(
+        round(
+            min(
+                100,
+                max(
+                    0,
+                    overall_probability * 70 + unpaid_count * 7 + late_count * 4 + queue_bonus,
+                ),
+            )
+        )
+    )
+
+    impact_ratio_map = {
+        "monitor": 0.05,
+        "auto_reminder": 0.12,
+        "structured_outreach": 0.2,
+        "field_audit": 0.3,
+        "escalated_enforcement": 0.38,
+    }
+    impact_ratio = impact_ratio_map.get(action, 0.12)
+
+    expected_risk_reduction_pp = round(overall_probability * impact_ratio * 100, 1)
+    expected_penalty_saving = round(total_penalties * min(0.9, impact_ratio + 0.12), 2) if total_penalties > 0 else 0.0
+
+    base_recoverable_vnd = max(0.0, unpaid_count * 2_500_000 + late_count * 800_000)
+    expected_collection_uplift = round(base_recoverable_vnd * impact_ratio, 2)
+
+    next_steps_map = {
+        "monitor": [
+            "Theo dõi tiếp 1-2 chu kỳ nộp thuế gần nhất.",
+            "Duy trì nhắc lịch nộp tờ khai qua kênh tự động.",
+        ],
+        "auto_reminder": [
+            "Gửi nhắc hạn nộp tờ khai/NNT trước hạn 7 ngày.",
+            "Theo dõi phản hồi trong 72 giờ và cập nhật trạng thái.",
+        ],
+        "structured_outreach": [
+            "Liên hệ bổ sung thông tin qua phone/email theo playbook delinquency.",
+            "Đặt mốc cam kết nộp bổ sung trong vòng 5 ngày làm việc.",
+        ],
+        "field_audit": [
+            "Mở soát xét hồ sơ chi tiết và đối chiếu lịch sử nộp/chậm nộp.",
+            "Phân công cán bộ xử lý theo nhóm rủi ro cao.",
+        ],
+        "escalated_enforcement": [
+            "Kích hoạt quy trình cưỡng chế theo quy định nội bộ.",
+            "Phối hợp đội thu nợ để giảm tồn đọng trong 30 ngày.",
+        ],
+    }
+
+    rationale_parts = []
+    if warning_reason:
+        rationale_parts.append(warning_reason)
+    rationale_parts.append(f"Xác suất trễ hạn 90 ngày hiện tại {int(round(p90 * 100))}%.")
+    if unpaid_count > 0:
+        rationale_parts.append(f"Đang có {unpaid_count} kỳ quá hạn chưa nộp.")
+    if late_count > 0:
+        rationale_parts.append(f"Lịch sử ghi nhận {late_count} kỳ trễ hạn.")
+
+    return {
+        "recommended_action": action,
+        "priority_score": priority_score,
+        "expected_risk_reduction_pp": expected_risk_reduction_pp,
+        "expected_penalty_saving": expected_penalty_saving,
+        "expected_collection_uplift": expected_collection_uplift,
+        "confidence": confidence,
+        "rationale": " ".join(rationale_parts).strip() or "Chưa ghi nhận động lực can thiệp mạnh ở chu kỳ hiện tại.",
+        "next_steps": next_steps_map.get(action, []),
+    }
+
+
 def _build_baseline_prediction(db: Session, tax_code: str, company_name: str) -> dict:
     """
     Build a baseline delinquency prediction from payment history statistics.
@@ -508,6 +775,15 @@ def _build_baseline_prediction(db: Session, tax_code: str, company_name: str) ->
     history = _build_payment_history_summary(db, tax_code)
 
     if not history["data_available"] or history["total_periods"] == 0:
+        early_warning = _build_early_warning_payload(db, tax_code, history)
+        intervention_uplift = _build_intervention_uplift_payload(
+            probability=0.0,
+            prob_30d=0.0,
+            prob_60d=0.0,
+            prob_90d=0.0,
+            payment_history_summary=history,
+            early_warning=early_warning,
+        )
         return {
             "tax_code": tax_code,
             "company_name": company_name,
@@ -524,6 +800,8 @@ def _build_baseline_prediction(db: Session, tax_code: str, company_name: str) ->
             "prediction_age_days": None,
             "freshness": "unknown",
             "monotonic_adjusted": False,
+            "early_warning": early_warning,
+            "intervention_uplift": intervention_uplift,
             "payment_history_summary": history,
         }
 
@@ -551,6 +829,15 @@ def _build_baseline_prediction(db: Session, tax_code: str, company_name: str) ->
         reasons.append({"reason": f"Tổng phạt: {history['total_penalties']:,.0f} VNĐ", "weight": 0.1})
 
     cluster = _classify_cluster(prob_30d, prob_60d, prob_90d)
+    early_warning = _build_early_warning_payload(db, tax_code, history)
+    intervention_uplift = _build_intervention_uplift_payload(
+        probability=overall_prob,
+        prob_30d=prob_30d,
+        prob_60d=prob_60d,
+        prob_90d=prob_90d,
+        payment_history_summary=history,
+        early_warning=early_warning,
+    )
 
     return {
         "tax_code": tax_code,
@@ -568,6 +855,8 @@ def _build_baseline_prediction(db: Session, tax_code: str, company_name: str) ->
         "prediction_age_days": 0,
         "freshness": "fresh",
         "monotonic_adjusted": monotonic_adjusted,
+        "early_warning": early_warning,
+        "intervention_uplift": intervention_uplift,
         "payment_history_summary": history,
     }
 
@@ -651,10 +940,20 @@ def get_delinquency_forecast(
         items = []
         for pred in predictions_db:
             company_name = company_name_map.get(pred.tax_code, "")
+            payment_summary = _build_payment_history_summary(db, pred.tax_code)
+            early_warning = _build_early_warning_payload(db, pred.tax_code, payment_summary)
             prob_30d, prob_60d, prob_90d, monotonic_adjusted = _normalize_horizon_probs(
                 pred.prob_30d,
                 pred.prob_60d,
                 pred.prob_90d,
+            )
+            intervention_uplift = _build_intervention_uplift_payload(
+                probability=prob_90d,
+                prob_30d=prob_30d,
+                prob_60d=prob_60d,
+                prob_90d=prob_90d,
+                payment_history_summary=payment_summary,
+                early_warning=early_warning,
             )
             prediction_ref = pred.prediction_date or (pred.created_at.date() if pred.created_at else None)
             age_days = _prediction_age_days(prediction_ref)
@@ -681,7 +980,9 @@ def get_delinquency_forecast(
                 "prediction_age_days": age_days,
                 "freshness": _freshness_from_age(age_days),
                 "monotonic_adjusted": monotonic_adjusted,
-                "payment_history_summary": _build_payment_history_summary(db, pred.tax_code),
+                "early_warning": early_warning,
+                "intervention_uplift": intervention_uplift,
+                "payment_history_summary": payment_summary,
             })
 
         stale_count = sum(1 for item in items if item.get("freshness") == "stale")
@@ -855,10 +1156,21 @@ def get_delinquency_detail(tax_code: str, db: Session = Depends(get_db)):
     )
 
     if cached:
+        split_trigger_status = _build_split_trigger_status_context(snapshot_source="delinquency_detail_cached")
+        payment_summary = _build_payment_history_summary(db, tax_code)
+        early_warning = _build_early_warning_payload(db, tax_code, payment_summary)
         prob_30d, prob_60d, prob_90d, monotonic_adjusted = _normalize_horizon_probs(
             cached.prob_30d,
             cached.prob_60d,
             cached.prob_90d,
+        )
+        intervention_uplift = _build_intervention_uplift_payload(
+            probability=prob_90d,
+            prob_30d=prob_30d,
+            prob_60d=prob_60d,
+            prob_90d=prob_90d,
+            payment_history_summary=payment_summary,
+            early_warning=early_warning,
         )
         prediction_ref = cached.prediction_date or (cached.created_at.date() if cached.created_at else None)
         age_days = _prediction_age_days(prediction_ref)
@@ -884,11 +1196,17 @@ def get_delinquency_detail(tax_code: str, db: Session = Depends(get_db)):
             "prediction_age_days": age_days,
             "freshness": _freshness_from_age(age_days),
             "monotonic_adjusted": monotonic_adjusted,
-            "payment_history_summary": _build_payment_history_summary(db, tax_code),
+            "early_warning": early_warning,
+            "intervention_uplift": intervention_uplift,
+            "split_trigger_status": split_trigger_status,
+            "payment_history_summary": payment_summary,
         }
 
     # Fallback to statistical baseline
-    return _build_baseline_prediction(db, tax_code, company.name)
+    split_trigger_status = _build_split_trigger_status_context(snapshot_source="delinquency_detail_baseline")
+    baseline_payload = _build_baseline_prediction(db, tax_code, company.name)
+    baseline_payload["split_trigger_status"] = split_trigger_status
+    return baseline_payload
 
 
 def _build_batch_candidate_tax_codes(

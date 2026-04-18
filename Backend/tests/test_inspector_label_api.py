@@ -127,3 +127,44 @@ def test_inspector_label_rejects_mismatched_assessment_tax_code(client):
     assert response.status_code == 400
     assert "khớp" in response.json()["detail"]
     assert fake_db.added == []
+
+
+def test_inspector_label_accepts_outcome_kpi_fields(client):
+    fake_db = _FakeDB(_AssessmentRow(assessment_id=13, tax_code="01010001"))
+
+    def _override_get_db():
+        yield fake_db
+
+    app.dependency_overrides[get_db] = _override_get_db
+    app.dependency_overrides[auth.get_current_user] = lambda: SimpleNamespace(id=11, badge_id="B011")
+
+    payload = {
+        "tax_code": "01010001",
+        "label_type": "fraud_confirmed",
+        "confidence": "high",
+        "assessment_id": 13,
+        "intervention_action": "field_audit",
+        "intervention_attempted": True,
+        "outcome_status": "partial_recovered",
+        "predicted_collection_uplift": 120000000,
+        "expected_recovery": 200000000,
+        "expected_net_recovery": 130000000,
+        "estimated_audit_cost": 30000000,
+        "actual_audit_cost": 25000000,
+        "actual_audit_hours": 42.5,
+        "amount_recovered": 85000000,
+        "kpi_window_days": 120,
+    }
+
+    response = client.post("/api/ai/inspector-label", json=payload)
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["intervention_action"] == "field_audit"
+    assert body["intervention_attempted"] is True
+    assert body["outcome_status"] == "partial_recovered"
+    assert body["kpi_window_days"] == 120
+
+    assert len(fake_db.added) == 1
+    assert fake_db.added[0].expected_recovery == 200000000
+    assert fake_db.added[0].actual_audit_hours == 42.5

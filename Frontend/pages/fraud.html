@@ -290,11 +290,11 @@
 <div class="mt-auto px-6 pt-6 border-t border-white/5">
 <div class="flex items-center gap-3 p-2 rounded-lg bg-white/5">
 <div class="w-8 h-8 rounded bg-primary-fixed-dim/20 flex items-center justify-center overflow-hidden shrink-0">
-<img id="user-avatar-image" alt="Avatar" class="w-full h-full object-cover hidden" />
+<img id="user-avatar-image" alt="Ảnh đại diện" class="w-full h-full object-cover hidden" />
 <span id="user-avatar-fallback" class="text-primary-fixed-dim text-[10px] font-black tracking-tight">AD</span>
 </div>
 <div id="user-profile-badge">
-<p class="text-xs font-bold" id="user-full-name">Admin Profile</p>
+<p class="text-xs font-bold" id="user-full-name">Hồ sơ quản trị</p>
 <p class="text-[10px] text-slate-500" id="user-current-role">Quản trị viên</p>
 </div>
 </div>
@@ -470,6 +470,124 @@ Phân tích AI
 <!-- Dynamically populated -->
 </div>
 </div>
+
+<!-- Decision Intelligence (integrated action guidance) -->
+<div id="decision-intelligence-panel" class="bg-surface-container-lowest p-6 rounded-2xl border border-outline-variant/10" style="display:none;">
+<div class="flex flex-wrap items-start justify-between gap-3 mb-4">
+<h4 class="text-sm font-black uppercase tracking-widest text-primary-container flex items-center gap-2">
+<span class="material-symbols-outlined text-[16px]">policy</span>
+Trí tuệ quyết định
+</h4>
+<div class="flex items-center gap-2">
+<span id="decision-action-badge" class="px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-slate-100 text-slate-700">---</span>
+<span class="px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-slate-100 text-slate-700">Ưu tiên <span id="decision-priority-score">0</span>/100</span>
+</div>
+</div>
+<p id="decision-rationale" class="text-xs text-slate-600 leading-relaxed">Đang chờ dữ liệu để đề xuất hành động thanh tra.</p>
+
+<div class="mt-3 grid grid-cols-1 md:grid-cols-3 gap-2">
+<div class="rounded-xl border border-outline-variant/20 bg-surface-container-low p-3">
+<p class="text-[10px] font-black uppercase tracking-wider text-slate-400">Hành động can thiệp</p>
+<p id="decision-intervention-action" class="text-sm font-black text-primary-container mt-1">Giám sát</p>
+</div>
+<div class="rounded-xl border border-outline-variant/20 bg-surface-container-low p-3">
+<p class="text-[10px] font-black uppercase tracking-wider text-slate-400">Mức giảm rủi ro kỳ vọng</p>
+<p id="decision-intervention-risk-reduction" class="text-sm font-black text-emerald-700 mt-1">0.0 pp</p>
+</div>
+<div class="rounded-xl border border-outline-variant/20 bg-surface-container-low p-3">
+<p class="text-[10px] font-black uppercase tracking-wider text-slate-400">Mức tăng thu kỳ vọng</p>
+<p id="decision-intervention-collection-uplift" class="text-sm font-black text-indigo-700 mt-1">0 đ</p>
+</div>
+</div>
+
+<div class="mt-4">
+<p class="text-[10px] font-black uppercase tracking-wider text-slate-400">Khuyến nghị hành động</p>
+<ul id="decision-next-steps" class="mt-2 space-y-2 text-xs text-slate-600"></ul>
+</div>
+
+<div class="mt-4">
+<p class="text-[10px] font-black uppercase tracking-wider text-slate-400">Tín hiệu ưu tiên</p>
+<div id="decision-signals" class="mt-2 grid grid-cols-1 md:grid-cols-2 gap-2"></div>
+</div>
+</div>
+
+<!-- VAT Refund Signals (integrated into existing Fraud flow) -->
+<div id="vat-refund-signals-panel" class="bg-surface-container-lowest p-6 rounded-2xl border border-outline-variant/10" style="display:none;">
+<div class="flex flex-wrap items-start justify-between gap-3 mb-4">
+<h4 class="text-sm font-black uppercase tracking-widest text-primary-container flex items-center gap-2">
+<span class="material-symbols-outlined text-[16px]">receipt_long</span>
+Tín hiệu hoàn thuế VAT
+</h4>
+<div class="flex items-center gap-2">
+<span id="vat-refund-queue-badge" class="px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-slate-100 text-slate-700">Giám sát</span>
+<span class="px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-slate-100 text-slate-700">Điểm <span id="vat-refund-score">0</span>/100</span>
+</div>
+</div>
+
+<div class="grid grid-cols-1 md:grid-cols-2 gap-3 mb-3">
+<div class="rounded-xl border border-outline-variant/20 bg-surface-container-low p-3">
+<p class="text-[10px] font-black uppercase tracking-wider text-slate-400">Tỷ lệ VAT đầu vào/đầu ra</p>
+<p id="vat-refund-ratio" class="text-lg font-black text-primary-container mt-1">--</p>
+</div>
+<div class="rounded-xl border border-outline-variant/20 bg-surface-container-low p-3">
+<p class="text-[10px] font-black uppercase tracking-wider text-slate-400">Chênh lệch VAT ước tính</p>
+<p id="vat-refund-gap" class="text-lg font-black text-amber-700 mt-1">--</p>
+</div>
+</div>
+
+<p id="vat-refund-rationale" class="text-xs text-slate-600 leading-relaxed">Đang chờ dữ liệu đánh giá hoàn thuế VAT.</p>
+
+<div class="mt-4">
+<p class="text-[10px] font-black uppercase tracking-wider text-slate-400">Kiểm tra nghiệp vụ đề xuất</p>
+<ul id="vat-refund-checks" class="mt-2 space-y-2 text-xs text-slate-600"></ul>
+</div>
+
+<div class="mt-4">
+<p class="text-[10px] font-black uppercase tracking-wider text-slate-400">Tín hiệu VAT ưu tiên</p>
+<div id="vat-refund-indicators" class="mt-2 grid grid-cols-1 md:grid-cols-2 gap-2"></div>
+</div>
+</div>
+
+<!-- Audit Value (integrated expected recovery view) -->
+<div id="audit-value-panel" class="bg-surface-container-lowest p-6 rounded-2xl border border-outline-variant/10" style="display:none;">
+<div class="flex flex-wrap items-start justify-between gap-3 mb-4">
+<h4 class="text-sm font-black uppercase tracking-widest text-primary-container flex items-center gap-2">
+<span class="material-symbols-outlined text-[16px]">paid</span>
+Giá trị thanh tra
+</h4>
+<div class="flex items-center gap-2">
+<span id="audit-value-lane-badge" class="px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-slate-100 text-slate-700">Giám sát</span>
+<span class="px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-slate-100 text-slate-700">Ưu tiên <span id="audit-value-priority">0</span>/100</span>
+</div>
+</div>
+
+<div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3 mb-3">
+<div class="rounded-xl border border-outline-variant/20 bg-surface-container-low p-3">
+<p class="text-[10px] font-black uppercase tracking-wider text-slate-400">Thu hồi ước tính</p>
+<p id="audit-value-recovery" class="text-base font-black text-emerald-700 mt-1">0 đ</p>
+</div>
+<div class="rounded-xl border border-outline-variant/20 bg-surface-container-low p-3">
+<p class="text-[10px] font-black uppercase tracking-wider text-slate-400">Thu hồi ròng kỳ vọng</p>
+<p id="audit-value-net-recovery" class="text-base font-black text-indigo-700 mt-1">0 đ</p>
+</div>
+<div class="rounded-xl border border-outline-variant/20 bg-surface-container-low p-3">
+<p class="text-[10px] font-black uppercase tracking-wider text-slate-400">Khả năng thu hồi</p>
+<p id="audit-value-recoverability" class="text-base font-black text-primary-container mt-1">0%</p>
+</div>
+<div class="rounded-xl border border-outline-variant/20 bg-surface-container-low p-3">
+<p class="text-[10px] font-black uppercase tracking-wider text-slate-400">Giờ thanh tra / chi phí</p>
+<p id="audit-value-audit-hours" class="text-sm font-black text-primary-container mt-1">0 h</p>
+<p id="audit-value-cost" class="text-[11px] font-bold text-slate-500 mt-1">0 đ</p>
+</div>
+</div>
+
+<p id="audit-value-rationale" class="text-xs text-slate-600 leading-relaxed">Đang chờ dữ liệu ước tính giá trị thanh tra.</p>
+
+<div class="mt-4">
+<p class="text-[10px] font-black uppercase tracking-wider text-slate-400">Yếu tố tạo giá trị</p>
+<div id="audit-value-drivers" class="mt-2 grid grid-cols-1 md:grid-cols-2 gap-2"></div>
+</div>
+</div>
 <!-- Single Query Charts: Trend + Radar -->
 <div class="grid grid-cols-2 gap-6" id="single-charts-row" style="display:none;">
 <div class="bg-surface-container-lowest p-6 rounded-2xl border border-outline-variant/10">
@@ -511,21 +629,21 @@ Tiến triển đặc trưng F1-F4 theo năm
 <div class="bg-surface-container-lowest p-6 rounded-2xl border border-outline-variant/10">
 <h5 class="text-xs font-black uppercase tracking-widest text-primary-container mb-4 flex items-center gap-2">
 <span class="material-symbols-outlined text-[16px]">waterfall_chart</span>
-Waterfall biến động đặc trưng rủi ro
+Biểu đồ thác nước biến động đặc trưng rủi ro
 </h5>
 <div id="chart-single-feature-waterfall" style="height: 280px;"></div>
 </div>
 <div class="bg-surface-container-lowest p-6 rounded-2xl border border-outline-variant/10">
 <h5 class="text-xs font-black uppercase tracking-widest text-primary-container mb-4 flex items-center gap-2">
 <span class="material-symbols-outlined text-[16px]">tune</span>
-Percentile Bullet đặc trưng rủi ro
+Thước percentile đặc trưng rủi ro
 </h5>
 <div id="chart-single-feature-percentile" style="height: 280px;"></div>
 </div>
 <div class="bg-surface-container-lowest p-6 rounded-2xl border border-outline-variant/10 xl:col-span-3">
 <h5 class="text-xs font-black uppercase tracking-widest text-primary-container mb-2 flex items-center gap-2">
 <span class="material-symbols-outlined text-[16px]">grid_view</span>
-Sensitivity Heatmap (Revenue x Chi phí)
+Bản đồ nhiệt độ nhạy (Doanh thu x Chi phí)
 </h5>
 <p class="text-[9px] text-slate-400 mb-3">Mô phỏng nhanh độ nhạy điểm rủi ro theo các kịch bản điều chỉnh doanh thu và chi phí.</p>
 <div id="chart-single-sensitivity-heatmap" style="height: 300px;"></div>
@@ -575,12 +693,12 @@ Timeline red flags theo năm
 <div class="flex items-center gap-3">
 <h5 class="text-xs font-black uppercase tracking-widest text-primary-container flex items-center gap-2">
 <span class="material-symbols-outlined text-[16px]">science</span>
-Mô phỏng What-If (AI Sandbox)
+Mô phỏng giả định (Phòng thí nghiệm AI)
 </h5>
 <p class="text-[9px] text-slate-400 hidden sm:block">Kéo thanh trượt để xem rủi ro thay đổi</p>
 </div>
 <button id="whatif-reset-btn" type="button" class="text-[9px] font-bold uppercase tracking-widest text-slate-400 hover:text-primary-container transition-colors flex items-center gap-1">
-<span class="material-symbols-outlined text-[14px]">restart_alt</span> Reset
+<span class="material-symbols-outlined text-[14px]">restart_alt</span> Đặt lại
 </button>
 </div>
 <div class="grid grid-cols-2 gap-4 mb-5">
@@ -668,6 +786,14 @@ Xuất Báo cáo Thanh Tra (PDF)
 <span class="material-symbols-outlined text-white text-xl">gavel</span>
 <h5 class="text-xs font-black uppercase tracking-widest">Hành động Thanh tra</h5>
 </div>
+<div id="fraud-split-gate-panel" class="mb-4 rounded-xl border border-white/20 bg-white/10 p-3">
+<div class="flex items-center justify-between gap-2">
+<p class="text-[10px] font-black uppercase tracking-widest text-white/80">Cổng Split Trigger</p>
+<span id="fraud-split-gate-badge" class="text-[10px] px-2 py-0.5 rounded bg-white/15 font-black uppercase tracking-wider">KHÔNG RÕ</span>
+</div>
+<p id="fraud-split-gate-summary" class="text-[10px] text-white/75 mt-1 leading-relaxed">Chưa tải trạng thái split-trigger.</p>
+<p id="fraud-split-gate-updated" class="text-[9px] text-white/50 mt-1 uppercase tracking-wider">Cập nhật: --</p>
+</div>
 <div class="space-y-3">
 <button id="action-send-notice-btn" type="button" class="w-full py-3 bg-white/10 hover:bg-white/20 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all">Gửi thông báo giải trình</button>
 <button id="action-create-report-btn" type="button" class="w-full py-3 bg-white/10 hover:bg-white/20 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all">Lập biên bản vi phạm</button>
@@ -716,12 +842,13 @@ type="text"
 <th class="px-4 py-3 font-bold text-[10px] uppercase tracking-widest text-slate-400">Tên doanh nghiệp</th>
 <th class="px-4 py-3 font-bold text-[10px] uppercase tracking-widest text-slate-400">Ngành</th>
 <th class="px-4 py-3 font-bold text-[10px] uppercase tracking-widest text-slate-400">Điểm rủi ro</th>
+<th class="px-4 py-3 font-bold text-[10px] uppercase tracking-widest text-slate-400">Can thiệp</th>
 <th class="px-4 py-3 font-bold text-[10px] uppercase tracking-widest text-slate-400">Cập nhật AI</th>
 <th class="px-4 py-3 font-bold text-[10px] uppercase tracking-widest text-slate-400 text-right">Thao tác</th>
 </tr>
 </thead>
 <tbody id="single-company-table-body" class="divide-y divide-slate-100">
-<tr><td colspan="6" class="px-6 py-8 text-center text-slate-400 text-xs italic">Đang tải danh sách doanh nghiệp...</td></tr>
+<tr><td colspan="7" class="px-6 py-8 text-center text-slate-400 text-xs italic">Đang tải danh sách doanh nghiệp...</td></tr>
 </tbody>
 </table>
 </div>
@@ -837,7 +964,7 @@ Cơ cấu Phân bổ Rủi ro
 <div class="col-span-12 bg-surface-container-lowest p-6 rounded-2xl border border-outline-variant/10">
 <h4 class="text-xs font-black uppercase tracking-widest text-primary-container mb-1 flex items-center gap-2">
 <span class="material-symbols-outlined text-[16px]">show_chart</span>
-Xu hướng Rủi ro qua các năm (Yearly Trend Analysis)
+Xu hướng Rủi ro qua các năm (Phân tích xu hướng theo năm)
 </h4>
 <p class="text-[9px] text-slate-400 mb-3">Biến động điểm rủi ro trung bình và số lượng doanh nghiệp rủi ro cao theo thời gian</p>
 <div id="chart-batch-trend" style="height: 350px;"></div>
@@ -849,7 +976,7 @@ Xu hướng Rủi ro qua các năm (Yearly Trend Analysis)
 <div class="col-span-7 bg-surface-container-lowest p-6 rounded-2xl border border-outline-variant/10">
 <h4 class="text-xs font-black uppercase tracking-widest text-primary-container mb-1 flex items-center gap-2">
 <span class="material-symbols-outlined text-[16px]">query_stats</span>
-Revenue vs Risk theo Ngành (Business View)
+Doanh thu so với Rủi ro theo ngành (Góc nhìn nghiệp vụ)
 </h4>
 <p class="text-[9px] text-slate-400 mb-3">Giữ nguyên PCA kỹ thuật, bổ sung thêm góc nhìn nghiệp vụ doanh thu-rủi ro.</p>
 <div id="chart-revenue-risk" style="height: 420px;"></div>
@@ -857,7 +984,7 @@ Revenue vs Risk theo Ngành (Business View)
 <div class="col-span-5 bg-surface-container-lowest p-6 rounded-2xl border border-outline-variant/10">
 <h4 class="text-xs font-black uppercase tracking-widest text-primary-container mb-1 flex items-center gap-2">
 <span class="material-symbols-outlined text-[16px]">timeline</span>
-Cumulative Risk Curve
+Đường cong rủi ro lũy kế
 </h4>
 <p class="text-[9px] text-slate-400 mb-3">Top N% doanh nghiệp đang chiếm bao nhiêu % tổng rủi ro toàn lô.</p>
 <div id="chart-cumulative-risk" style="height: 420px;"></div>
@@ -869,7 +996,7 @@ Cumulative Risk Curve
 <div class="col-span-7 bg-surface-container-lowest p-6 rounded-2xl border border-outline-variant/10">
 <h4 class="text-xs font-black uppercase tracking-widest text-primary-container mb-1 flex items-center gap-2">
 <span class="material-symbols-outlined text-[16px]">account_tree</span>
-Cohort Risk Progression Funnel
+Phễu tiến triển rủi ro theo cohort
 </h4>
 <p class="text-[9px] text-slate-400 mb-3">Theo dõi luồng dịch chuyển nhóm rủi ro giữa các năm cho cùng MST.</p>
 <div id="chart-cohort-funnel" style="height: 420px;"></div>
@@ -877,7 +1004,7 @@ Cohort Risk Progression Funnel
 <div class="col-span-5 bg-surface-container-lowest p-6 rounded-2xl border border-outline-variant/10">
 <h4 class="text-xs font-black uppercase tracking-widest text-primary-container mb-1 flex items-center gap-2">
 <span class="material-symbols-outlined text-[16px]">grid_view</span>
-VAT Anomaly Heatmap (F3)
+Bản đồ nhiệt bất thường VAT (F3)
 </h4>
 <p class="text-[9px] text-slate-400 mb-3">Tần suất bất thường VAT theo trục ngành-năm.</p>
 <div id="chart-vat-heatmap" style="height: 420px;"></div>
@@ -889,7 +1016,7 @@ VAT Anomaly Heatmap (F3)
 <div class="col-span-12 bg-surface-container-lowest p-6 rounded-2xl border border-outline-variant/10">
 <h4 class="text-xs font-black uppercase tracking-widest text-primary-container mb-1 flex items-center gap-2">
 <span class="material-symbols-outlined text-[16px]">map</span>
-Bản đồ Nhiệt Rủi ro theo Địa lý (Vietnam Risk Heatmap)
+Bản đồ Nhiệt Rủi ro theo Địa lý (Bản đồ nhiệt rủi ro Việt Nam)
 </h4>
 <p class="text-[9px] text-slate-400 mb-3">Mật độ & mức rủi ro trung bình theo tỉnh thành – Hover để xem chi tiết số DN và điểm rủi ro</p>
 <div id="chart-geo-map" style="height: 600px;"></div>
@@ -920,7 +1047,7 @@ Phân bổ Rủi ro theo Ngành (Box Plot)
 <div class="col-span-5 bg-surface-container-lowest p-6 rounded-2xl border border-outline-variant/10">
 <h4 class="text-xs font-black uppercase tracking-widest text-primary-container mb-4 flex items-center gap-2">
 <span class="material-symbols-outlined text-[16px]">neurology</span>
-Trọng số Đặc trưng AI (XGBoost Feature Importance)
+Trọng số Đặc trưng AI (Mức quan trọng đặc trưng XGBoost)
 </h4>
 <p class="text-[9px] text-slate-400 mb-4">Trọng số do thuật toán XGBoost học được từ dữ liệu – không phải rule-based</p>
 <div id="chart-keydrivers" style="height: 340px;"></div>
@@ -1002,7 +1129,7 @@ Danh sách Doanh nghiệp theo Điểm Rủi ro
 </nav>
 <div class="flex items-center gap-2 bg-primary-container px-3 py-1.5 rounded text-white font-bold cursor-help group relative">
 <span class="material-symbols-outlined text-[12px]" style="font-variation-settings: 'FILL' 1;">lock</span>
-<span>SECURE ENDPOINT 0.9.2</span>
+<span>ĐIỂM CUỐI BẢO MẬT 0.9.2</span>
 </div>
 </div>
 </footer>

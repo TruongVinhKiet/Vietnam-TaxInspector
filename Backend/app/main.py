@@ -77,6 +77,128 @@ async def lifespan(app: FastAPI):
                 "ADD COLUMN IF NOT EXISTS amendment_number INTEGER DEFAULT 0;"
             ))
 
+            # KPI loop foundation migrations (Sprint 1)
+            conn.execute(text(
+                "ALTER TABLE inspector_labels "
+                "ADD COLUMN IF NOT EXISTS intervention_action VARCHAR(50);"
+            ))
+            conn.execute(text(
+                "ALTER TABLE inspector_labels "
+                "ADD COLUMN IF NOT EXISTS intervention_attempted BOOLEAN DEFAULT FALSE;"
+            ))
+            conn.execute(text(
+                "ALTER TABLE inspector_labels "
+                "ADD COLUMN IF NOT EXISTS outcome_status VARCHAR(30);"
+            ))
+            conn.execute(text(
+                "ALTER TABLE inspector_labels "
+                "ADD COLUMN IF NOT EXISTS predicted_collection_uplift NUMERIC(18, 2);"
+            ))
+            conn.execute(text(
+                "ALTER TABLE inspector_labels "
+                "ADD COLUMN IF NOT EXISTS expected_recovery NUMERIC(18, 2);"
+            ))
+            conn.execute(text(
+                "ALTER TABLE inspector_labels "
+                "ADD COLUMN IF NOT EXISTS expected_net_recovery NUMERIC(18, 2);"
+            ))
+            conn.execute(text(
+                "ALTER TABLE inspector_labels "
+                "ADD COLUMN IF NOT EXISTS estimated_audit_cost NUMERIC(18, 2);"
+            ))
+            conn.execute(text(
+                "ALTER TABLE inspector_labels "
+                "ADD COLUMN IF NOT EXISTS actual_audit_cost NUMERIC(18, 2);"
+            ))
+            conn.execute(text(
+                "ALTER TABLE inspector_labels "
+                "ADD COLUMN IF NOT EXISTS actual_audit_hours FLOAT;"
+            ))
+            conn.execute(text(
+                "ALTER TABLE inspector_labels "
+                "ADD COLUMN IF NOT EXISTS outcome_recorded_at TIMESTAMP;"
+            ))
+            conn.execute(text(
+                "ALTER TABLE inspector_labels "
+                "ADD COLUMN IF NOT EXISTS kpi_window_days INTEGER DEFAULT 90;"
+            ))
+
+            conn.execute(text(
+                "CREATE TABLE IF NOT EXISTS kpi_trigger_policies ("
+                "id SERIAL PRIMARY KEY, "
+                "track_name VARCHAR(50) NOT NULL, "
+                "metric_name VARCHAR(80) NOT NULL, "
+                "comparator VARCHAR(8) NOT NULL DEFAULT '>=', "
+                "threshold FLOAT NOT NULL, "
+                "min_sample INTEGER NOT NULL DEFAULT 50, "
+                "window_days INTEGER NOT NULL DEFAULT 28, "
+                "cooldown_days INTEGER NOT NULL DEFAULT 14, "
+                "enabled BOOLEAN NOT NULL DEFAULT TRUE, "
+                "rationale TEXT, "
+                "created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, "
+                "updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP"
+                ");"
+            ))
+            conn.execute(text(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_kpi_policy_track_metric "
+                "ON kpi_trigger_policies (track_name, metric_name);"
+            ))
+
+            conn.execute(text(
+                "CREATE TABLE IF NOT EXISTS kpi_metric_snapshots ("
+                "id SERIAL PRIMARY KEY, "
+                "track_name VARCHAR(50) NOT NULL, "
+                "metric_name VARCHAR(80) NOT NULL, "
+                "metric_value FLOAT, "
+                "sample_size INTEGER NOT NULL DEFAULT 0, "
+                "comparator VARCHAR(8), "
+                "threshold FLOAT, "
+                "status VARCHAR(30) NOT NULL DEFAULT 'no_metric', "
+                "window_days INTEGER NOT NULL DEFAULT 28, "
+                "source VARCHAR(80) NOT NULL DEFAULT 'split_trigger_status', "
+                "details JSONB, "
+                "generated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, "
+                "created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP"
+                ");"
+            ))
+            conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS idx_kpi_snapshot_track_metric_ts "
+                "ON kpi_metric_snapshots (track_name, metric_name, generated_at DESC);"
+            ))
+            conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS idx_kpi_snapshot_generated_at "
+                "ON kpi_metric_snapshots (generated_at DESC);"
+            ))
+
+            conn.execute(text(
+                "INSERT INTO kpi_trigger_policies (track_name, metric_name, comparator, threshold, min_sample, window_days, cooldown_days, enabled, rationale) "
+                "SELECT 'audit_value', 'precision_top_50', '>=', 0.70, 50, 28, 14, TRUE, 'Top-50 hồ sơ Audit Value cần precision ổn định trước split.' "
+                "WHERE NOT EXISTS ("
+                "SELECT 1 FROM kpi_trigger_policies WHERE track_name='audit_value' AND metric_name='precision_top_50'"
+                ");"
+            ))
+            conn.execute(text(
+                "INSERT INTO kpi_trigger_policies (track_name, metric_name, comparator, threshold, min_sample, window_days, cooldown_days, enabled, rationale) "
+                "SELECT 'audit_value', 'roi_positive_rate', '>=', 0.80, 50, 28, 14, TRUE, 'Tối thiểu 80% case can thiệp phải có net recovery dương.' "
+                "WHERE NOT EXISTS ("
+                "SELECT 1 FROM kpi_trigger_policies WHERE track_name='audit_value' AND metric_name='roi_positive_rate'"
+                ");"
+            ))
+            conn.execute(text(
+                "INSERT INTO kpi_trigger_policies (track_name, metric_name, comparator, threshold, min_sample, window_days, cooldown_days, enabled, rationale) "
+                "SELECT 'vat_refund', 'precision_top_100', '>=', 0.65, 80, 28, 14, TRUE, 'Top-100 VAT queue cần precision đủ mạnh trước split.' "
+                "WHERE NOT EXISTS ("
+                "SELECT 1 FROM kpi_trigger_policies WHERE track_name='vat_refund' AND metric_name='precision_top_100'"
+                ");"
+            ))
+            conn.execute(text(
+                "INSERT INTO kpi_trigger_policies (track_name, metric_name, comparator, threshold, min_sample, window_days, cooldown_days, enabled, rationale) "
+                "SELECT 'vat_refund', 'false_negative_rate_high_risk', '<=', 0.12, 50, 28, 14, TRUE, 'Giữ FN high-risk VAT ở mức thấp để tránh bỏ sót hồ sơ.' "
+                "WHERE NOT EXISTS ("
+                "SELECT 1 FROM kpi_trigger_policies WHERE track_name='vat_refund' AND metric_name='false_negative_rate_high_risk'"
+                ");"
+            ))
+
             conn.commit()
         print("[OK] Schema migration: all flagship columns verified.")
     except Exception as e:
@@ -102,6 +224,35 @@ async def lifespan(app: FastAPI):
         print("[OK] Cache cleanup scheduler started (runs every 24h).")
     except Exception as e:
         print(f"[WARN] Cache cleanup scheduler failed to start: {e}")
+
+    # --- Periodic KPI snapshot capture scheduler (every 6 hours by default) ---
+    try:
+        import threading
+        import time as _time
+
+        kpi_snapshot_interval = int(os.getenv("KPI_SNAPSHOT_INTERVAL_SECONDS", "21600"))
+        kpi_snapshot_interval = max(900, kpi_snapshot_interval)  # minimum 15 minutes
+
+        def _kpi_snapshot_loop():
+            """Persist split-trigger KPI snapshots on a fixed cadence for trend alerting."""
+            while True:
+                try:
+                    payload = monitoring.get_split_trigger_status_snapshot(
+                        persist_snapshot=True,
+                        snapshot_source="scheduler_periodic_capture",
+                    )
+                    captured = int(payload.get("snapshots_captured") or 0)
+                    ready = bool(payload.get("ready", False))
+                    print(f"[OK] KPI snapshot captured rows={captured}, ready={ready}.")
+                except Exception as exc:
+                    print(f"[WARN] Periodic KPI snapshot capture error: {exc}")
+                _time.sleep(kpi_snapshot_interval)
+
+        t_kpi = threading.Thread(target=_kpi_snapshot_loop, daemon=True)
+        t_kpi.start()
+        print(f"[OK] KPI snapshot scheduler started (runs every {kpi_snapshot_interval}s).")
+    except Exception as e:
+        print(f"[WARN] KPI snapshot scheduler failed to start: {e}")
 
     yield
 

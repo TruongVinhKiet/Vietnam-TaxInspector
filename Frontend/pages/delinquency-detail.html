@@ -145,11 +145,11 @@
 <div class="mt-auto px-6 pt-6 border-t border-white/5">
 <div class="flex items-center gap-3 p-2 rounded-lg bg-white/5">
 <div class="w-8 h-8 rounded bg-primary-fixed-dim/20 flex items-center justify-center overflow-hidden shrink-0">
-<img id="user-avatar-image" alt="Avatar" class="w-full h-full object-cover hidden" />
+<img id="user-avatar-image" alt="Ảnh đại diện" class="w-full h-full object-cover hidden" />
 <span id="user-avatar-fallback" class="text-primary-fixed-dim text-[10px] font-black tracking-tight">AD</span>
 </div>
 <div id="user-profile-badge">
-<p class="text-xs font-bold" id="user-full-name">Admin Profile</p>
+<p class="text-xs font-bold" id="user-full-name">Hồ sơ quản trị</p>
 <p class="text-[10px] text-slate-500" id="user-current-role">Quản trị viên</p>
 </div>
 </div>
@@ -207,6 +207,21 @@
             </div>
         </div>
         <div id="detail-meta-badges" class="flex flex-wrap items-center gap-2 mt-5"></div>
+    </section>
+
+    <section class="mt-6 delinq-detail-enter" data-motion-order="1">
+        <article class="bg-white rounded-xl border border-slate-100 shadow-sm p-5">
+            <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
+                <div>
+                    <h3 class="text-xs font-bold uppercase tracking-widest text-slate-500">Quản trị split-trigger</h3>
+                    <p id="detail-split-gate-summary" class="text-sm text-slate-500 mt-1">Đang tải trạng thái split-trigger cho hồ sơ này.</p>
+                </div>
+                <div class="flex items-center gap-2">
+                    <span id="detail-split-gate-updated" class="text-[10px] uppercase tracking-wider text-slate-400">Cập nhật: --</span>
+                    <span id="detail-split-gate-badge" class="inline-flex items-center px-3 py-1 rounded-full text-xs font-bold bg-slate-100 text-slate-700">ĐANG TẢI</span>
+                </div>
+            </div>
+        </article>
     </section>
 
     <section class="grid grid-cols-1 lg:grid-cols-3 gap-6 mt-6 delinq-detail-enter" data-motion-order="1">
@@ -270,22 +285,83 @@
                     <dd id="detail-cluster" class="font-bold text-slate-700 text-right">---</dd>
                 </div>
                 <div class="flex justify-between gap-3">
-                    <dt class="text-slate-500">Model version</dt>
+                    <dt class="text-slate-500">Phiên bản mô hình</dt>
                     <dd id="detail-model-version" class="font-bold text-slate-700 text-right">---</dd>
                 </div>
                 <div class="flex justify-between gap-3">
-                    <dt class="text-slate-500">Prediction date</dt>
+                    <dt class="text-slate-500">Ngày dự báo</dt>
                     <dd id="detail-prediction-date" class="font-bold text-slate-700 text-right">---</dd>
                 </div>
                 <div class="flex justify-between gap-3">
-                    <dt class="text-slate-500">Prediction age</dt>
+                    <dt class="text-slate-500">Tuổi dự báo</dt>
                     <dd id="detail-age-days" class="font-bold text-slate-700 text-right">---</dd>
                 </div>
                 <div class="flex justify-between gap-3">
-                    <dt class="text-slate-500">Source</dt>
+                    <dt class="text-slate-500">Nguồn</dt>
                     <dd id="detail-score-source" class="font-bold text-slate-700 text-right">---</dd>
                 </div>
+                <div class="flex justify-between gap-3">
+                    <dt class="text-slate-500">Hàng đợi cảnh báo sớm</dt>
+                    <dd id="detail-warning-queue" class="font-bold text-slate-700 text-right">---</dd>
+                </div>
+                <div class="flex justify-between gap-3">
+                    <dt class="text-slate-500">Mức cảnh báo sớm</dt>
+                    <dd id="detail-warning-level" class="font-bold text-slate-700 text-right">---</dd>
+                </div>
             </dl>
+
+            <div class="mt-4 rounded-lg border border-slate-100 bg-slate-50 p-3">
+                <p class="text-[10px] uppercase tracking-widest text-slate-500 font-bold">Lý do cảnh báo</p>
+                <p id="detail-warning-reason" class="text-xs text-slate-600 mt-1 leading-relaxed">---</p>
+                <div id="detail-warning-tags" class="flex flex-wrap gap-1 mt-2"></div>
+            </div>
+        </article>
+    </section>
+
+    <section class="mt-6 delinq-detail-enter" data-motion-order="3">
+        <article class="bg-white rounded-xl border border-slate-100 shadow-sm p-5">
+            <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
+                <div>
+                    <h3 class="text-xs font-bold uppercase tracking-widest text-slate-500">Can thiệp / Tác động đề xuất</h3>
+                    <p class="text-sm text-slate-500 mt-1">Khuyến nghị hành động cho hồ sơ doanh nghiệp dựa trên tín hiệu hiện tại.</p>
+                </div>
+                <span id="detail-intervention-action" class="inline-flex items-center px-3 py-1 rounded-full text-xs font-bold bg-slate-100 text-slate-700">---</span>
+            </div>
+
+            <div class="mt-4 grid grid-cols-2 md:grid-cols-3 gap-3">
+                <div class="rounded-lg bg-slate-50 p-3">
+                    <p class="text-[10px] uppercase tracking-wide text-slate-500 font-bold">Điểm ưu tiên</p>
+                    <p id="detail-intervention-priority" class="text-2xl font-black text-slate-800 mt-1">0</p>
+                </div>
+                <div class="rounded-lg bg-slate-50 p-3">
+                    <p class="text-[10px] uppercase tracking-wide text-slate-500 font-bold">Độ tin cậy</p>
+                    <p id="detail-intervention-confidence" class="text-2xl font-black text-slate-800 mt-1">---</p>
+                </div>
+                <div class="rounded-lg bg-emerald-50 p-3">
+                    <p class="text-[10px] uppercase tracking-wide text-emerald-700/80 font-bold">Giảm rủi ro kỳ vọng</p>
+                    <p id="detail-intervention-risk-reduction" class="text-2xl font-black text-emerald-700 mt-1">0.0 pp</p>
+                </div>
+                <div class="rounded-lg bg-blue-50 p-3">
+                    <p class="text-[10px] uppercase tracking-wide text-blue-700/80 font-bold">Giảm phạt kỳ vọng</p>
+                    <p id="detail-intervention-penalty-saving" class="text-xl font-black text-blue-700 mt-1">0 VNĐ</p>
+                </div>
+                <div class="rounded-lg bg-indigo-50 p-3 md:col-span-2">
+                    <p class="text-[10px] uppercase tracking-wide text-indigo-700/80 font-bold">Tăng thu hồi kỳ vọng</p>
+                    <p id="detail-intervention-collection-uplift" class="text-xl font-black text-indigo-700 mt-1">0 VNĐ</p>
+                </div>
+            </div>
+
+            <div class="mt-4 rounded-lg border border-slate-100 bg-slate-50 p-3">
+                <p class="text-[10px] uppercase tracking-widest text-slate-500 font-bold">Lý do</p>
+                <p id="detail-intervention-rationale" class="text-xs text-slate-600 mt-1 leading-relaxed">---</p>
+            </div>
+
+            <div class="mt-4">
+                <p class="text-[10px] uppercase tracking-widest text-slate-500 font-bold mb-2">Bước hành động gợi ý</p>
+                <ul id="detail-intervention-next-steps" class="space-y-2 text-sm text-slate-600">
+                    <li class="text-slate-400">Đang tải khuyến nghị...</li>
+                </ul>
+            </div>
         </article>
     </section>
 

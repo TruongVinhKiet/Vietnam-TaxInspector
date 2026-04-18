@@ -200,7 +200,7 @@ function renderSingleMarginDistribution(distributionData) {
     if (!bins.length) {
         renderSingleTrendChartMessage(container, 'Chưa có dữ liệu phân phối biên lợi nhuận theo ngành.');
         if (summaryEl) {
-            summaryEl.textContent = 'Dữ liệu tham chiếu ngành chưa đủ để tính percentile biên lợi nhuận.';
+            summaryEl.textContent = 'Dữ liệu tham chiếu ngành chưa đủ để tính phân vị biên lợi nhuận.';
         }
         return;
     }
@@ -215,9 +215,9 @@ function renderSingleMarginDistribution(distributionData) {
         : -1;
 
     if (summaryEl) {
-        const marginLabel = Number.isFinite(companyMargin) ? `${companyMargin.toFixed(2)}%` : 'N/A';
-        const percentileLabel = Number.isFinite(percentile) ? `${percentile.toFixed(1)}%` : 'N/A';
-        summaryEl.textContent = `Biên lợi nhuận DN: ${marginLabel} | Percentile: ${percentileLabel} | Mẫu so sánh: ${sampleSize.toLocaleString()} DN`;
+        const marginLabel = Number.isFinite(companyMargin) ? `${companyMargin.toFixed(2)}%` : 'Không có';
+        const percentileLabel = Number.isFinite(percentile) ? `${percentile.toFixed(1)}%` : 'Không có';
+        summaryEl.textContent = `Biên lợi nhuận DN: ${marginLabel} | Phân vị: ${percentileLabel} | Mẫu so sánh: ${sampleSize.toLocaleString()} DN`;
     }
 
     const chart = safeInitChart(container);
@@ -238,9 +238,9 @@ function renderSingleMarginDistribution(distributionData) {
             itemStyle: { color: '#dc2626' },
             tooltip: {
                 formatter: () => {
-                    const marginLabel = Number.isFinite(companyMargin) ? `${companyMargin.toFixed(2)}%` : 'N/A';
-                    const percentileLabel = Number.isFinite(percentile) ? `${percentile.toFixed(1)}%` : 'N/A';
-                    return `<b>Biên lợi nhuận DN</b><br>${marginLabel}<br>Percentile: ${percentileLabel}`;
+                    const marginLabel = Number.isFinite(companyMargin) ? `${companyMargin.toFixed(2)}%` : 'Không có';
+                    const percentileLabel = Number.isFinite(percentile) ? `${percentile.toFixed(1)}%` : 'Không có';
+                    return `<b>Biên lợi nhuận DN</b><br>${marginLabel}<br>Phân vị: ${percentileLabel}`;
                 },
             },
         }]
@@ -252,12 +252,12 @@ function renderSingleMarginDistribution(distributionData) {
             trigger: 'item',
             formatter: (params) => {
                 if (params.seriesType === 'scatter') {
-                    const marginLabel = Number.isFinite(companyMargin) ? `${companyMargin.toFixed(2)}%` : 'N/A';
-                    const percentileLabel = Number.isFinite(percentile) ? `${percentile.toFixed(1)}%` : 'N/A';
-                    return `<b>Biên lợi nhuận DN</b><br>${marginLabel}<br>Percentile: ${percentileLabel}`;
+                    const marginLabel = Number.isFinite(companyMargin) ? `${companyMargin.toFixed(2)}%` : 'Không có';
+                    const percentileLabel = Number.isFinite(percentile) ? `${percentile.toFixed(1)}%` : 'Không có';
+                    return `<b>Biên lợi nhuận DN</b><br>${marginLabel}<br>Phân vị: ${percentileLabel}`;
                 }
                 const idx = Number(params.dataIndex || 0);
-                const label = labels[idx] || 'N/A';
+                const label = labels[idx] || 'Không có';
                 const count = Number(counts[idx] || 0);
                 return `<b>${escapeHtml(label)}</b><br>Số DN: <b>${count.toLocaleString()}</b>`;
             },
@@ -571,6 +571,146 @@ function getRiskBadgeClass(level) {
 }
 
 
+function formatSplitGateTimestamp(raw) {
+    if (!raw) return '--';
+    const dt = new Date(raw);
+    if (Number.isNaN(dt.getTime())) return '--';
+    return dt.toLocaleString('vi-VN', { hour12: false });
+}
+
+
+function normalizeSplitTriggerStatus(rawStatus) {
+    const payload = rawStatus && typeof rawStatus === 'object' ? rawStatus : {};
+    const hasPayload = Object.keys(payload).length > 0;
+
+    if (!hasPayload) {
+        return {
+            ready: false,
+            schemaReady: false,
+            readinessScore: 0,
+            enabledRules: 0,
+            passedRules: 0,
+            blockedTracks: [],
+            reason: 'Chạy Phân tích AI để tải trạng thái split-trigger cho doanh nghiệp này.',
+            generatedAt: '',
+        };
+    }
+
+    const schemaReady = payload.schema_ready === true;
+    const ready = schemaReady && payload.ready === true;
+
+    const readinessScoreRaw = Number(payload.readiness_score);
+    const readinessScore = Number.isFinite(readinessScoreRaw)
+        ? Math.max(0, Math.min(100, readinessScoreRaw))
+        : 0;
+
+    const totals = payload.totals && typeof payload.totals === 'object' ? payload.totals : {};
+    const enabledRules = Number.isFinite(Number(totals.enabled_rules)) ? Number(totals.enabled_rules) : 0;
+    const passedRules = Number.isFinite(Number(totals.passed_rules)) ? Number(totals.passed_rules) : 0;
+
+    const trackStatus = payload.track_status && typeof payload.track_status === 'object' ? payload.track_status : {};
+    const blockedTracks = Object.entries(trackStatus)
+        .filter(([, value]) => !(value && value.ready_for_split))
+        .map(([trackName, value]) => {
+            const blockingRuleCount = Number(value && value.blocking_rule_count ? value.blocking_rule_count : 0);
+            const normalizedTrack = String(trackName || '').replaceAll('_', ' ').toUpperCase();
+            return blockingRuleCount > 0
+                ? `${normalizedTrack} (${blockingRuleCount} quy tắc chặn)`
+                : normalizedTrack;
+        });
+
+    let reason = String(payload.reason || '').trim();
+    if (!reason) {
+        if (!schemaReady) {
+            reason = 'Schema KPI chưa sẵn sàng để mở quản trị split-trigger.';
+        } else if (ready) {
+            reason = 'Split-trigger đã sẵn sàng, có thể mở hành động thanh tra.';
+        } else {
+            reason = 'Split-trigger chưa sẵn sàng, cần cải thiện KPI trên các track đang bị chặn.';
+        }
+    }
+
+    return {
+        ready,
+        schemaReady,
+        readinessScore,
+        enabledRules,
+        passedRules,
+        blockedTracks,
+        reason,
+        generatedAt: payload.generated_at || '',
+    };
+}
+
+
+function setFraudActionButtonState(button, disabled) {
+    if (!button) return;
+    button.disabled = Boolean(disabled);
+    if (disabled) {
+        button.classList.add('opacity-50', 'cursor-not-allowed');
+        button.classList.remove('hover:bg-white/20');
+    } else {
+        button.classList.remove('opacity-50', 'cursor-not-allowed');
+        button.classList.add('hover:bg-white/20');
+    }
+}
+
+
+function renderFraudSplitTriggerGate(rawStatus) {
+    const gate = normalizeSplitTriggerStatus(rawStatus);
+    window._fraudSplitGateState = gate;
+
+    const panel = document.getElementById('fraud-split-gate-panel');
+    const badge = document.getElementById('fraud-split-gate-badge');
+    const summary = document.getElementById('fraud-split-gate-summary');
+    const updated = document.getElementById('fraud-split-gate-updated');
+
+    let badgeLabel = 'SẴN SÀNG';
+    let badgeToneClass = 'bg-emerald-500/20 text-emerald-100';
+    if (!gate.schemaReady) {
+        badgeLabel = 'THIẾU SCHEMA';
+        badgeToneClass = 'bg-slate-500/20 text-slate-100';
+    } else if (!gate.ready) {
+        badgeLabel = 'ĐANG KHÓA';
+        badgeToneClass = 'bg-amber-500/20 text-amber-100';
+    }
+
+    if (panel) {
+        panel.classList.remove('hidden');
+    }
+    if (badge) {
+        badge.className = `text-[10px] px-2 py-0.5 rounded font-black uppercase tracking-wider ${badgeToneClass}`;
+        badge.textContent = badgeLabel;
+    }
+    if (summary) {
+        const coreSummary = `Độ sẵn sàng ${gate.readinessScore.toFixed(1)}% • Quy tắc ${gate.passedRules}/${gate.enabledRules}`;
+        const blockedText = gate.blockedTracks.length
+            ? ` • Đang chặn: ${gate.blockedTracks.join(', ')}`
+            : '';
+        summary.textContent = gate.ready
+            ? `${coreSummary}. ${gate.reason}`
+            : `${coreSummary}${blockedText}. ${gate.reason}`;
+    }
+    if (updated) {
+        updated.textContent = `Cập nhật: ${formatSplitGateTimestamp(gate.generatedAt)}`;
+    }
+
+    const lockActions = !gate.ready;
+    const sendNoticeBtn = document.getElementById('action-send-notice-btn');
+    const createReportBtn = document.getElementById('action-create-report-btn');
+    setFraudActionButtonState(sendNoticeBtn, lockActions);
+    setFraudActionButtonState(createReportBtn, lockActions);
+
+    const lockReason = gate.reason || 'Split-trigger chưa sẵn sàng.';
+    if (sendNoticeBtn) {
+        sendNoticeBtn.title = lockActions ? lockReason : 'Gửi thông báo giải trình';
+    }
+    if (createReportBtn) {
+        createReportBtn.title = lockActions ? lockReason : 'Lập biên bản vi phạm';
+    }
+}
+
+
 // ===================================================================
 // MODE 1: SINGLE QUERY (Real-time)
 // ===================================================================
@@ -657,9 +797,14 @@ function renderSingleResult(data) {
     document.getElementById('result-revenue').textContent = formatVND(data.revenue);
     document.getElementById('result-expenses').textContent = formatVND(data.total_expenses);
     document.getElementById('result-year').textContent = data.year || '---';
+    renderFraudSplitTriggerGate(data.split_trigger_status || null);
 
     animateRiskScore(data.risk_score || 0, data);
     renderRedFlags(data.red_flags || []);
+    const interventionPayload = normalizeInterventionUplift(data.intervention_uplift || null, data);
+    renderDecisionIntelligence(data.decision_intelligence || null, data, interventionPayload);
+    renderVatRefundSignals(data.vat_refund_signals || null, data);
+    renderAuditValue(data.audit_value || null, data);
     renderShapExplanation(data.shap_explanation || []);
 
     // Single Query Charts (Trend + Radar)
@@ -751,6 +896,1096 @@ function renderSingleResult(data) {
         whatifBox.style.display = 'block';
         window._whatifTaxCode = data.tax_code;
         window._whatifOriginalScore = data.risk_score;
+    }
+}
+
+
+function buildFallbackInterventionUplift(data) {
+    const score = Math.max(0, Math.min(100, Number(data?.risk_score || 0)));
+    const anomaly = Math.max(0, Number(data?.anomaly_score || 0));
+    const confidenceRaw = Math.max(0, Math.min(100, Number(data?.model_confidence || 0)));
+    const redFlags = Array.isArray(data?.red_flags) ? data.red_flags : [];
+
+    const highFlagCount = redFlags.filter((flag) => {
+        const severity = String(flag?.severity || '').toLowerCase();
+        return severity === 'high' || severity === 'critical';
+    }).length;
+
+    const yearlyFeatureScores = Array.isArray(data?.yearly_feature_scores) ? data.yearly_feature_scores : [];
+    let trendDelta = 0;
+    if (yearlyFeatureScores.length >= 2) {
+        const sorted = [...yearlyFeatureScores].sort((a, b) => Number(a?.year || 0) - Number(b?.year || 0));
+        const latest = Number(sorted[sorted.length - 1]?.risk_score || 0);
+        const previous = Number(sorted[sorted.length - 2]?.risk_score || 0);
+        trendDelta = latest - previous;
+    }
+
+    const priorityRaw = (
+        score * 0.60
+        + Math.min(20, highFlagCount * 8)
+        + Math.min(12, redFlags.length * 2)
+        + Math.min(10, Math.max(0, trendDelta) * 0.8)
+        + Math.min(15, Math.max(0, (anomaly - 0.55) * 35))
+    );
+    const priorityScore = Math.max(0, Math.min(100, Math.round(priorityRaw + (confidenceRaw > 0 && confidenceRaw < 55 ? 5 : 0))));
+
+    let action = 'monitor';
+    if (score >= 82 || highFlagCount >= 2 || anomaly >= 0.90 || priorityScore >= 86) {
+        action = 'escalated_enforcement';
+    } else if (score >= 65 || highFlagCount >= 1 || priorityScore >= 68) {
+        action = 'field_audit';
+    } else if (score >= 45 || redFlags.length > 0 || priorityScore >= 50) {
+        action = 'structured_outreach';
+    } else if (score >= 25 || anomaly >= 0.60) {
+        action = 'auto_reminder';
+    }
+
+    const impactRatioMap = {
+        monitor: 0.05,
+        auto_reminder: 0.12,
+        structured_outreach: 0.20,
+        field_audit: 0.30,
+        escalated_enforcement: 0.38,
+    };
+    const impactRatio = impactRatioMap[action] || 0.12;
+
+    const revenue = Math.max(0, Number(data?.revenue || 0));
+    const totalExpenses = Math.max(0, Number(data?.total_expenses || 0));
+    const estimatedPenaltyExposure = Math.max(0, (totalExpenses - revenue) * 0.03) + highFlagCount * 2500000 + redFlags.length * 800000;
+    const estimatedCollectionBase = Math.max(0, revenue * 0.015 + totalExpenses * 0.008);
+
+    const confidence = confidenceRaw >= 80 ? 'high' : confidenceRaw >= 55 ? 'medium' : 'low';
+    const rationale = [
+        `Điểm rủi ro hiện tại ${score.toFixed(1)}/100.`,
+        highFlagCount > 0 ? `Ghi nhận ${highFlagCount} red flag mức cao.` : null,
+        trendDelta >= 8 ? `Xu hướng điểm rủi ro tăng ${trendDelta.toFixed(1)} điểm.` : null,
+        anomaly >= 0.70 ? 'Điểm dị biệt ở mức cần can thiệp nghiệp vụ.' : null,
+    ].filter(Boolean).join(' ');
+
+    const nextStepsByAction = {
+        monitor: [
+            'Duy trì giám sát định kỳ theo chu kỳ quý.',
+            'Tự động cảnh báo khi điểm vượt ngưỡng 45 trong kỳ mới.',
+        ],
+        auto_reminder: [
+            'Gửi nhắc hạn giải trình cho doanh nghiệp trong 72 giờ.',
+            'Ràng buộc đối soát bổ sung nếu điểm dị biệt tiếp tục tăng.',
+        ],
+        structured_outreach: [
+            'Mở phiên làm việc có cấu trúc với doanh nghiệp theo checklist F1-F4.',
+            'Đối chiếu tờ khai VAT và báo cáo tài chính của 3 kỳ gần nhất.',
+        ],
+        field_audit: [
+            'Phân công tổ nghiệp vụ kiểm tra tại chỗ theo hồ sơ ưu tiên.',
+            'Yêu cầu bộ chứng từ giải trình và đối soát nguồn hóa đơn liên quan.',
+        ],
+        escalated_enforcement: [
+            'Kích hoạt quy trình xử lý cưỡng chế theo thẩm quyền.',
+            'Phối hợp liên đơn vị để thu hồi nghĩa vụ tồn đọng trong 30 ngày.',
+        ],
+    };
+
+    return {
+        recommended_action: action,
+        priority_score: priorityScore,
+        expected_risk_reduction_pp: Number((score * impactRatio).toFixed(1)),
+        expected_penalty_saving: Number((estimatedPenaltyExposure * Math.min(0.9, impactRatio + 0.15)).toFixed(2)),
+        expected_collection_uplift: Number((estimatedCollectionBase * impactRatio).toFixed(2)),
+        confidence,
+        rationale: rationale || 'Hệ thống chưa ghi nhận động lực can thiệp mạnh ở chu kỳ hiện tại.',
+        next_steps: nextStepsByAction[action] || nextStepsByAction.monitor,
+    };
+}
+
+
+function normalizeInterventionUplift(interventionUplift, data) {
+    const fallback = buildFallbackInterventionUplift(data || {});
+    if (!interventionUplift || typeof interventionUplift !== 'object') {
+        return fallback;
+    }
+
+    const actionRaw = String(interventionUplift.recommended_action || '').trim();
+    const allowedActions = new Set(['monitor', 'auto_reminder', 'structured_outreach', 'field_audit', 'escalated_enforcement']);
+    const recommendedAction = allowedActions.has(actionRaw) ? actionRaw : fallback.recommended_action;
+
+    const priorityScore = Number.isFinite(Number(interventionUplift.priority_score))
+        ? Math.max(0, Math.min(100, Math.round(Number(interventionUplift.priority_score))))
+        : fallback.priority_score;
+
+    const expectedRiskReduction = Number.isFinite(Number(interventionUplift.expected_risk_reduction_pp))
+        ? Math.max(0, Number(interventionUplift.expected_risk_reduction_pp))
+        : fallback.expected_risk_reduction_pp;
+
+    const expectedPenaltySaving = Number.isFinite(Number(interventionUplift.expected_penalty_saving))
+        ? Math.max(0, Number(interventionUplift.expected_penalty_saving))
+        : fallback.expected_penalty_saving;
+
+    const expectedCollectionUplift = Number.isFinite(Number(interventionUplift.expected_collection_uplift))
+        ? Math.max(0, Number(interventionUplift.expected_collection_uplift))
+        : fallback.expected_collection_uplift;
+
+    const confidenceRaw = String(interventionUplift.confidence || '').toLowerCase();
+    const confidence = ['low', 'medium', 'high'].includes(confidenceRaw) ? confidenceRaw : fallback.confidence;
+
+    const rationale = (typeof interventionUplift.rationale === 'string' && interventionUplift.rationale.trim())
+        ? interventionUplift.rationale.trim()
+        : fallback.rationale;
+
+    const nextSteps = Array.isArray(interventionUplift.next_steps)
+        ? interventionUplift.next_steps.map((step) => String(step || '').trim()).filter(Boolean).slice(0, 5)
+        : [];
+
+    return {
+        recommended_action: recommendedAction,
+        priority_score: priorityScore,
+        expected_risk_reduction_pp: expectedRiskReduction,
+        expected_penalty_saving: expectedPenaltySaving,
+        expected_collection_uplift: expectedCollectionUplift,
+        confidence,
+        rationale,
+        next_steps: nextSteps.length ? nextSteps : fallback.next_steps,
+    };
+}
+
+
+function mapDecisionFromIntervention(interventionPayload) {
+    const action = String(interventionPayload?.recommended_action || 'monitor');
+    if (action === 'escalated_enforcement') {
+        return { recommended_action: 'urgent_audit', action_label: 'Xử lý cưỡng chế nâng cao', action_deadline_days: 7 };
+    }
+    if (action === 'field_audit') {
+        return { recommended_action: 'targeted_review', action_label: 'Kiểm tra tại chỗ', action_deadline_days: 14 };
+    }
+    if (action === 'structured_outreach') {
+        return { recommended_action: 'enhanced_monitoring', action_label: 'Can thiệp có cấu trúc', action_deadline_days: 21 };
+    }
+    if (action === 'auto_reminder') {
+        return { recommended_action: 'enhanced_monitoring', action_label: 'Nhắc hạn tự động', action_deadline_days: 30 };
+    }
+    return { recommended_action: 'periodic_monitoring', action_label: 'Theo dõi định kỳ', action_deadline_days: 60 };
+}
+
+
+function harmonizeDecisionWithIntervention(decisionPayload, interventionPayload) {
+    const base = decisionPayload && typeof decisionPayload === 'object' ? { ...decisionPayload } : {};
+    const intervention = normalizeInterventionUplift(interventionPayload || null, null);
+    const mapped = mapDecisionFromIntervention(intervention);
+    const shouldEscalate = intervention.recommended_action === 'field_audit'
+        || intervention.recommended_action === 'escalated_enforcement'
+        || Number(intervention.priority_score || 0) >= 75;
+
+    const topSignals = Array.isArray(base.top_signals) ? [...base.top_signals] : [];
+    if (!topSignals.some((signal) => String(signal?.key || '') === 'intervention_uplift')) {
+        topSignals.push({
+            key: 'intervention_uplift',
+            label: 'Can thiệp/Uplift',
+            value: Number(intervention.priority_score || 0),
+            severity: shouldEscalate ? 'high' : Number(intervention.priority_score || 0) >= 45 ? 'medium' : 'low',
+            summary: intervention.rationale || 'Hành động can thiệp đã được đồng bộ với Trí tuệ quyết định.',
+        });
+    }
+
+    return {
+        ...base,
+        recommended_action: mapped.recommended_action,
+        action_label: mapped.action_label,
+        action_deadline_days: mapped.action_deadline_days,
+        priority_score: Number(intervention.priority_score || 0),
+        rationale: intervention.rationale || base.rationale || 'Không có ghi chú giải thích bổ sung.',
+        next_steps: Array.isArray(intervention.next_steps) && intervention.next_steps.length ? intervention.next_steps : (base.next_steps || []),
+        top_signals: topSignals.slice(0, 4),
+        should_escalate: shouldEscalate,
+    };
+}
+
+
+function buildFallbackDecisionIntelligence(data) {
+    const score = Math.max(0, Math.min(100, Number(data?.risk_score || 0)));
+    const anomaly = Math.max(0, Number(data?.anomaly_score || 0));
+    const redFlags = Array.isArray(data?.red_flags) ? data.red_flags : [];
+    const yearlyFeatureScores = Array.isArray(data?.yearly_feature_scores) ? data.yearly_feature_scores : [];
+
+    let trendDelta = 0;
+    if (yearlyFeatureScores.length >= 2) {
+        const sorted = [...yearlyFeatureScores].sort((a, b) => Number(a?.year || 0) - Number(b?.year || 0));
+        const latest = Number(sorted[sorted.length - 1]?.risk_score || 0);
+        const previous = Number(sorted[sorted.length - 2]?.risk_score || 0);
+        trendDelta = latest - previous;
+    }
+
+    const highFlagCount = redFlags.filter((flag) => {
+        const severity = String(flag?.severity || '').toLowerCase();
+        return severity === 'high' || severity === 'critical';
+    }).length;
+
+    const priorityRaw = (
+        score * 0.62
+        + Math.min(20, highFlagCount * 9)
+        + Math.min(12, redFlags.length * 2)
+        + Math.min(14, Math.max(0, trendDelta) * 0.9)
+        + Math.min(15, Math.max(0, (anomaly - 0.5) * 35))
+    );
+    const priorityScore = Math.max(0, Math.min(100, Math.round(priorityRaw)));
+
+    let recommendedAction = 'periodic_monitoring';
+    let actionLabel = 'Theo dõi định kỳ';
+    let actionDeadlineDays = 60;
+    let shouldEscalate = false;
+
+    if (score >= 80 || highFlagCount >= 2 || anomaly >= 0.90 || priorityScore >= 85) {
+        recommendedAction = 'urgent_audit';
+        actionLabel = 'Thanh tra đột xuất';
+        actionDeadlineDays = 7;
+        shouldEscalate = true;
+    } else if (score >= 60 || highFlagCount >= 1 || priorityScore >= 65) {
+        recommendedAction = 'targeted_review';
+        actionLabel = 'Kiểm tra chuyên sâu';
+        actionDeadlineDays = 15;
+        shouldEscalate = priorityScore >= 75;
+    } else if (score >= 40 || redFlags.length > 0 || priorityScore >= 45) {
+        recommendedAction = 'enhanced_monitoring';
+        actionLabel = 'Giám sát tăng cường';
+        actionDeadlineDays = 30;
+    }
+
+    const nextStepsByAction = {
+        urgent_audit: [
+            'Khởi tạo hồ sơ thanh tra đột xuất trong 24 giờ.',
+            'Yêu cầu doanh nghiệp giải trình hóa đơn VAT trong 7 ngày.',
+            'Đối soát giao dịch liên quan với nhóm đối tác có rủi ro cao.',
+        ],
+        targeted_review: [
+            'Mở đợt kiểm tra chuyên đề theo nhóm chỉ số vượt ngưỡng.',
+            'Ưu tiên đối soát tờ khai VAT và điều chỉnh bổ sung gần nhất.',
+            'Đánh giá lại sau khi tiếp nhận bộ chứng từ giải trình.',
+        ],
+        enhanced_monitoring: [
+            'Đưa doanh nghiệp vào danh sách giám sát tăng cường theo tháng.',
+            'Theo dõi biến động điểm và kích hoạt cảnh báo nếu điểm vượt 60.',
+            'Cập nhật bộ dữ liệu trước kỳ đánh giá tiếp theo.',
+        ],
+        periodic_monitoring: [
+            'Duy trì theo dõi định kỳ theo quý.',
+            'Cập nhật dữ liệu tài chính mới trước lần đánh giá tiếp theo.',
+            'Tự động nâng cấp mức cảnh báo nếu xuất hiện red flag mới.',
+        ],
+    };
+
+    const topSignals = [
+        {
+            key: 'risk_score',
+            label: 'Tổng điểm rủi ro',
+            value: score,
+            severity: score >= 60 ? 'high' : score >= 40 ? 'medium' : 'low',
+            summary: `Điểm tổng hợp hiện tại ${score.toFixed(1)}/100.`,
+        },
+    ];
+    if (anomaly >= 0.6) {
+        topSignals.push({
+            key: 'anomaly_score',
+            label: 'Độ dị biệt',
+            value: anomaly,
+            severity: anomaly >= 0.85 ? 'high' : 'medium',
+            summary: 'Độ dị biệt tài chính đang cao hơn mức an toàn.',
+        });
+    }
+    if (redFlags.length > 0) {
+        topSignals.push({
+            key: 'red_flags',
+            label: 'Cụm cảnh báo',
+            value: redFlags.length,
+            severity: highFlagCount > 0 || redFlags.length >= 3 ? 'high' : 'medium',
+            summary: `Phát hiện ${redFlags.length} red flag trong kết quả AI.`,
+        });
+    }
+    if (trendDelta >= 8) {
+        topSignals.push({
+            key: 'risk_trend',
+            label: 'Xu hướng điểm rủi ro',
+            value: trendDelta,
+            severity: trendDelta >= 15 ? 'high' : 'medium',
+            summary: 'Điểm rủi ro đang tăng so với kỳ trước.',
+        });
+    }
+
+    const rationale = [
+        `Điểm rủi ro hiện tại ${score.toFixed(1)}/100.`,
+        redFlags.length > 0 ? `Có ${redFlags.length} red flag đang kích hoạt.` : null,
+        trendDelta >= 8 ? `Xu hướng điểm rủi ro tăng ${trendDelta.toFixed(1)} điểm.` : null,
+        anomaly >= 0.7 ? 'Độ dị biệt tài chính ở mức cảnh báo.' : null,
+    ].filter(Boolean).join(' ');
+
+    return {
+        recommended_action: recommendedAction,
+        action_label: actionLabel,
+        action_deadline_days: actionDeadlineDays,
+        priority_score: priorityScore,
+        rationale: rationale || 'Hệ thống khuyến nghị theo dõi định kỳ đối với doanh nghiệp này.',
+        next_steps: nextStepsByAction[recommendedAction] || nextStepsByAction.periodic_monitoring,
+        top_signals: topSignals.slice(0, 4),
+        should_escalate: shouldEscalate,
+    };
+}
+
+
+function normalizeDecisionIntelligence(decisionIntelligence, data, interventionPayload = null) {
+    const fallback = buildFallbackDecisionIntelligence(data || {});
+    const normalizedIntervention = normalizeInterventionUplift(interventionPayload || data?.intervention_uplift || null, data || {});
+
+    if (!decisionIntelligence || typeof decisionIntelligence !== 'object') {
+        return harmonizeDecisionWithIntervention(fallback, normalizedIntervention);
+    }
+
+    const rawAction = String(decisionIntelligence.recommended_action || '').trim();
+    const allowedActions = new Set(['periodic_monitoring', 'enhanced_monitoring', 'targeted_review', 'urgent_audit']);
+    const recommendedAction = allowedActions.has(rawAction) ? rawAction : fallback.recommended_action;
+
+    const actionLabel = (typeof decisionIntelligence.action_label === 'string' && decisionIntelligence.action_label.trim())
+        ? decisionIntelligence.action_label.trim()
+        : fallback.action_label;
+
+    const actionDeadlineDays = Number.isFinite(Number(decisionIntelligence.action_deadline_days))
+        ? Math.max(1, Math.round(Number(decisionIntelligence.action_deadline_days)))
+        : fallback.action_deadline_days;
+
+    const priorityScore = Number.isFinite(Number(decisionIntelligence.priority_score))
+        ? Math.max(0, Math.min(100, Math.round(Number(decisionIntelligence.priority_score))))
+        : fallback.priority_score;
+
+    const rationale = (typeof decisionIntelligence.rationale === 'string' && decisionIntelligence.rationale.trim())
+        ? decisionIntelligence.rationale.trim()
+        : fallback.rationale;
+
+    const nextSteps = Array.isArray(decisionIntelligence.next_steps)
+        ? decisionIntelligence.next_steps
+            .map((step) => String(step || '').trim())
+            .filter(Boolean)
+            .slice(0, 5)
+        : [];
+
+    const topSignals = Array.isArray(decisionIntelligence.top_signals)
+        ? decisionIntelligence.top_signals
+            .filter((signal) => signal && typeof signal === 'object')
+            .map((signal) => {
+                const severity = String(signal.severity || '').toLowerCase();
+                return {
+                    key: String(signal.key || 'signal'),
+                    label: String(signal.label || 'Tín hiệu'),
+                    value: Number.isFinite(Number(signal.value)) ? Number(signal.value) : null,
+                    severity: severity === 'high' || severity === 'medium' || severity === 'low' ? severity : 'medium',
+                    summary: String(signal.summary || '').trim(),
+                };
+            })
+            .slice(0, 4)
+        : [];
+
+    const normalizedDecision = {
+        recommended_action: recommendedAction,
+        action_label: actionLabel,
+        action_deadline_days: actionDeadlineDays,
+        priority_score: priorityScore,
+        rationale,
+        next_steps: nextSteps.length ? nextSteps : fallback.next_steps,
+        top_signals: topSignals.length ? topSignals : fallback.top_signals,
+        should_escalate: Boolean(decisionIntelligence.should_escalate),
+    };
+
+    return harmonizeDecisionWithIntervention(normalizedDecision, normalizedIntervention);
+}
+
+
+function getDecisionBadgeClass(action) {
+    if (action === 'urgent_audit') return 'bg-red-100 text-red-700 border border-red-200';
+    if (action === 'targeted_review') return 'bg-orange-100 text-orange-700 border border-orange-200';
+    if (action === 'enhanced_monitoring') return 'bg-amber-100 text-amber-700 border border-amber-200';
+    return 'bg-emerald-100 text-emerald-700 border border-emerald-200';
+}
+
+
+function formatDecisionSignalValue(signal) {
+    const value = Number(signal?.value);
+    if (!Number.isFinite(value)) return 'Không có';
+
+    const key = String(signal?.key || '');
+    if (key === 'risk_score') return `${value.toFixed(1)}/100`;
+    if (key === 'anomaly_score') return `${(value * 100).toFixed(1)}%`;
+    if (key === 'risk_trend') return `${value > 0 ? '+' : ''}${value.toFixed(1)} điểm`;
+    if (key === 'red_flags') return `${Math.round(value)} cảnh báo`;
+    return value.toFixed(3);
+}
+
+
+function getInterventionActionLabel(action) {
+    const map = {
+        monitor: 'Giám sát',
+        auto_reminder: 'Nhắc hạn tự động',
+        structured_outreach: 'Can thiệp có cấu trúc',
+        field_audit: 'Kiểm tra tại chỗ',
+        escalated_enforcement: 'Cưỡng chế nâng cao',
+    };
+    return map[String(action || '').toLowerCase()] || 'Giám sát';
+}
+
+
+function renderDecisionIntelligence(decisionIntelligence, data, interventionPayload = null) {
+    const panel = document.getElementById('decision-intelligence-panel');
+    if (!panel) return;
+
+    const actionBadge = document.getElementById('decision-action-badge');
+    const priorityEl = document.getElementById('decision-priority-score');
+    const rationaleEl = document.getElementById('decision-rationale');
+    const interventionActionEl = document.getElementById('decision-intervention-action');
+    const interventionRiskReductionEl = document.getElementById('decision-intervention-risk-reduction');
+    const interventionCollectionUpliftEl = document.getElementById('decision-intervention-collection-uplift');
+    const stepsEl = document.getElementById('decision-next-steps');
+    const signalsEl = document.getElementById('decision-signals');
+
+    if (!actionBadge || !priorityEl || !rationaleEl || !stepsEl || !signalsEl) {
+        panel.style.display = 'none';
+        return;
+    }
+
+    const normalizedIntervention = normalizeInterventionUplift(interventionPayload || data?.intervention_uplift || null, data || {});
+    const payload = normalizeDecisionIntelligence(decisionIntelligence, data || {}, normalizedIntervention);
+    panel.style.display = 'block';
+
+    const suffix = payload.should_escalate ? ' • Chuyển cấp' : '';
+    actionBadge.className = `px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider ${getDecisionBadgeClass(payload.recommended_action)}`;
+    actionBadge.textContent = `${payload.action_label}${suffix}`;
+    priorityEl.textContent = String(payload.priority_score);
+    rationaleEl.textContent = payload.rationale || 'Không có ghi chú giải thích bổ sung.';
+
+    if (interventionActionEl) {
+        interventionActionEl.textContent = getInterventionActionLabel(normalizedIntervention.recommended_action || 'monitor');
+    }
+    if (interventionRiskReductionEl) {
+        interventionRiskReductionEl.textContent = `${Number(normalizedIntervention.expected_risk_reduction_pp || 0).toFixed(1)} pp`;
+    }
+    if (interventionCollectionUpliftEl) {
+        interventionCollectionUpliftEl.textContent = formatVND(Number(normalizedIntervention.expected_collection_uplift || 0));
+    }
+
+    stepsEl.innerHTML = '';
+    (Array.isArray(payload.next_steps) ? payload.next_steps : []).forEach((step) => {
+        const li = document.createElement('li');
+        li.className = 'flex items-start gap-2';
+
+        const icon = document.createElement('span');
+        icon.className = 'material-symbols-outlined text-[14px] text-primary-container mt-0.5';
+        icon.textContent = 'task_alt';
+
+        const text = document.createElement('span');
+        text.textContent = step;
+
+        li.appendChild(icon);
+        li.appendChild(text);
+        stepsEl.appendChild(li);
+    });
+
+    if (!stepsEl.children.length) {
+        const li = document.createElement('li');
+        li.className = 'text-slate-500 italic';
+        li.textContent = 'Chưa có hành động khuyến nghị.';
+        stepsEl.appendChild(li);
+    }
+
+    signalsEl.innerHTML = '';
+    const toneBySeverity = {
+        high: 'bg-red-50 border-red-200 text-red-700',
+        medium: 'bg-amber-50 border-amber-200 text-amber-700',
+        low: 'bg-emerald-50 border-emerald-200 text-emerald-700',
+    };
+
+    (Array.isArray(payload.top_signals) ? payload.top_signals : []).forEach((signal) => {
+        const tone = toneBySeverity[String(signal?.severity || 'medium')] || toneBySeverity.medium;
+        const card = document.createElement('div');
+        card.className = `rounded-lg border px-3 py-2 ${tone}`;
+
+        const title = document.createElement('p');
+        title.className = 'text-[10px] font-black uppercase tracking-wider';
+        title.textContent = `${signal.label || 'Tín hiệu'}: ${formatDecisionSignalValue(signal)}`;
+
+        const summary = document.createElement('p');
+        summary.className = 'text-[10px] mt-1 leading-relaxed';
+        summary.textContent = signal.summary || 'Tín hiệu được đưa vào danh sách ưu tiên kiểm tra.';
+
+        card.appendChild(title);
+        card.appendChild(summary);
+        signalsEl.appendChild(card);
+    });
+
+    if (!signalsEl.children.length) {
+        const placeholder = document.createElement('div');
+        placeholder.className = 'rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-[10px] text-slate-500 italic';
+        placeholder.textContent = 'Chưa ghi nhận tín hiệu ưu tiên bổ sung.';
+        signalsEl.appendChild(placeholder);
+    }
+}
+
+
+function buildFallbackVatRefundSignals(data) {
+    const score = Math.max(0, Math.min(100, Number(data?.risk_score || 0)));
+    const anomaly = Math.max(0, Number(data?.anomaly_score || 0));
+    const f2 = Math.max(0, Number(data?.f2_ratio_limit || 0));
+    const f3 = Math.max(0, Number(data?.f3_vat_structure || 0));
+    const revenue = Math.max(0, Number(data?.revenue || 0));
+    const totalExpenses = Math.max(0, Number(data?.total_expenses || 0));
+
+    const vatOutput = revenue * 0.1;
+    const vatInput = totalExpenses * 0.75 * 0.1;
+    const ratio = vatOutput > 0 ? vatInput / vatOutput : (vatInput > 0 ? 2 : 0);
+    const refundGap = Math.max(0, vatInput - vatOutput);
+
+    const redFlags = Array.isArray(data?.red_flags) ? data.red_flags : [];
+    const vatFlagCount = redFlags.filter((flag) => {
+        const blob = [
+            flag?.feature,
+            flag?.title,
+            flag?.reason,
+            flag?.description,
+            flag?.actual_value,
+        ].map((v) => String(v || '').toLowerCase()).join(' ');
+        return blob.includes('vat') || blob.includes('hoa don') || blob.includes('hoan thue') || blob.includes('invoice');
+    }).length;
+
+    const yearlyFeatureScores = Array.isArray(data?.yearly_feature_scores) ? data.yearly_feature_scores : [];
+    let f3Trend = 0;
+    if (yearlyFeatureScores.length >= 2) {
+        const sorted = [...yearlyFeatureScores].sort((a, b) => Number(a?.year || 0) - Number(b?.year || 0));
+        f3Trend = Number(sorted[sorted.length - 1]?.f3_vat_structure || 0) - Number(sorted[sorted.length - 2]?.f3_vat_structure || 0);
+    }
+
+    const indicators = [];
+    if (f3 >= 0.7) {
+        indicators.push({ key: 'f3_vat_structure', label: 'Cấu trúc VAT bất thường', value: f3, severity: 'high', summary: 'F3 VAT vượt ngưỡng cao cần đối soát.' });
+    } else if (f3 >= 0.55) {
+        indicators.push({ key: 'f3_vat_structure', label: 'Cấu trúc VAT bất thường', value: f3, severity: 'medium', summary: 'F3 VAT vượt ngưỡng theo dõi.' });
+    }
+    if (ratio >= 1.15) {
+        indicators.push({ key: 'vat_input_output_ratio', label: 'Tỷ lệ VAT đầu vào/đầu ra', value: ratio, severity: 'high', summary: 'VAT đầu vào vượt đáng kể VAT đầu ra.' });
+    } else if (ratio >= 1.0) {
+        indicators.push({ key: 'vat_input_output_ratio', label: 'Tỷ lệ VAT đầu vào/đầu ra', value: ratio, severity: 'medium', summary: 'Tỷ lệ VAT cần được theo dõi sát.' });
+    }
+    if (refundGap > 0) {
+        indicators.push({ key: 'estimated_refund_gap', label: 'Chênh lệch VAT ước tính', value: refundGap, severity: refundGap > vatOutput * 0.3 ? 'high' : 'medium', summary: 'Chênh lệch VAT dương cần đối chiếu chứng từ.' });
+    }
+    if (vatFlagCount > 0) {
+        indicators.push({ key: 'vat_related_flags', label: 'Red-flag liên quan VAT', value: vatFlagCount, severity: vatFlagCount >= 2 ? 'high' : 'medium', summary: `Ghi nhận ${vatFlagCount} red-flag liên quan VAT/hóa đơn.` });
+    }
+    if (anomaly >= 0.75) {
+        indicators.push({ key: 'anomaly_score', label: 'Độ dị biệt tài chính', value: anomaly, severity: anomaly >= 0.9 ? 'high' : 'medium', summary: 'Độ dị biệt tài chính vượt ngưỡng theo dõi hoàn thuế.' });
+    }
+    if (f3Trend >= 0.08) {
+        indicators.push({ key: 'f3_trend', label: 'Xu hướng F3 VAT', value: f3Trend, severity: f3Trend >= 0.15 ? 'high' : 'medium', summary: 'F3 VAT tăng so với kỳ trước.' });
+    }
+
+    const priorityRaw = (
+        f3 * 45
+        + Math.min(25, Math.max(0, (ratio - 1) * 60))
+        + Math.min(15, Math.max(0, refundGap / (vatOutput + 1)) * 10)
+        + Math.min(20, vatFlagCount * 8)
+        + Math.min(10, Math.max(0, anomaly - 0.6) * 30)
+        + Math.min(8, Math.max(0, f3Trend) * 40)
+        + (score >= 60 ? 6 : 0)
+        + (f2 >= 1.2 ? 5 : 0)
+    );
+    const signalScore = Math.max(0, Math.min(100, Math.round(priorityRaw)));
+
+    let queue = 'monitor';
+    let level = 'low';
+    let hasSignal = false;
+    if (signalScore >= 80 || (f3 >= 0.7 && ratio >= 1.2) || vatFlagCount >= 2) {
+        queue = 'priority_refund_audit';
+        level = 'critical';
+        hasSignal = true;
+    } else if (signalScore >= 60 || (f3 >= 0.65 && ratio >= 1.05)) {
+        queue = 'priority_refund_audit';
+        level = 'high';
+        hasSignal = true;
+    } else if (signalScore >= 40 || f3 >= 0.55 || ratio >= 1.0) {
+        queue = 'refund_watchlist';
+        level = 'medium';
+        hasSignal = true;
+    }
+
+    const rationaleParts = [];
+    if (hasSignal) rationaleParts.push(`Mức ưu tiên hoàn thuế VAT: ${level.toUpperCase()} (${signalScore}/100).`);
+    if (f3 >= 0.55) rationaleParts.push(`F3 VAT = ${f3.toFixed(2)} vượt ngưỡng theo dõi.`);
+    if (ratio >= 1.0) rationaleParts.push(`Tỷ lệ VAT đầu vào/đầu ra = ${ratio.toFixed(2)}.`);
+    if (refundGap > 0) rationaleParts.push(`Chênh lệch VAT đầu vào-đầu ra ước tính ${refundGap.toFixed(0)}.`);
+    if (vatFlagCount > 0) rationaleParts.push(`Có ${vatFlagCount} red-flag liên quan VAT/hóa đơn.`);
+    if (!rationaleParts.length) rationaleParts.push('Chưa ghi nhận tín hiệu hoàn thuế VAT bất thường trong kỳ hiện tại.');
+
+    const checksMap = {
+        priority_refund_audit: [
+            'Đối chiếu hóa đơn VAT đầu vào theo chuỗi nhà cung cấp trước phê duyệt hoàn.',
+            'Kiểm tra tính hợp lệ bộ chứng từ khấu trừ VAT của 3 kỳ gần nhất.',
+            'Bổ sung xác minh giao dịch có VAT đầu vào giá trị lớn.',
+        ],
+        refund_watchlist: [
+            'Đưa hồ sơ vào danh sách theo dõi hoàn thuế theo chu kỳ tháng/quý.',
+            'Yêu cầu bổ sung giải trình cho hóa đơn đầu vào giá trị cao.',
+            'Cảnh báo nếu F3 VAT tiếp tục tăng trong kỳ tiếp theo.',
+        ],
+        monitor: [
+            'Duy trì giám sát thường xuyên, chưa cần kích hoạt kiểm tra chuyên đề.',
+            'Cập nhật dữ liệu VAT kỳ mới để đánh giá lại xu hướng.',
+        ],
+    };
+
+    return {
+        has_signal: hasSignal,
+        queue,
+        level,
+        score: signalScore,
+        rationale: rationaleParts.join(' '),
+        vat_input_output_ratio: Number.isFinite(ratio) ? ratio : null,
+        estimated_refund_gap: Number.isFinite(refundGap) ? refundGap : 0,
+        recommended_checks: checksMap[queue] || checksMap.monitor,
+        indicators: indicators.slice(0, 5),
+    };
+}
+
+
+function normalizeVatRefundSignals(vatRefundSignals, data) {
+    const fallback = buildFallbackVatRefundSignals(data || {});
+    if (!vatRefundSignals || typeof vatRefundSignals !== 'object') {
+        return fallback;
+    }
+
+    const queue = ['monitor', 'refund_watchlist', 'priority_refund_audit'].includes(String(vatRefundSignals.queue || ''))
+        ? String(vatRefundSignals.queue)
+        : fallback.queue;
+    const level = ['low', 'medium', 'high', 'critical'].includes(String(vatRefundSignals.level || ''))
+        ? String(vatRefundSignals.level)
+        : fallback.level;
+    const score = Number.isFinite(Number(vatRefundSignals.score))
+        ? Math.max(0, Math.min(100, Math.round(Number(vatRefundSignals.score))))
+        : fallback.score;
+    const ratio = Number.isFinite(Number(vatRefundSignals.vat_input_output_ratio))
+        ? Number(vatRefundSignals.vat_input_output_ratio)
+        : fallback.vat_input_output_ratio;
+    const gap = Number.isFinite(Number(vatRefundSignals.estimated_refund_gap))
+        ? Math.max(0, Number(vatRefundSignals.estimated_refund_gap))
+        : fallback.estimated_refund_gap;
+    const rationale = (typeof vatRefundSignals.rationale === 'string' && vatRefundSignals.rationale.trim())
+        ? vatRefundSignals.rationale.trim()
+        : fallback.rationale;
+    const recommendedChecks = Array.isArray(vatRefundSignals.recommended_checks)
+        ? vatRefundSignals.recommended_checks.map((it) => String(it || '').trim()).filter(Boolean).slice(0, 5)
+        : [];
+    const indicators = Array.isArray(vatRefundSignals.indicators)
+        ? vatRefundSignals.indicators
+            .filter((item) => item && typeof item === 'object')
+            .map((item) => {
+                const severity = String(item.severity || '').toLowerCase();
+                return {
+                    key: String(item.key || 'signal'),
+                    label: String(item.label || 'Tín hiệu VAT'),
+                    value: Number.isFinite(Number(item.value)) ? Number(item.value) : null,
+                    severity: ['low', 'medium', 'high'].includes(severity) ? severity : 'medium',
+                    summary: String(item.summary || '').trim(),
+                };
+            })
+            .slice(0, 5)
+        : [];
+
+    return {
+        has_signal: Boolean(vatRefundSignals.has_signal) || queue !== 'monitor' || level !== 'low',
+        queue,
+        level,
+        score,
+        rationale,
+        vat_input_output_ratio: ratio,
+        estimated_refund_gap: gap,
+        recommended_checks: recommendedChecks.length ? recommendedChecks : fallback.recommended_checks,
+        indicators: indicators.length ? indicators : fallback.indicators,
+    };
+}
+
+
+function getVatRefundQueueClass(queue) {
+    if (queue === 'priority_refund_audit') return 'bg-red-100 text-red-700 border border-red-200';
+    if (queue === 'refund_watchlist') return 'bg-amber-100 text-amber-700 border border-amber-200';
+    return 'bg-blue-100 text-blue-700 border border-blue-200';
+}
+
+
+function formatVatRefundIndicatorValue(indicator) {
+    const value = Number(indicator?.value);
+    if (!Number.isFinite(value)) return 'Không có';
+    const key = String(indicator?.key || '');
+    if (key === 'vat_input_output_ratio') return `${value.toFixed(2)}x`;
+    if (key === 'estimated_refund_gap') return formatVND(value);
+    if (key === 'vat_related_flags') return `${Math.round(value)} cảnh báo`;
+    if (key === 'anomaly_score') return `${(value * 100).toFixed(1)}%`;
+    if (key === 'f3_trend') return `${value > 0 ? '+' : ''}${value.toFixed(3)}`;
+    return value.toFixed(3);
+}
+
+
+function renderVatRefundSignals(vatRefundSignals, data) {
+    const panel = document.getElementById('vat-refund-signals-panel');
+    if (!panel) return;
+
+    const queueBadge = document.getElementById('vat-refund-queue-badge');
+    const scoreEl = document.getElementById('vat-refund-score');
+    const ratioEl = document.getElementById('vat-refund-ratio');
+    const gapEl = document.getElementById('vat-refund-gap');
+    const rationaleEl = document.getElementById('vat-refund-rationale');
+    const checksEl = document.getElementById('vat-refund-checks');
+    const indicatorsEl = document.getElementById('vat-refund-indicators');
+
+    if (!queueBadge || !scoreEl || !ratioEl || !gapEl || !rationaleEl || !checksEl || !indicatorsEl) {
+        panel.style.display = 'none';
+        return;
+    }
+
+    const payload = normalizeVatRefundSignals(vatRefundSignals, data || {});
+    panel.style.display = 'block';
+
+    const queueLabelMap = {
+        priority_refund_audit: 'Kiểm tra hoàn thuế ưu tiên',
+        refund_watchlist: 'Danh sách theo dõi hoàn thuế',
+        monitor: 'Giám sát',
+    };
+
+    queueBadge.className = `px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider ${getVatRefundQueueClass(payload.queue)}`;
+    queueBadge.textContent = `${queueLabelMap[payload.queue] || 'Giám sát'} • ${String(payload.level || 'low').toUpperCase()}`;
+    scoreEl.textContent = String(payload.score || 0);
+
+    ratioEl.textContent = Number.isFinite(Number(payload.vat_input_output_ratio))
+        ? `${Number(payload.vat_input_output_ratio).toFixed(2)}x`
+        : '--';
+    gapEl.textContent = Number.isFinite(Number(payload.estimated_refund_gap))
+        ? formatVND(Number(payload.estimated_refund_gap))
+        : '--';
+    rationaleEl.textContent = payload.rationale || 'Chưa ghi nhận tín hiệu hoàn thuế VAT bất thường.';
+
+    checksEl.innerHTML = '';
+    (Array.isArray(payload.recommended_checks) ? payload.recommended_checks : []).forEach((check) => {
+        const li = document.createElement('li');
+        li.className = 'flex items-start gap-2';
+
+        const icon = document.createElement('span');
+        icon.className = 'material-symbols-outlined text-[14px] text-primary-container mt-0.5';
+        icon.textContent = 'task_alt';
+
+        const text = document.createElement('span');
+        text.textContent = check;
+
+        li.appendChild(icon);
+        li.appendChild(text);
+        checksEl.appendChild(li);
+    });
+    if (!checksEl.children.length) {
+        const li = document.createElement('li');
+        li.className = 'text-slate-500 italic';
+        li.textContent = 'Chưa có kiểm tra bổ sung được đề xuất.';
+        checksEl.appendChild(li);
+    }
+
+    indicatorsEl.innerHTML = '';
+    const toneBySeverity = {
+        high: 'bg-red-50 border-red-200 text-red-700',
+        medium: 'bg-amber-50 border-amber-200 text-amber-700',
+        low: 'bg-emerald-50 border-emerald-200 text-emerald-700',
+    };
+
+    (Array.isArray(payload.indicators) ? payload.indicators : []).forEach((indicator) => {
+        const tone = toneBySeverity[String(indicator?.severity || 'medium')] || toneBySeverity.medium;
+        const card = document.createElement('div');
+        card.className = `rounded-lg border px-3 py-2 ${tone}`;
+
+        const title = document.createElement('p');
+        title.className = 'text-[10px] font-black uppercase tracking-wider';
+        title.textContent = `${indicator.label || 'Tín hiệu VAT'}: ${formatVatRefundIndicatorValue(indicator)}`;
+
+        const summary = document.createElement('p');
+        summary.className = 'text-[10px] mt-1 leading-relaxed';
+        summary.textContent = indicator.summary || 'Chỉ báo VAT cần được xem xét bổ sung.';
+
+        card.appendChild(title);
+        card.appendChild(summary);
+        indicatorsEl.appendChild(card);
+    });
+
+    if (!indicatorsEl.children.length) {
+        const placeholder = document.createElement('div');
+        placeholder.className = 'rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-[10px] text-slate-500 italic';
+        placeholder.textContent = 'Không có tín hiệu VAT ưu tiên tại thời điểm đánh giá.';
+        indicatorsEl.appendChild(placeholder);
+    }
+}
+
+
+function buildFallbackAuditValue(data) {
+    const score = Math.max(0, Math.min(100, Number(data?.risk_score || 0)));
+    const anomaly = Math.max(0, Number(data?.anomaly_score || 0));
+    const confidenceRaw = Math.max(0, Math.min(100, Number(data?.model_confidence || 0)));
+    const rev = Math.max(0, Number(data?.revenue || 0));
+    const exp = Math.max(0, Number(data?.total_expenses || 0));
+
+    const redFlags = Array.isArray(data?.red_flags) ? data.red_flags : [];
+    const highRedFlagCount = redFlags.filter((flag) => {
+        const severity = String(flag?.severity || '').toLowerCase();
+        return severity === 'high' || severity === 'critical';
+    }).length;
+
+    const yearlyFeatureScores = Array.isArray(data?.yearly_feature_scores) ? data.yearly_feature_scores : [];
+    let trendDelta = 0;
+    if (yearlyFeatureScores.length >= 2) {
+        const sorted = [...yearlyFeatureScores].sort((a, b) => Number(a?.year || 0) - Number(b?.year || 0));
+        trendDelta = Number(sorted[sorted.length - 1]?.risk_score || 0) - Number(sorted[sorted.length - 2]?.risk_score || 0);
+    }
+
+    const marginGap = Math.max(0, exp - rev);
+    const exposureBase = (
+        marginGap * 0.08
+        + rev * 0.012
+        + redFlags.length * 900000
+        + highRedFlagCount * 2200000
+        + Math.max(0, anomaly - 0.55) * 25000000
+        + Math.max(0, trendDelta) * 450000
+    );
+
+    let recoverability = (
+        0.18
+        + (score / 100) * 0.45
+        + Math.min(0.15, Math.max(0, anomaly - 0.5) * 0.45)
+        + Math.min(0.14, highRedFlagCount * 0.04)
+        + (trendDelta >= 10 ? 0.05 : 0)
+    );
+    if (confidenceRaw > 0 && confidenceRaw < 55) recoverability -= 0.06;
+    recoverability = Math.max(0.08, Math.min(0.86, recoverability));
+
+    const estimatedRecovery = Math.max(0, exposureBase) * recoverability;
+    const auditHoursEstimate = Math.max(
+        8,
+        Math.min(120, 14 + score * 0.62 + highRedFlagCount * 4.5 + Math.min(18, Math.max(0, trendDelta) * 0.7)),
+    );
+    const estimatedAuditCost = auditHoursEstimate * 650000;
+    const expectedNetRecovery = Math.max(0, estimatedRecovery - estimatedAuditCost);
+
+    const netMillion = expectedNetRecovery / 1000000;
+    let priorityScore = Math.round(
+        score * 0.55
+        + Math.min(24, netMillion * 0.75)
+        + Math.min(12, highRedFlagCount * 3)
+        + (recoverability >= 0.6 ? 5 : 0),
+    );
+    priorityScore = Math.max(0, Math.min(100, priorityScore));
+
+    let recommendedLane = 'monitor';
+    if (expectedNetRecovery >= 2000000000 || priorityScore >= 80) {
+        recommendedLane = 'priority_audit';
+    } else if (expectedNetRecovery >= 800000000 || priorityScore >= 62) {
+        recommendedLane = 'targeted_audit';
+    } else if (expectedNetRecovery >= 200000000 || priorityScore >= 45) {
+        recommendedLane = 'desk_review';
+    }
+
+    let confidence = 'low';
+    if (confidenceRaw >= 80) confidence = 'high';
+    else if (confidenceRaw >= 55) confidence = 'medium';
+    if (confidence === 'low' && yearlyFeatureScores.length >= 4) confidence = 'medium';
+
+    const rationaleParts = [
+        `Giá trị truy thu kỳ vọng ước tính ${formatVND(estimatedRecovery)}.`,
+        `Giá trị thuần sau chi phí ước tính ${formatVND(expectedNetRecovery)}.`,
+        `Điểm rủi ro hiện tại ${score.toFixed(1)}/100 với khả năng thu hồi ${(recoverability * 100).toFixed(1)}%.`,
+    ];
+    if (highRedFlagCount > 0) rationaleParts.push(`Phát hiện ${highRedFlagCount} red flag mức cao cần ưu tiên hồ sơ.`);
+    if (trendDelta >= 8) rationaleParts.push(`Xu hướng rủi ro tăng ${trendDelta.toFixed(1)} điểm so với kỳ trước.`);
+
+    return {
+        estimated_recovery: estimatedRecovery,
+        expected_net_recovery: expectedNetRecovery,
+        recoverability_ratio: recoverability,
+        audit_hours_estimate: auditHoursEstimate,
+        estimated_audit_cost: estimatedAuditCost,
+        priority_score: priorityScore,
+        recommended_lane: recommendedLane,
+        confidence,
+        rationale: rationaleParts.join(' '),
+        drivers: [
+            {
+                key: 'expected_recovery',
+                label: 'Giá trị truy thu ước tính',
+                value: estimatedRecovery,
+                impact: estimatedRecovery >= 1000000000 ? 'high' : 'medium',
+                summary: 'Tổng giá trị có thể truy thu nếu mở thanh tra hồ sơ này.',
+            },
+            {
+                key: 'recoverability_ratio',
+                label: 'Tỷ lệ thu hồi',
+                value: recoverability,
+                impact: recoverability >= 0.6 ? 'high' : 'medium',
+                summary: 'Ước tính khả năng biến rủi ro thành giá trị thu hồi thực tế.',
+            },
+            {
+                key: 'audit_cost',
+                label: 'Chi phí thanh tra',
+                value: estimatedAuditCost,
+                impact: estimatedAuditCost <= 60000000 ? 'low' : 'medium',
+                summary: 'Nguồn lực cán bộ ước tính để hoàn tất một chu kỳ xử lý.',
+            },
+            {
+                key: 'risk_momentum',
+                label: 'Động lực rủi ro',
+                value: trendDelta,
+                impact: trendDelta >= 12 ? 'high' : (trendDelta >= 4 ? 'medium' : 'low'),
+                summary: 'Tốc độ tăng điểm rủi ro theo chuỗi năm phân tích.',
+            },
+        ],
+    };
+}
+
+
+function normalizeAuditValue(auditValue, data) {
+    const fallback = buildFallbackAuditValue(data || {});
+    if (!auditValue || typeof auditValue !== 'object') return fallback;
+
+    const lane = String(auditValue.recommended_lane || '').trim();
+    const allowedLane = new Set(['monitor', 'desk_review', 'targeted_audit', 'priority_audit']);
+    const confidenceRaw = String(auditValue.confidence || '').trim().toLowerCase();
+    const allowedConfidence = new Set(['low', 'medium', 'high']);
+
+    const drivers = Array.isArray(auditValue.drivers)
+        ? auditValue.drivers
+            .filter((driver) => driver && typeof driver === 'object')
+            .map((driver) => {
+                const impact = String(driver.impact || '').toLowerCase();
+                return {
+                    key: String(driver.key || 'driver'),
+                    label: String(driver.label || 'Yếu tố'),
+                    value: Number.isFinite(Number(driver.value)) ? Number(driver.value) : null,
+                    impact: impact === 'high' || impact === 'medium' || impact === 'low' ? impact : 'medium',
+                    summary: String(driver.summary || '').trim(),
+                };
+            })
+            .slice(0, 6)
+        : [];
+
+    return {
+        estimated_recovery: Number.isFinite(Number(auditValue.estimated_recovery))
+            ? Math.max(0, Number(auditValue.estimated_recovery))
+            : Number(fallback.estimated_recovery || 0),
+        expected_net_recovery: Number.isFinite(Number(auditValue.expected_net_recovery))
+            ? Math.max(0, Number(auditValue.expected_net_recovery))
+            : Number(fallback.expected_net_recovery || 0),
+        recoverability_ratio: Number.isFinite(Number(auditValue.recoverability_ratio))
+            ? Math.max(0, Math.min(1, Number(auditValue.recoverability_ratio)))
+            : Number(fallback.recoverability_ratio || 0),
+        audit_hours_estimate: Number.isFinite(Number(auditValue.audit_hours_estimate))
+            ? Math.max(0, Number(auditValue.audit_hours_estimate))
+            : Number(fallback.audit_hours_estimate || 0),
+        estimated_audit_cost: Number.isFinite(Number(auditValue.estimated_audit_cost))
+            ? Math.max(0, Number(auditValue.estimated_audit_cost))
+            : Number(fallback.estimated_audit_cost || 0),
+        priority_score: Number.isFinite(Number(auditValue.priority_score))
+            ? Math.max(0, Math.min(100, Math.round(Number(auditValue.priority_score))))
+            : Number(fallback.priority_score || 0),
+        recommended_lane: allowedLane.has(lane) ? lane : String(fallback.recommended_lane || 'monitor'),
+        confidence: allowedConfidence.has(confidenceRaw) ? confidenceRaw : String(fallback.confidence || 'medium'),
+        rationale: (typeof auditValue.rationale === 'string' && auditValue.rationale.trim())
+            ? auditValue.rationale.trim()
+            : String(fallback.rationale || ''),
+        drivers: drivers.length ? drivers : (Array.isArray(fallback.drivers) ? fallback.drivers : []),
+    };
+}
+
+
+function getAuditValueLaneClass(lane) {
+    if (lane === 'priority_audit') return 'bg-red-100 text-red-700 border border-red-200';
+    if (lane === 'targeted_audit') return 'bg-orange-100 text-orange-700 border border-orange-200';
+    if (lane === 'desk_review') return 'bg-blue-100 text-blue-700 border border-blue-200';
+    return 'bg-emerald-100 text-emerald-700 border border-emerald-200';
+}
+
+
+function formatAuditDriverValue(driver) {
+    const value = Number(driver?.value);
+    if (!Number.isFinite(value)) return 'Không có';
+    const key = String(driver?.key || '');
+
+    if (key === 'recoverability_ratio') return `${(value * 100).toFixed(1)}%`;
+    if (key === 'risk_momentum') return `${value >= 0 ? '+' : ''}${value.toFixed(1)} điểm`;
+    if (key.includes('cost') || key.includes('recovery')) return formatVND(value);
+    return value.toFixed(2);
+}
+
+
+function renderAuditValue(auditValue, data) {
+    const panel = document.getElementById('audit-value-panel');
+    if (!panel) return;
+
+    const laneBadge = document.getElementById('audit-value-lane-badge');
+    const priorityEl = document.getElementById('audit-value-priority');
+    const recoveryEl = document.getElementById('audit-value-recovery');
+    const netRecoveryEl = document.getElementById('audit-value-net-recovery');
+    const recoverabilityEl = document.getElementById('audit-value-recoverability');
+    const auditHoursEl = document.getElementById('audit-value-audit-hours');
+    const costEl = document.getElementById('audit-value-cost');
+    const rationaleEl = document.getElementById('audit-value-rationale');
+    const driversEl = document.getElementById('audit-value-drivers');
+
+    if (!laneBadge || !priorityEl || !recoveryEl || !netRecoveryEl || !recoverabilityEl || !auditHoursEl || !costEl || !rationaleEl || !driversEl) {
+        panel.style.display = 'none';
+        return;
+    }
+
+    const payload = normalizeAuditValue(auditValue, data || {});
+    panel.style.display = 'block';
+
+    const laneLabelMap = {
+        priority_audit: 'Thanh tra ưu tiên',
+        targeted_audit: 'Thanh tra mục tiêu',
+        desk_review: 'Rà soát hồ sơ',
+        monitor: 'Giám sát',
+    };
+
+    laneBadge.className = `px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider ${getAuditValueLaneClass(payload.recommended_lane)}`;
+    laneBadge.textContent = `${laneLabelMap[payload.recommended_lane] || 'Giám sát'} • ${String(payload.confidence || 'medium').toUpperCase()}`;
+    priorityEl.textContent = String(payload.priority_score || 0);
+
+    recoveryEl.textContent = formatVND(Number(payload.estimated_recovery || 0));
+    netRecoveryEl.textContent = formatVND(Number(payload.expected_net_recovery || 0));
+    recoverabilityEl.textContent = `${(Number(payload.recoverability_ratio || 0) * 100).toFixed(1)}%`;
+    auditHoursEl.textContent = `${Number(payload.audit_hours_estimate || 0).toFixed(1)} h`;
+    costEl.textContent = formatVND(Number(payload.estimated_audit_cost || 0));
+    rationaleEl.textContent = payload.rationale || 'Chưa có dữ liệu ước tính giá trị thanh tra cho hồ sơ này.';
+
+    driversEl.innerHTML = '';
+    const toneByImpact = {
+        high: 'bg-red-50 border-red-200 text-red-700',
+        medium: 'bg-amber-50 border-amber-200 text-amber-700',
+        low: 'bg-emerald-50 border-emerald-200 text-emerald-700',
+    };
+
+    (Array.isArray(payload.drivers) ? payload.drivers : []).forEach((driver) => {
+        const tone = toneByImpact[String(driver?.impact || 'medium')] || toneByImpact.medium;
+        const card = document.createElement('div');
+        card.className = `rounded-lg border px-3 py-2 ${tone}`;
+
+        const title = document.createElement('p');
+        title.className = 'text-[10px] font-black uppercase tracking-wider';
+        title.textContent = `${driver.label || 'Yếu tố giá trị'}: ${formatAuditDriverValue(driver)}`;
+
+        const summary = document.createElement('p');
+        summary.className = 'text-[10px] mt-1 leading-relaxed';
+        summary.textContent = driver.summary || 'Yếu tố này được sử dụng để xếp hạng giá trị thanh tra.';
+
+        card.appendChild(title);
+        card.appendChild(summary);
+        driversEl.appendChild(card);
+    });
+
+    if (!driversEl.children.length) {
+        const placeholder = document.createElement('div');
+        placeholder.className = 'rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-[10px] text-slate-500 italic';
+        placeholder.textContent = 'Không có yếu tố giá trị bổ sung trong kỳ đánh giá.';
+        driversEl.appendChild(placeholder);
     }
 }
 
@@ -966,13 +2201,21 @@ async function uploadCSV(file) {
 
 
 function startPolling(batchId) {
-    if (pollingInterval) clearInterval(pollingInterval);
-    pollingInterval = setInterval(async () => {
+    stopPollingLoop();
+    const pollingToken = ++_pollingRequestToken;
+    let pollingInFlight = false;
+
+    const pollOnce = async () => {
+        if (pollingInFlight || pollingToken !== _pollingRequestToken || document.hidden) {
+            return;
+        }
+
+        pollingInFlight = true;
         try {
             const response = await secureFetch(`${API_BASE}/ai/batch-status/${batchId}`);
-            if (!response.ok) return;
+            if (pollingToken !== _pollingRequestToken || !response.ok) return;
             const status = await response.json();
-            if (!status) return;
+            if (pollingToken !== _pollingRequestToken || !status) return;
         
 
 
@@ -987,24 +2230,39 @@ function startPolling(batchId) {
             }
 
             if (status.status === 'done') {
-                clearInterval(pollingInterval); pollingInterval = null;
-                if (_pollingWatchdog) {
-                    clearTimeout(_pollingWatchdog);
-                    _pollingWatchdog = null;
-                }
+                stopPollingLoop();
                 showToast('Phân tích hoàn tất!', `Đã xử lý thành công ${status.processed_rows} doanh nghiệp.`, 'success', 6000);
                 loadBatchResults(batchId);
             } else if (status.status === 'failed') {
-                clearInterval(pollingInterval); pollingInterval = null;
-                if (_pollingWatchdog) {
-                    clearTimeout(_pollingWatchdog);
-                    _pollingWatchdog = null;
-                }
+                stopPollingLoop();
                 showToast('Phân tích thất bại', status.error_message || 'Lỗi không xác định', 'error', 8000);
                 resetBatchUI();
             }
-        } catch (err) { console.error('Polling error:', err); }
+        } catch (err) {
+            console.error('Polling error:', err);
+        } finally {
+            pollingInFlight = false;
+        }
+    };
+
+    pollingInterval = setInterval(() => {
+        void pollOnce();
     }, 1500);
+
+    void pollOnce();
+}
+
+
+function stopPollingLoop() {
+    _pollingRequestToken += 1;
+    if (pollingInterval) {
+        clearInterval(pollingInterval);
+        pollingInterval = null;
+    }
+    if (_pollingWatchdog) {
+        clearTimeout(_pollingWatchdog);
+        _pollingWatchdog = null;
+    }
 }
 
 
@@ -1035,9 +2293,7 @@ function resetBatchUI() {
         progressTrack.setAttribute('aria-valuenow', '0');
         progressTrack.setAttribute('aria-valuetext', '0%');
     }
-    _pollingRequestToken += 1;
-    if (pollingInterval) { clearInterval(pollingInterval); pollingInterval = null; }
-    if (_pollingWatchdog) { clearTimeout(_pollingWatchdog); _pollingWatchdog = null; }
+    stopPollingLoop();
 }
 
 
@@ -1252,7 +2508,7 @@ function renderRevenueRiskScatter(revenueRiskData, assessments = []) {
         .filter((row) => Number.isFinite(row.log_revenue) && Number.isFinite(row.risk_score));
 
     if (!normalized.length) {
-        renderSingleTrendChartMessage(container, 'Không đủ dữ liệu để vẽ Revenue vs Risk scatter.');
+        renderSingleTrendChartMessage(container, 'Không đủ dữ liệu để vẽ biểu đồ phân tán Doanh thu vs Rủi ro.');
         return;
     }
 
@@ -1819,13 +3075,79 @@ function formatDirectoryTimestamp(raw) {
 }
 
 
+function getDirectoryInterventionFallback(score) {
+    const normalizedScore = Math.max(0, Math.min(100, Number(score || 0)));
+    if (normalizedScore >= 82) return { action: 'escalated_enforcement', priority: Math.round(normalizedScore) };
+    if (normalizedScore >= 65) return { action: 'field_audit', priority: Math.round(normalizedScore) };
+    if (normalizedScore >= 45) return { action: 'structured_outreach', priority: Math.round(normalizedScore) };
+    if (normalizedScore >= 25) return { action: 'auto_reminder', priority: Math.round(normalizedScore) };
+    return { action: 'monitor', priority: Math.round(normalizedScore) };
+}
+
+
+function normalizeDirectoryIntervention(row) {
+    const fallback = getDirectoryInterventionFallback(row?.risk_score);
+    const actionRaw = String(row?.intervention_action || '').trim().toLowerCase();
+    const allowedActions = new Set(['monitor', 'auto_reminder', 'structured_outreach', 'field_audit', 'escalated_enforcement']);
+    const action = allowedActions.has(actionRaw) ? actionRaw : fallback.action;
+    const priority = Number.isFinite(Number(row?.intervention_priority))
+        ? Math.max(0, Math.min(100, Math.round(Number(row.intervention_priority))))
+        : fallback.priority;
+
+    return { action, priority };
+}
+
+
+function getDirectoryInterventionLabel(action) {
+    if (action === 'escalated_enforcement') return 'Cưỡng chế';
+    if (action === 'field_audit') return 'Kiểm tra tại chỗ';
+    if (action === 'structured_outreach') return 'Can thiệp có cấu trúc';
+    if (action === 'auto_reminder') return 'Nhắc hạn tự động';
+    return 'Giám sát';
+}
+
+
+function getDirectoryInterventionBadgeClass(action) {
+    if (action === 'escalated_enforcement') return 'bg-rose-50 text-rose-700 border border-rose-100';
+    if (action === 'field_audit') return 'bg-orange-50 text-orange-700 border border-orange-100';
+    if (action === 'structured_outreach') return 'bg-amber-50 text-amber-700 border border-amber-100';
+    if (action === 'auto_reminder') return 'bg-blue-50 text-blue-700 border border-blue-100';
+    return 'bg-slate-100 text-slate-600 border border-slate-200';
+}
+
+
+function normalizeDelinquencyKeyword(value) {
+    return String(value || '').trim().slice(0, 80);
+}
+
+
+function openDelinquencyWithInterventionFilter(action, searchKeyword = '') {
+    const actionRaw = String(action || '').trim().toLowerCase();
+    const allowedActions = new Set(['monitor', 'auto_reminder', 'structured_outreach', 'field_audit', 'escalated_enforcement']);
+    const normalizedAction = allowedActions.has(actionRaw) ? actionRaw : 'monitor';
+    const normalizedKeyword = normalizeDelinquencyKeyword(searchKeyword);
+
+    const targetUrl = new URL('delinquency.html', window.location.href);
+    targetUrl.searchParams.set('intervention_filter', normalizedAction);
+    targetUrl.searchParams.set('sort_by', 'intervention_priority_desc');
+    if (normalizedKeyword) {
+        targetUrl.searchParams.set('q', normalizedKeyword);
+    } else {
+        targetUrl.searchParams.delete('q');
+    }
+    targetUrl.searchParams.delete('page');
+
+    window.location.href = targetUrl.toString();
+}
+
+
 function renderSingleCompanyDirectoryTable() {
     const tbody = document.getElementById('single-company-table-body');
     const summary = document.getElementById('single-company-summary');
     if (!tbody || !summary) return;
 
     if (!singleCompanyRows.length) {
-        tbody.innerHTML = '<tr><td colspan="6" class="px-6 py-8 text-center text-slate-400 text-xs italic">Không tìm thấy doanh nghiệp phù hợp.</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="7" class="px-6 py-8 text-center text-slate-400 text-xs italic">Không tìm thấy doanh nghiệp phù hợp.</td></tr>';
         summary.textContent = 'Không có dữ liệu theo bộ lọc hiện tại.';
         return;
     }
@@ -1836,6 +3158,9 @@ function renderSingleCompanyDirectoryTable() {
             const name = escapeHtml(row.name || '---');
             const industry = escapeHtml(row.industry || '---');
             const score = Number(row.risk_score || 0);
+            const intervention = normalizeDirectoryIntervention(row);
+            const interventionLabel = getDirectoryInterventionLabel(intervention.action);
+            const interventionClass = getDirectoryInterventionBadgeClass(intervention.action);
             const scoreClass = score >= 80
                 ? 'text-red-600'
                 : score >= 60
@@ -1849,7 +3174,7 @@ function renderSingleCompanyDirectoryTable() {
                 : '<span class="px-2 py-0.5 rounded bg-slate-100 text-slate-500 text-[9px] font-black uppercase tracking-wider">CHƯA CHẤM</span>';
 
             return `
-                <tr class="hover:bg-slate-50 transition-colors">
+                <tr class="group hover:bg-slate-50 transition-all duration-300">
                     <td class="px-4 py-3 font-mono font-bold text-primary-container">${taxCode}</td>
                     <td class="px-4 py-3">
                         <div class="font-semibold text-on-surface text-xs">${name}</div>
@@ -1857,6 +3182,17 @@ function renderSingleCompanyDirectoryTable() {
                     </td>
                     <td class="px-4 py-3 text-slate-500">${industry}</td>
                     <td class="px-4 py-3 font-black ${scoreClass}">${score.toFixed(1)}</td>
+                    <td class="px-4 py-3">
+                        <div class="inline-flex flex-col gap-1.5">
+                            <button
+                                type="button"
+                                class="single-company-intervention-btn px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-wider transition-all duration-300 hover:-translate-y-0.5 hover:shadow-[0_8px_16px_rgba(0,33,71,0.12)] ${interventionClass}"
+                                data-intervention-action="${escapeHtml(intervention.action)}"
+                                title="Mở trang Nợ đọng với bộ lọc can thiệp tương ứng"
+                            >${escapeHtml(interventionLabel)}</button>
+                            <span class="text-[9px] font-bold text-slate-500">P${intervention.priority}</span>
+                        </div>
+                    </td>
                     <td class="px-4 py-3 text-slate-500 text-[10px]">${updatedAt}</td>
                     <td class="px-4 py-3 text-right">
                         <button class="single-company-analyze-btn px-3 py-1.5 rounded-lg bg-primary-container text-white text-[10px] font-black uppercase tracking-wider hover:bg-primary transition-colors" data-tax-code="${taxCode}">Phân tích</button>
@@ -1875,6 +3211,15 @@ function renderSingleCompanyDirectoryTable() {
         button.setAttribute('data-bound', 'true');
         button.addEventListener('click', () => {
             analyzeSingleCompanyFromDirectory(button.getAttribute('data-tax-code') || '');
+        });
+    });
+
+    tbody.querySelectorAll('.single-company-intervention-btn').forEach((button) => {
+        if (button.getAttribute('data-bound') === 'true') return;
+        button.setAttribute('data-bound', 'true');
+        button.addEventListener('click', () => {
+            const searchKeyword = document.getElementById('single-company-search')?.value || '';
+            openDelinquencyWithInterventionFilter(button.getAttribute('data-intervention-action') || '', searchKeyword);
         });
     });
 }
@@ -1944,7 +3289,7 @@ async function loadSingleCompanyDirectory() {
     const tbody = document.getElementById('single-company-table-body');
     if (!tbody) return;
 
-    tbody.innerHTML = '<tr><td colspan="6" class="px-6 py-8 text-center text-slate-400 text-xs italic">Đang tải dữ liệu doanh nghiệp...</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="7" class="px-6 py-8 text-center text-slate-400 text-xs italic">Đang tải dữ liệu doanh nghiệp...</td></tr>';
 
     const q = (document.getElementById('single-company-search')?.value || '').trim();
     const params = new URLSearchParams({
@@ -1972,7 +3317,7 @@ async function loadSingleCompanyDirectory() {
         renderSingleCompanyPagination();
     } catch (error) {
         console.error(error);
-        tbody.innerHTML = '<tr><td colspan="6" class="px-6 py-8 text-center text-error text-xs font-bold">Lỗi tải dữ liệu doanh nghiệp.</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="7" class="px-6 py-8 text-center text-error text-xs font-bold">Lỗi tải dữ liệu doanh nghiệp.</td></tr>';
         const summary = document.getElementById('single-company-summary');
         if (summary) summary.textContent = 'Không tải được danh sách doanh nghiệp ở thời điểm hiện tại.';
         showToast('Lỗi danh sách doanh nghiệp', error.message || 'Không thể tải dữ liệu CSDL.', 'warning');
@@ -2071,10 +3416,10 @@ function renderSingleTrendChartMessage(container, message) {
 function mapHistorySourceLabel(historySource) {
     const normalized = String(historySource || '').trim();
     const sourceMap = {
-        cache: 'Cache',
-        tax_returns: 'TaxReturns',
-        tax_returns_aggregation: 'TaxReturns',
-        assessment_history: 'AssessmentHistory',
+        cache: 'Bộ nhớ đệm',
+        tax_returns: 'Tờ khai thuế',
+        tax_returns_aggregation: 'Tờ khai thuế',
+        assessment_history: 'Lịch sử đánh giá',
         unavailable: 'Chưa có',
     };
     return sourceMap[normalized] || 'Không rõ';
@@ -2427,7 +3772,7 @@ function renderSingleFeatureDeltaWaterfall(singleData) {
         return false;
     }
 
-    const categories = deltas.map((d) => d.label).concat('Tong');
+    const categories = deltas.map((d) => d.label).concat('Tổng');
     const assist = [];
     const increase = [];
     const decrease = [];
@@ -2467,14 +3812,14 @@ function renderSingleFeatureDeltaWaterfall(singleData) {
             trigger: 'axis',
             axisPointer: { type: 'shadow' },
             formatter: (params) => {
-                const active = params.find((p) => p.seriesName !== 'Nen') || params[0];
+                const active = params.find((p) => p.seriesName !== 'Nền') || params[0];
                 const idx = active ? active.dataIndex : 0;
                 const value = Number(rawValues[idx] || 0);
                 const sign = value > 0 ? '+' : '';
                 if (idx === categories.length - 1) {
-                    return `<b>${categories[idx]}</b><br>Tong bien dong: <b>${sign}${value.toFixed(4)}</b>`;
+                    return `<b>${categories[idx]}</b><br>Tổng biến động: <b>${sign}${value.toFixed(4)}</b>`;
                 }
-                return `<b>${categories[idx]}</b><br>Delta: <b>${sign}${value.toFixed(4)}</b>`;
+                return `<b>${categories[idx]}</b><br>Độ lệch: <b>${sign}${value.toFixed(4)}</b>`;
             },
         },
         grid: { left: '12%', right: '6%', top: '8%', bottom: '18%' },
@@ -2490,7 +3835,7 @@ function renderSingleFeatureDeltaWaterfall(singleData) {
         },
         series: [
             {
-                name: 'Nen',
+                name: 'Nền',
                 type: 'bar',
                 stack: 'total',
                 data: assist,
@@ -2499,7 +3844,7 @@ function renderSingleFeatureDeltaWaterfall(singleData) {
                 tooltip: { show: false },
             },
             {
-                name: 'Tang',
+                name: 'Tăng',
                 type: 'bar',
                 stack: 'total',
                 data: increase,
@@ -2514,7 +3859,7 @@ function renderSingleFeatureDeltaWaterfall(singleData) {
                 },
             },
             {
-                name: 'Giam',
+                name: 'Giảm',
                 type: 'bar',
                 stack: 'total',
                 data: decrease,
@@ -2580,7 +3925,7 @@ function buildSingleFeaturePercentileMetrics(singleData) {
     if (riskPercentile !== null && Number.isFinite(currentRisk)) {
         metrics.push({
             key: 'risk_score',
-            label: 'Risk',
+            label: 'Rủi ro',
             percentile: riskPercentile,
             benchmarkPercentile: 50,
             currentDisplay: Number(currentRisk).toFixed(1),
@@ -2676,7 +4021,7 @@ function renderSingleFeaturePercentileBullet(singleData) {
 
     const metrics = buildSingleFeaturePercentileMetrics(singleData || {});
     if (!metrics.length) {
-        renderSingleTrendChartMessage(container, 'Chưa đủ dữ liệu lịch sử để tính percentile bullet cho Risk/F1-F4.');
+        renderSingleTrendChartMessage(container, 'Chưa đủ dữ liệu lịch sử để tính thước phân vị cho Rủi ro/F1-F4.');
         return false;
     }
 
@@ -2702,7 +4047,7 @@ function renderSingleFeaturePercentileBullet(singleData) {
                 const narrative = getFeaturePercentileNarrative(metric.key, riskTier.code);
 
                 return `<b>${metric.label}</b><br>`
-                    + `Percentile hiện tại: <b>${Number(metric.percentile).toFixed(1)}%</b><br>`
+                    + `Phân vị hiện tại: <b>${Number(metric.percentile).toFixed(1)}%</b><br>`
                     + `Mốc tham chiếu: <b>P${Number(metric.benchmarkPercentile).toFixed(1)}</b><br>`
                     + `Giá trị hiện tại: <b>${metric.currentDisplay}</b><br>`
                     + `Ngưỡng an toàn: <b>${metric.benchmarkDisplay}</b><br>`
@@ -2711,7 +4056,7 @@ function renderSingleFeaturePercentileBullet(singleData) {
             },
         },
         legend: {
-            data: ['Percentile hiện tại', 'Mốc tham chiếu'],
+            data: ['Phân vị hiện tại', 'Mốc tham chiếu'],
             bottom: 0,
             textStyle: { fontSize: 9 },
         },
@@ -2731,7 +4076,7 @@ function renderSingleFeaturePercentileBullet(singleData) {
         },
         series: [
             {
-                name: 'Band low',
+                name: 'Vùng thấp',
                 type: 'bar',
                 stack: 'band',
                 data: lowBand,
@@ -2742,7 +4087,7 @@ function renderSingleFeaturePercentileBullet(singleData) {
                 tooltip: { show: false },
             },
             {
-                name: 'Band medium',
+                name: 'Vùng trung bình',
                 type: 'bar',
                 stack: 'band',
                 data: mediumBand,
@@ -2753,7 +4098,7 @@ function renderSingleFeaturePercentileBullet(singleData) {
                 tooltip: { show: false },
             },
             {
-                name: 'Band high',
+                name: 'Vùng cao',
                 type: 'bar',
                 stack: 'band',
                 data: highBand,
@@ -2764,7 +4109,7 @@ function renderSingleFeaturePercentileBullet(singleData) {
                 tooltip: { show: false },
             },
             {
-                name: 'Percentile hien tai',
+                name: 'Phân vị hiện tại',
                 type: 'bar',
                 data: currentPercentiles,
                 barWidth: 8,
@@ -2773,7 +4118,7 @@ function renderSingleFeaturePercentileBullet(singleData) {
                 z: 10,
             },
             {
-                name: 'Moc tham chieu',
+                name: 'Mốc tham chiếu',
                 type: 'scatter',
                 data: benchmarkData,
                 symbol: 'diamond',
@@ -3034,7 +4379,7 @@ function renderSingleSensitivityHeatmapChart(container, heatmapData) {
     const yLabels = heatmapData.expenseAdjustments.map((v) => `CP ${v > 0 ? '+' : ''}${v}%`);
     const baseX = heatmapData.revenueAdjustments.indexOf(0);
     const baseY = heatmapData.expenseAdjustments.indexOf(0);
-    const sourceLabel = heatmapData.source === 'what_if_backend' ? 'What-If Backend' : 'Local Fallback';
+    const sourceLabel = heatmapData.source === 'what_if_backend' ? 'Mô phỏng từ backend' : 'Mô phỏng cục bộ';
 
     const chart = safeInitChart(container);
     chart.setOption({
@@ -3057,8 +4402,8 @@ function renderSingleSensitivityHeatmapChart(container, heatmapData) {
                 return `<b>Kịch bản mô phỏng</b><br>`
                     + `Doanh thu: <b>${revAdj > 0 ? '+' : ''}${revAdj}%</b><br>`
                     + `Chi phí: <b>${expAdj > 0 ? '+' : ''}${expAdj}%</b><br>`
-                    + `Risk ước tính: <b>${projectedRisk.toFixed(1)}</b><br>`
-                    + `Delta Risk: <b>${deltaSign}${deltaRisk.toFixed(1)}</b><br>`
+                    + `Rủi ro ước tính: <b>${projectedRisk.toFixed(1)}</b><br>`
+                    + `Độ lệch rủi ro: <b>${deltaSign}${deltaRisk.toFixed(1)}</b><br>`
                     + `Mức cảnh báo: <b>${tier.label}</b><br>`
                     + `Nguồn: <b>${sourceLabel}</b><br>`
                     + `<span style="color:#475569">${escapeHtml(narrative)}</span>`;
@@ -3084,7 +4429,7 @@ function renderSingleSensitivityHeatmapChart(container, heatmapData) {
             orient: 'vertical',
             right: 0,
             top: 'middle',
-            text: ['Risk cao', 'Risk thấp'],
+            text: ['Rủi ro cao', 'Rủi ro thấp'],
             inRange: {
                 color: ['#dcfce7', '#bbf7d0', '#fde68a', '#fdba74', '#f87171', '#b91c1c'],
             },
@@ -3092,7 +4437,7 @@ function renderSingleSensitivityHeatmapChart(container, heatmapData) {
         },
         series: [
             {
-                name: 'Sensitivity',
+                name: 'Độ nhạy',
                 type: 'heatmap',
                 data: heatmapData.values,
                 label: {
@@ -3108,7 +4453,7 @@ function renderSingleSensitivityHeatmapChart(container, heatmapData) {
                 },
             },
             {
-                name: 'Hien tai',
+                name: 'Hiện tại',
                 type: 'scatter',
                 data: [[baseX, baseY, heatmapData.currentRisk]],
                 symbol: 'pin',
@@ -3120,14 +4465,14 @@ function renderSingleSensitivityHeatmapChart(container, heatmapData) {
                 },
                 label: {
                     show: true,
-                    formatter: 'Now',
+                    formatter: 'Hiện tại',
                     color: '#ffffff',
                     fontSize: 8,
                     position: 'inside',
                 },
                 z: 30,
                 tooltip: {
-                    formatter: () => `Trang thai hien tai\nRisk: ${heatmapData.currentRisk.toFixed(1)}`,
+                    formatter: () => `Trạng thái hiện tại\nRủi ro: ${heatmapData.currentRisk.toFixed(1)}`,
                 },
             },
         ],
@@ -3161,7 +4506,7 @@ function renderSingleSensitivityHeatmap(singleData) {
     }
 
     const requestToken = ++_singleSensitivityHeatmapRequestToken;
-    renderSingleTrendChartMessage(container, 'Đang tải sensitivity heatmap từ backend What-If...');
+    renderSingleTrendChartMessage(container, 'Đang tải bản đồ nhiệt độ nhạy từ backend mô phỏng giả định...');
 
     fetchSingleSensitivityHeatmapData(singleData || {})
         .then((heatmapData) => {
@@ -3357,7 +4702,7 @@ function renderCumulativeRiskCurve(curveData) {
 
     const points = Array.isArray(curveData.points) ? curveData.points : [];
     if (!points.length) {
-        renderSingleTrendChartMessage(container, 'Chưa có dữ liệu cumulative risk curve.');
+        renderSingleTrendChartMessage(container, 'Chưa có dữ liệu đường cong rủi ro tích lũy.');
         return;
     }
 
@@ -3371,11 +4716,11 @@ function renderCumulativeRiskCurve(curveData) {
             trigger: 'axis',
             formatter: (params) => {
                 const point = params[0] && params[0].data ? params[0].data : [0, 0];
-                return `Top <b>${Number(point[0]).toFixed(1)}%</b> DN đang chứa <b>${Number(point[1]).toFixed(1)}%</b> tổng rủi ro`;
+                return `Nhóm top <b>${Number(point[0]).toFixed(1)}%</b> DN đang chứa <b>${Number(point[1]).toFixed(1)}%</b> tổng rủi ro`;
             },
         },
         legend: {
-            data: ['Cumulative Risk', 'Đường cân bằng'],
+            data: ['Rủi ro tích lũy', 'Đường cân bằng'],
             bottom: 0,
             textStyle: { fontSize: 9 },
         },
@@ -3396,7 +4741,7 @@ function renderCumulativeRiskCurve(curveData) {
         },
         series: [
             {
-                name: 'Cumulative Risk',
+                name: 'Rủi ro tích lũy',
                 type: 'line',
                 smooth: true,
                 data: seriesData,
@@ -3421,7 +4766,7 @@ function renderCumulativeRiskCurve(curveData) {
                 },
             },
             {
-                name: 'Duong can bang',
+                name: 'Đường cân bằng',
                 type: 'line',
                 data: diagonal,
                 lineStyle: { width: 2, color: '#64748b', type: 'dashed' },
@@ -3736,6 +5081,12 @@ function renderPeerComparison(data) {
 // ===================================================================
 
 function actionSendNotice() {
+    const gateState = window._fraudSplitGateState;
+    if (!gateState || !gateState.ready) {
+        showToast('Cổng đang khóa', gateState?.reason || 'Split-trigger chưa sẵn sàng cho hành động thanh tra.', 'warning');
+        return;
+    }
+
     const companyName = document.getElementById('result-company-name')?.textContent || 'Doanh nghiệp';
     const taxCode = document.getElementById('fraud-mst')?.value || '';
     if (!taxCode || companyName === 'Không rõ') {
@@ -3751,6 +5102,12 @@ function actionSendNotice() {
 }
 
 function actionCreateReport() {
+    const gateState = window._fraudSplitGateState;
+    if (!gateState || !gateState.ready) {
+        showToast('Cổng đang khóa', gateState?.reason || 'Split-trigger chưa sẵn sàng cho hành động thanh tra.', 'warning');
+        return;
+    }
+
     const companyName = document.getElementById('result-company-name')?.textContent || 'Doanh nghiệp';
     const taxCode = document.getElementById('fraud-mst')?.value || '';
     const riskScore = document.getElementById('risk-score')?.textContent || '0';
@@ -4142,21 +5499,117 @@ async function exportPDF() {
         const expensesText = Number.isFinite(Number(data.total_expenses)) ? `${Number(data.total_expenses).toLocaleString()} tỷ VNĐ` : '---';
         const riskScoreText = Number.isFinite(Number(data.risk_score)) ? Number(data.risk_score).toFixed(1) : '0.0';
         const safeAnomalyPercent = escapeHtml(anomalyPercent);
+
+        const interventionPayload = normalizeInterventionUplift(data.intervention_uplift || null, data);
+        const decisionPayload = normalizeDecisionIntelligence(data.decision_intelligence || null, data, interventionPayload);
+        const actionCatalog = {
+            urgent_audit: 'Thanh tra đột xuất',
+            targeted_review: 'Kiểm tra chuyên sâu',
+            enhanced_monitoring: 'Giám sát tăng cường',
+            periodic_monitoring: 'Theo dõi định kỳ',
+        };
+        const decisionActionText = actionCatalog[decisionPayload.recommended_action] || decisionPayload.action_label || 'Theo dõi định kỳ';
+        const decisionPriorityScore = Number.isFinite(Number(decisionPayload.priority_score))
+            ? Math.max(0, Math.min(100, Math.round(Number(decisionPayload.priority_score))))
+            : 0;
+        const decisionDeadline = Number.isFinite(Number(decisionPayload.action_deadline_days))
+            ? Math.max(1, Math.round(Number(decisionPayload.action_deadline_days)))
+            : 30;
+        const safeDecisionActionText = escapeHtml(decisionActionText);
+        const safeDecisionRationale = escapeHtml(decisionPayload.rationale || 'Hệ thống chưa ghi nhận căn cứ khuyến nghị bổ sung.');
+        const safeDecisionEscalation = decisionPayload.should_escalate
+            ? 'Có (đề nghị chuyển cấp xử lý theo thẩm quyền)'
+            : 'Không';
+        const interventionActionCatalog = {
+            monitor: 'Giám sát',
+            auto_reminder: 'Nhắc hạn tự động',
+            structured_outreach: 'Can thiệp có cấu trúc',
+            field_audit: 'Kiểm tra tại chỗ',
+            escalated_enforcement: 'Cưỡng chế nâng cao',
+        };
+        const interventionActionText = interventionActionCatalog[interventionPayload.recommended_action] || 'Giám sát';
+        const safeInterventionActionText = escapeHtml(interventionActionText);
+        const safeInterventionRiskReduction = escapeHtml(`${Number(interventionPayload.expected_risk_reduction_pp || 0).toFixed(1)} pp`);
+        const safeInterventionPenaltySaving = escapeHtml(formatVND(Number(interventionPayload.expected_penalty_saving || 0)));
+        const safeInterventionCollectionUplift = escapeHtml(formatVND(Number(interventionPayload.expected_collection_uplift || 0)));
+        const safeInterventionConfidence = escapeHtml(String(interventionPayload.confidence || 'medium').toUpperCase());
+
+        const decisionSignalsHtml = (Array.isArray(decisionPayload.top_signals) ? decisionPayload.top_signals : [])
+            .slice(0, 4)
+            .map((signal) => {
+                const label = escapeHtml(String(signal?.label || 'Tín hiệu'));
+                const summary = escapeHtml(String(signal?.summary || 'Không có diễn giải bổ sung.'));
+                const severityRaw = String(signal?.severity || 'medium').toLowerCase();
+                const severityLabel = severityRaw === 'high' ? 'Cao' : severityRaw === 'low' ? 'Thấp' : 'Trung bình';
+                const safeSeverityLabel = escapeHtml(severityLabel);
+                const valueText = escapeHtml(formatDecisionSignalValue(signal));
+                return `<li><b>${label}</b> - Mức độ ${safeSeverityLabel}; Giá trị: ${valueText}. Nội dung đánh giá: ${summary}</li>`;
+            })
+            .join('');
+
+        const decisionStepsHtml = (Array.isArray(decisionPayload.next_steps) ? decisionPayload.next_steps : [])
+            .slice(0, 5)
+            .map((step) => `<li>${escapeHtml(String(step || ''))}</li>`)
+            .join('');
+
+        const vatRefundPayload = normalizeVatRefundSignals(data.vat_refund_signals || null, data);
+        const vatQueueCatalog = {
+            priority_refund_audit: 'Kiểm tra hoàn thuế ưu tiên',
+            refund_watchlist: 'Theo dõi hoàn thuế',
+            monitor: 'Giám sát thường xuyên',
+        };
+        const vatQueueText = vatQueueCatalog[vatRefundPayload.queue] || 'Giám sát thường xuyên';
+        const vatRatioText = Number.isFinite(Number(vatRefundPayload.vat_input_output_ratio))
+            ? `${Number(vatRefundPayload.vat_input_output_ratio).toFixed(2)}x`
+            : 'Không có';
+        const vatGapText = Number.isFinite(Number(vatRefundPayload.estimated_refund_gap))
+            ? formatVND(Number(vatRefundPayload.estimated_refund_gap))
+            : 'Không có';
+        const safeVatQueueText = escapeHtml(vatQueueText);
+        const safeVatLevelText = escapeHtml(String(vatRefundPayload.level || 'low').toUpperCase());
+        const safeVatRationale = escapeHtml(vatRefundPayload.rationale || 'Chưa ghi nhận tín hiệu hoàn thuế VAT bất thường tại thời điểm đánh giá.');
+        const safeVatRatioText = escapeHtml(vatRatioText);
+        const safeVatGapText = escapeHtml(vatGapText);
+
+        const vatChecksHtml = (Array.isArray(vatRefundPayload.recommended_checks) ? vatRefundPayload.recommended_checks : [])
+            .slice(0, 5)
+            .map((step) => `<li>${escapeHtml(String(step || ''))}</li>`)
+            .join('');
+
+        const vatIndicatorsHtml = (Array.isArray(vatRefundPayload.indicators) ? vatRefundPayload.indicators : [])
+            .slice(0, 5)
+            .map((indicator) => {
+                const label = escapeHtml(String(indicator?.label || 'Tín hiệu VAT'));
+                const summary = escapeHtml(String(indicator?.summary || 'Không có diễn giải bổ sung.'));
+                const valueText = escapeHtml(formatVatRefundIndicatorValue(indicator));
+                const severityRaw = String(indicator?.severity || 'medium').toLowerCase();
+                const severityLabel = severityRaw === 'high' ? 'Cao' : severityRaw === 'low' ? 'Thấp' : 'Trung bình';
+                return `<li><b>${label}</b> - Mức độ ${escapeHtml(severityLabel)}; Giá trị: ${valueText}. Nội dung đánh giá: ${summary}</li>`;
+            })
+            .join('');
         
-        let riskConclusion = 'Doanh nghiệp <b>chưa có dấu hiệu rủi ro rõ ràng</b>, đề xuất đưa vào diện <b>Theo Dõi Định Kỳ</b>.';
+        let riskConclusion = 'Doanh nghiệp <b>chưa ghi nhận dấu hiệu rủi ro ở mức phải kiểm tra đột xuất</b>; kiến nghị đưa vào diện <b>theo dõi định kỳ</b> theo quy trình quản lý rủi ro.';
         if (data.risk_score >= 80) {
-            riskConclusion = 'Doanh nghiệp thuộc nhóm <b>RỦI RO RẤT CAO</b>, cấu trúc tài chính có dấu hiệu gian lận nghiêm trọng. Kính đề xuất cấp thẩm quyền đưa vào diện <b>Thanh Tra Đột Xuất</b> và yêu cầu giải trình ngay lập tức.';
+            riskConclusion = 'Doanh nghiệp thuộc nhóm <b>RỦI RO RẤT CAO</b>. Kiến nghị áp dụng biện pháp <b>thanh tra đột xuất</b>, yêu cầu giải trình toàn diện và thực hiện đối soát hồ sơ thuế theo quy định hiện hành.';
         } else if (data.risk_score >= 60) {
-            riskConclusion = 'Doanh nghiệp thuộc nhóm <b>RỦI RO CAO</b>. Kính đề xuất <b>Kiểm Tra Hồ Sơ Chuyên Sâu</b> đối với các tờ khai VAT và báo cáo tài chính trong 3 năm gần nhất.';
+            riskConclusion = 'Doanh nghiệp thuộc nhóm <b>RỦI RO CAO</b>. Kiến nghị triển khai <b>kiểm tra chuyên sâu hồ sơ</b>, ưu tiên các tờ khai VAT và báo cáo tài chính trong 03 năm gần nhất.';
         } else if (data.risk_score >= 40) {
-            riskConclusion = 'Doanh nghiệp có dấu hiệu <b>RỦI RO BẬC TRUNG</b>. Đề xuất tiếp tục <b>Theo Dõi Chặt Chẽ</b> biến động dòng tiền trong năm tài chính tiếp theo.';
+            riskConclusion = 'Doanh nghiệp có dấu hiệu <b>RỦI RO MỨC TRUNG BÌNH</b>. Kiến nghị thực hiện <b>giám sát tăng cường</b> đối với biến động dòng tiền trong kỳ đánh giá tiếp theo.';
+        }
+
+        if (decisionPayload.recommended_action === 'urgent_audit') {
+            riskConclusion = 'Trên cơ sở kết quả Trí tuệ quyết định, hồ sơ được xác định thuộc diện <b>THANH TRA ĐỘT XUẤT</b>. Đề nghị trình cấp có thẩm quyền phê duyệt kế hoạch kiểm tra khẩn và ban hành yêu cầu giải trình trong thời hạn quy định.';
+        } else if (decisionPayload.recommended_action === 'targeted_review') {
+            riskConclusion = 'Theo kết quả Trí tuệ quyết định, hồ sơ thuộc diện <b>KIỂM TRA CHUYÊN SÂU</b> có trọng tâm. Đề nghị ưu tiên đối soát tờ khai VAT, chứng từ đầu vào/đầu ra và các chỉ số F1-F4 vượt ngưỡng cảnh báo.';
+        } else if (decisionPayload.recommended_action === 'enhanced_monitoring') {
+            riskConclusion = 'Hệ thống Trí tuệ quyết định kiến nghị áp dụng chế độ <b>GIÁM SÁT TĂNG CƯỜNG</b> theo chu kỳ tháng; đồng thời kích hoạt quy trình kiểm tra bổ sung khi điểm rủi ro vượt ngưỡng nghiệp vụ.';
         }
 
         const flagsHtml = (data.red_flags || []).map(f => {
             const feature = escapeHtml(f?.feature || 'Đặc trưng chưa xác định');
             const reason = escapeHtml(f?.reason || 'Không có mô tả');
             const actualValue = escapeHtml(f?.actual_value || '---');
-            return `<li><b>Phát hiện bất thường về ${feature}:</b> ${reason} <i>(Chỉ số hiện tại ghi nhận: ${actualValue})</i>. Trí Tuệ Nhân Tạo (XGBoost) đánh giá đây là mắt xích trọng yếu có khả năng liên đới tới hành vi trục lợi thuế.</li>`;
+            return `<li><b>Chỉ báo ${feature}:</b> ${reason} <i>(Giá trị ghi nhận: ${actualValue})</i>. Đây là dấu hiệu cần kiểm tra, đối chiếu bổ sung với hồ sơ kê khai và chứng từ nguồn theo quy định.</li>`;
         }).join('');
 
         const today = new Date();
@@ -4179,43 +5632,87 @@ async function exportPDF() {
 
                 <!-- Title -->
                 <div style="text-align: center; margin-top: 40px; margin-bottom: 25px;">
-                    <div style="font-weight: bold; font-size: 14pt; margin-bottom: 5px;">THÔNG BÁO</div>
-                    <div style="font-weight: bold; font-size: 13pt;">Về việc cảnh báo rủi ro gian lận thuế và đề nghị giải trình<br>đối với hành vi kê khai tài chính bất thường</div>
+                    <div style="font-weight: bold; font-size: 14pt; margin-bottom: 5px;">THÔNG BÁO KẾT QUẢ PHÂN TÍCH RỦI RO THUẾ</div>
+                    <div style="font-weight: bold; font-size: 13pt;">Về việc nhận diện chỉ báo rủi ro và kiến nghị xử lý nghiệp vụ<br>đối với hồ sơ kê khai tài chính doanh nghiệp</div>
                 </div>
 
                 <!-- Content -->
                 <div style="text-align: justify; text-indent: 30px; margin-bottom: 15px;">
-                    Triển khai chuyên đề giám sát trọng điểm đối với các rủi ro hoàn thuế, quản lý hóa đơn và chống thất thu ngân sách nhà nước, Tổng cục Thuế đã đưa vào vận hành Hệ thống Giám sát Tự động TaxInspector có ứng dụng Trí tuệ nhân tạo (Mô hình điểm dị biệt Isolation Forest và Phân lớp Gradient Boosting).
-                    Qua phân tích định kỳ bộ dữ liệu tài chính khai báo đến thời điểm hiện tại, Tổng cục Thuế thông báo kết quả giám định rà soát đối với doanh nghiệp có tên sau đây:
+                    Căn cứ chức năng, nhiệm vụ quản lý thuế và kế hoạch tăng cường kiểm soát rủi ro trong công tác quản lý hóa đơn, kê khai thuế, Tổng cục Thuế triển khai hệ thống phân tích rủi ro TaxInspector có ứng dụng trí tuệ nhân tạo (mô hình Isolation Forest và Gradient Boosting).
+                    Trên cơ sở dữ liệu kê khai tài chính đã tiếp nhận đến thời điểm lập thông báo, kết quả phân tích cho thấy doanh nghiệp sau đây thuộc diện cần lưu ý trong công tác giám sát tuân thủ:
                 </div>
 
                 <div style="margin-left: 30px; margin-bottom: 15px;">
-                    - Ký danh: <b>${safeCompanyName}</b><br>
-                    - Mã số doanh nghiệp (MST): <b>${safeTaxCode}</b><br>
-                    - Ngành nghề kê khai: ${safeIndustry}<br>
-                    - Quy mô doanh thu/năm: ${escapeHtml(revenueText)}<br>
-                    - Thống kê chi phí vận hành: ${escapeHtml(expensesText)}
+                    - Tên doanh nghiệp: <b>${safeCompanyName}</b><br>
+                    - Mã số thuế: <b>${safeTaxCode}</b><br>
+                    - Lĩnh vực hoạt động kê khai: ${safeIndustry}<br>
+                    - Doanh thu kê khai theo kỳ: ${escapeHtml(revenueText)}<br>
+                    - Tổng chi phí kê khai theo kỳ: ${escapeHtml(expensesText)}
                 </div>
 
                 <div style="text-align: justify; text-indent: 30px; margin-bottom: 15px;">
-                    Căn cứ vào việc đối soát chuỗi chỉ số cơ bản của đối tượng với hàng nghìn thực thể khác trên cùng hệ sinh thái ngành, hệ thống đặc biệt đưa ra xếp loại rủi ro <b>${safeRiskLevel}</b> (điểm tổng hợp: <b>${riskScoreText} / 100</b>). 
-                    Đồng thời, cấu trúc tài chính phát sinh mức phân tán <b>${safeAnomalyPercent}%</b> so với biên độ an toàn cho phép. 
+                    Qua đối soát chuỗi chỉ số tài chính của doanh nghiệp với tập đối tượng cùng ngành, hệ thống xác định mức độ rủi ro thuế là <b>${safeRiskLevel}</b> (điểm tổng hợp: <b>${riskScoreText} / 100</b>). 
+                    Đồng thời, chỉ số dị biệt tài chính ghi nhận ở mức <b>${safeAnomalyPercent}%</b> so với ngưỡng tham chiếu, cho thấy cần thực hiện kiểm tra, xác minh bổ sung theo quy trình quản lý rủi ro.
                 </div>
 
                 <div style="text-align: justify; text-indent: 30px; margin-bottom: 10px;">
-                    Các luận điểm chuyên sâu từ hệ thống máy học (Red Flags) ghi nhận được:
+                    Các chỉ báo rủi ro trọng yếu do hệ thống máy học ghi nhận gồm:
                 </div>
                 <ul style="margin-top: 0; padding-left: 60px; margin-bottom: 15px; text-align: justify;">
-                    ${flagsHtml || '<li>Mô hình tính toán không ghi nhận đặc trưng rủi ro nào ở mức cảnh báo cao.</li>'}
+                    ${flagsHtml || '<li>Hệ thống chưa ghi nhận chỉ báo rủi ro ở mức cảnh báo cao tại thời điểm đánh giá.</li>'}
                 </ul>
+
+                <div style="margin: 14px 0 16px; border: 1.5px solid #000; padding: 12px 14px;">
+                    <div style="font-weight: bold; font-size: 12pt; margin-bottom: 6px;">KẾT LUẬN VÀ KIẾN NGHỊ XỬ LÝ TỪ TRÍ TUỆ QUYẾT ĐỊNH</div>
+                    <div style="font-size: 11pt; line-height: 1.45;">
+                        - Kiến nghị xử lý nghiệp vụ: <b>${safeDecisionActionText}</b><br>
+                        - Chỉ số ưu tiên kiểm tra: <b>${decisionPriorityScore}/100</b><br>
+                        - Thời hạn xử lý đề nghị: <b>${decisionDeadline} ngày</b><br>
+                        - Đề xuất chuyển cấp thẩm quyền: <b>${safeDecisionEscalation}</b><br>
+                        - Hành động Can thiệp/Tác động: <b>${safeInterventionActionText}</b> (Độ tin cậy: <b>${safeInterventionConfidence}</b>)<br>
+                        - Hiệu quả kỳ vọng: giảm rủi ro <b>${safeInterventionRiskReduction}</b>; giảm phạt <b>${safeInterventionPenaltySaving}</b>; tăng thu hồi <b>${safeInterventionCollectionUplift}</b><br>
+                        - Căn cứ khuyến nghị: ${safeDecisionRationale}
+                    </div>
+
+                    <div style="margin-top: 10px; font-weight: bold; font-size: 11pt;">Nội dung xử lý đề nghị:</div>
+                    <ul style="margin: 4px 0 0; padding-left: 22px; font-size: 11pt;">
+                        ${decisionStepsHtml || '<li>Chưa phát sinh nội dung xử lý cụ thể tại thời điểm lập thông báo.</li>'}
+                    </ul>
+
+                    <div style="margin-top: 8px; font-weight: bold; font-size: 11pt;">Các tín hiệu ưu tiên cần lưu ý:</div>
+                    <ul style="margin: 4px 0 0; padding-left: 22px; font-size: 11pt;">
+                        ${decisionSignalsHtml || '<li>Không ghi nhận tín hiệu ưu tiên bổ sung tại thời điểm đánh giá.</li>'}
+                    </ul>
+                </div>
+
+                <div style="margin: 14px 0 16px; border: 1.5px solid #000; padding: 12px 14px;">
+                    <div style="font-weight: bold; font-size: 12pt; margin-bottom: 6px;">TÍN HIỆU RỦI RO HOÀN THUẾ VAT</div>
+                    <div style="font-size: 11pt; line-height: 1.45;">
+                        - Trạng thái điều phối: <b>${safeVatQueueText}</b><br>
+                        - Cấp độ tín hiệu: <b>${safeVatLevelText}</b><br>
+                        - Tỷ lệ VAT đầu vào/đầu ra: <b>${safeVatRatioText}</b><br>
+                        - Chênh lệch VAT ước tính: <b>${safeVatGapText}</b><br>
+                        - Căn cứ nhận diện: ${safeVatRationale}
+                    </div>
+
+                    <div style="margin-top: 10px; font-weight: bold; font-size: 11pt;">Nội dung kiểm tra hoàn thuế đề nghị:</div>
+                    <ul style="margin: 4px 0 0; padding-left: 22px; font-size: 11pt;">
+                        ${vatChecksHtml || '<li>Chưa phát sinh yêu cầu kiểm tra hoàn thuế bổ sung tại thời điểm lập thông báo.</li>'}
+                    </ul>
+
+                    <div style="margin-top: 8px; font-weight: bold; font-size: 11pt;">Các tín hiệu VAT cần lưu ý:</div>
+                    <ul style="margin: 4px 0 0; padding-left: 22px; font-size: 11pt;">
+                        ${vatIndicatorsHtml || '<li>Không ghi nhận tín hiệu VAT ưu tiên bổ sung tại thời điểm đánh giá.</li>'}
+                    </ul>
+                </div>
 
                 <div style="text-align: justify; text-indent: 30px; margin-bottom: 15px;">
                     ${riskConclusion} 
-                    Tổng cục Thuế đề nghị các Cơ quan thuế địa phương rà soát lại dữ liệu hóa đơn, hồ sơ khai thuế để kịp thời triển khai các biện pháp nghiệp vụ thanh tra theo đúng quy định pháp luật.
+                    Tổng cục Thuế đề nghị cơ quan thuế địa phương tổ chức rà soát dữ liệu hóa đơn, hồ sơ khai thuế và triển khai biện pháp nghiệp vụ phù hợp; đồng thời cập nhật kết quả xử lý trên hệ thống theo đúng thẩm quyền và quy định pháp luật.
                 </div>
                 
                 <div style="text-align: justify; text-indent: 30px; margin-bottom: 15px;">
-                    Tổng cục Thuế thông báo để các cục nắm được và phối hợp thực hiện./.
+                    Tổng cục Thuế thông báo để các đơn vị biết, phối hợp triển khai và thực hiện./.
                 </div>
 
                 <!-- Footer Signatures -->
@@ -4242,12 +5739,12 @@ async function exportPDF() {
                     <div style="display: flex; gap: 20px; justify-content: center; align-items: start;">
                         ${chartImages.trend ? `
                         <div style="flex: 1; text-align: center;">
-                            <img src="${chartImages.trend}" alt="Trend Chart" style="max-width: 100%; border: 1px solid #ccc;">
+                            <img src="${chartImages.trend}" alt="Biểu đồ xu hướng" style="max-width: 100%; border: 1px solid #ccc;">
                             <div style="font-style: italic; font-size: 11pt; margin-top: 8px;">Mô phỏng 1: Khẩu độ Doanh thu/Chi phí</div>
                         </div>` : ''}
                         ${chartImages.radar ? `
                         <div style="flex: 1; text-align: center;">
-                            <img src="${chartImages.radar}" alt="Radar Chart" style="max-width: 100%; border: 1px solid #ccc;">
+                            <img src="${chartImages.radar}" alt="Biểu đồ radar" style="max-width: 100%; border: 1px solid #ccc;">
                             <div style="font-style: italic; font-size: 11pt; margin-top: 8px;">Mô phỏng 2: Biểu đồ Radar đa góc</div>
                         </div>` : ''}
                     </div>
@@ -4329,6 +5826,8 @@ function closeReportModal() {
 function initFraudPageEventBindings() {
     if (_fraudPageBindingsInitialized) return;
     _fraudPageBindingsInitialized = true;
+
+    renderFraudSplitTriggerGate(null);
 
     const tabSingleBtn = document.getElementById('tab-single-btn');
     if (tabSingleBtn) {
