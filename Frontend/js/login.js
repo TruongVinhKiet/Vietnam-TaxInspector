@@ -46,7 +46,7 @@ function showRegisterSuccessPanel({ badgeId, role }) {
 }
 
 function showApiOfflineMessage() {
-    showAuthToast('Backend API chưa chạy trên cổng 8000. Hãy chạy: uvicorn app.main:app --reload --port 8000');
+    showAuthToast('API backend chưa chạy trên cổng 8000. Hãy chạy: uvicorn app.main:app --reload --port 8000');
 }
 
 function openForgotModal() {
@@ -363,7 +363,7 @@ async function submitCccdLogin() {
         setTimeout(() => { closeCccdModal(); window.location.href = 'dashboard.html'; }, 800);
     } catch (err) {
         console.error('[CCCD Login]', err);
-        errorEl.textContent = 'Lỗi kết nối API Backend.';
+        errorEl.textContent = 'Lỗi kết nối API backend.';
         errorEl.classList.remove('hidden');
     } finally {
         btn.disabled = false;

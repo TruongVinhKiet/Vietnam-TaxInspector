@@ -209,7 +209,9 @@ class InspectorLabel(Base):
     inspector_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
     label_type = Column(String(50), nullable=False)       # 'fraud_confirmed', 'fraud_rejected', etc.
     confidence = Column(String(20), default="medium")     # low, medium, high
+    label_origin = Column(String(40), nullable=False, default="manual_inspector")
     assessment_id = Column(Integer, ForeignKey("ai_risk_assessments.id", ondelete="SET NULL"), nullable=True)
+    model_version = Column(String(80), nullable=True, index=True)
     evidence_summary = Column(Text, nullable=True)
     decision = Column(String(50), nullable=True)          # 'investigate', 'dismiss', 'escalate', 'penalize'
     decision_date = Column(Date, nullable=True)

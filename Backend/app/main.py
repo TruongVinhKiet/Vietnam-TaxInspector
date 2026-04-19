@@ -80,6 +80,28 @@ async def lifespan(app: FastAPI):
             # KPI loop foundation migrations (Sprint 1)
             conn.execute(text(
                 "ALTER TABLE inspector_labels "
+                "ADD COLUMN IF NOT EXISTS model_version VARCHAR(80);"
+            ))
+            conn.execute(text(
+                "ALTER TABLE inspector_labels "
+                "ADD COLUMN IF NOT EXISTS label_origin VARCHAR(40) DEFAULT 'manual_inspector';"
+            ))
+            conn.execute(text(
+                "UPDATE inspector_labels "
+                "SET label_origin = 'manual_inspector' "
+                "WHERE label_origin IS NULL OR btrim(label_origin) = '';"
+            ))
+            conn.execute(text(
+                "UPDATE inspector_labels l "
+                "SET model_version = a.model_version "
+                "FROM ai_risk_assessments a "
+                "WHERE l.assessment_id = a.id "
+                "AND (l.model_version IS NULL OR btrim(l.model_version) = '') "
+                "AND a.model_version IS NOT NULL "
+                "AND btrim(a.model_version) <> '';"
+            ))
+            conn.execute(text(
+                "ALTER TABLE inspector_labels "
                 "ADD COLUMN IF NOT EXISTS intervention_action VARCHAR(50);"
             ))
             conn.execute(text(

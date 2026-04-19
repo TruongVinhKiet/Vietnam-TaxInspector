@@ -58,6 +58,15 @@ ADMIN_POLICY_ROLES = {"admin"}
 KPI_BLOCKING_STATUSES = {"fail", "insufficient_data", "no_metric", "cooldown_active"}
 KPI_FAILLIKE_STATUSES = {"fail", "insufficient_data", "no_metric", "cooldown_active"}
 TERMINAL_OUTCOME_STATUSES = ("recovered", "partial_recovered", "unrecoverable", "dismissed")
+SYNTHETIC_MODEL_VERSION_TOKENS = ("seed-", "synthetic", "mock", "demo")
+SYNTHETIC_LABEL_MARKERS = (
+    "[AUTO-SEED-LARGE]",
+    "Bootstrap label from assessment",
+    "synthetic training label",
+)
+REAL_LABEL_ORIGINS = ("manual_inspector", "field_verified", "imported_casework")
+SYNTHETIC_LABEL_ORIGINS = ("bootstrap_generated", "auto_seed")
+DATA_REALITY_AUDIT_TABLE = "data_reality_audit_logs"
 
 
 class FeedbackData(BaseModel):
@@ -1780,7 +1789,302 @@ def _estimate_metric_sample_size(track_name: str, metric_name: str, summary: dic
     return total_labels
 
 
-def _compute_intervention_effectiveness(cur, window_days: int = 90, top_k: int = 50) -> dict[str, Any]:
+def _build_synthetic_model_version_predicate(column_name: str = "model_version") -> str:
+    prefix_predicates = [
+        f"LOWER(COALESCE({column_name}, '')) LIKE '{token}%'"
+        for token in SYNTHETIC_MODEL_VERSION_TOKENS
+        if token.endswith("-")
+    ]
+    contains_predicates = [
+        f"LOWER(COALESCE({column_name}, '')) LIKE '%{token}%'"
+        for token in SYNTHETIC_MODEL_VERSION_TOKENS
+        if not token.endswith("-")
+    ]
+    predicates = [*prefix_predicates, *contains_predicates]
+    return " OR ".join(predicates) if predicates else "FALSE"
+
+
+def _build_label_origin_predicate(column_name: str, origins: tuple[str, ...]) -> str:
+    normalized = [str(origin or "").strip().lower() for origin in origins if str(origin or "").strip()]
+    if not normalized:
+        return "FALSE"
+    quoted = ", ".join("'{}'".format(origin.replace("'", "''")) for origin in normalized)
+    return f"LOWER(COALESCE({column_name}, '')) IN ({quoted})"
+
+
+def _ensure_data_reality_audit_table(cur) -> None:
+    cur.execute(
+        f"""
+        CREATE TABLE IF NOT EXISTS {DATA_REALITY_AUDIT_TABLE} (
+            id SERIAL PRIMARY KEY,
+            source_endpoint VARCHAR(80) NOT NULL,
+            status VARCHAR(20) NOT NULL,
+            ready_for_real_ops BOOLEAN NOT NULL,
+            hard_ready BOOLEAN NOT NULL,
+            reasons JSONB,
+            hard_checks JSONB,
+            soft_checks JSONB,
+            metrics JSONB,
+            generated_at TIMESTAMP,
+            created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
+
+
+def _persist_data_reality_audit_log(cur, *, source_endpoint: str, data_reality: dict[str, Any]) -> None:
+    if not isinstance(data_reality, dict):
+        return
+
+    _ensure_data_reality_audit_table(cur)
+
+    generated_at = _parse_iso_timestamp(str(data_reality.get("generated_at") or "")) or datetime.utcnow()
+    cur.execute(
+        f"""
+        INSERT INTO {DATA_REALITY_AUDIT_TABLE} (
+            source_endpoint,
+            status,
+            ready_for_real_ops,
+            hard_ready,
+            reasons,
+            hard_checks,
+            soft_checks,
+            metrics,
+            generated_at
+        )
+        VALUES (%s, %s, %s, %s, %s::jsonb, %s::jsonb, %s::jsonb, %s::jsonb, %s)
+        """,
+        (
+            str(source_endpoint or "unknown"),
+            str(data_reality.get("status") or "unknown"),
+            bool(data_reality.get("ready_for_real_ops", False)),
+            bool(data_reality.get("hard_ready", False)),
+            json.dumps(data_reality.get("reasons") or [], ensure_ascii=False),
+            json.dumps(data_reality.get("hard_checks") or {}, ensure_ascii=False),
+            json.dumps(data_reality.get("soft_checks") or {}, ensure_ascii=False),
+            json.dumps(data_reality.get("metrics") or {}, ensure_ascii=False),
+            generated_at,
+        ),
+    )
+
+
+def _compute_specialized_data_reality(cur) -> dict[str, Any]:
+    assessment_columns = _table_columns(cur, "ai_risk_assessments")
+    label_columns = _table_columns(cur, "inspector_labels")
+
+    has_assessment_model_version = "model_version" in assessment_columns
+    has_label_evidence = "evidence_summary" in label_columns
+    has_label_inspector = "inspector_id" in label_columns
+    has_label_assessment_ref = "assessment_id" in label_columns
+    has_label_origin = "label_origin" in label_columns
+
+    total_assessments = 0
+    synthetic_assessments = 0
+    missing_assessment_model_version = 0
+    if has_assessment_model_version:
+        synthetic_predicate = _build_synthetic_model_version_predicate("model_version")
+        cur.execute(
+            f"""
+            SELECT
+                COUNT(*) AS total_rows,
+                COUNT(*) FILTER (
+                    WHERE model_version IS NULL OR btrim(model_version) = ''
+                ) AS missing_model_version,
+                COUNT(*) FILTER (
+                    WHERE {synthetic_predicate}
+                ) AS synthetic_rows
+            FROM ai_risk_assessments
+            """
+        )
+        total_assessments, missing_assessment_model_version, synthetic_assessments = cur.fetchone()
+
+    total_assessments = int(total_assessments or 0)
+    synthetic_assessments = int(synthetic_assessments or 0)
+    missing_assessment_model_version = int(missing_assessment_model_version or 0)
+
+    total_labels = 0
+    synthetic_labels_by_marker = 0
+    synthetic_labels_by_origin = 0
+    synthetic_labels_combined = 0
+    labels_with_inspector = 0
+    manual_origin_labels = 0
+    if has_label_evidence or has_label_inspector or has_label_origin:
+        marker_clauses = []
+        if has_label_evidence:
+            for marker in SYNTHETIC_LABEL_MARKERS:
+                escaped = marker.replace("'", "''")
+                marker_clauses.append(f"COALESCE(evidence_summary, '') ILIKE '{escaped}%'")
+                marker_clauses.append(f"COALESCE(evidence_summary, '') ILIKE '%{escaped}%'")
+
+        synthetic_marker_sql = " OR ".join(marker_clauses) if marker_clauses else "FALSE"
+        inspector_sql = "inspector_id IS NOT NULL" if has_label_inspector else "FALSE"
+        manual_origin_sql = _build_label_origin_predicate("label_origin", REAL_LABEL_ORIGINS) if has_label_origin else "FALSE"
+        synthetic_origin_sql = _build_label_origin_predicate("label_origin", SYNTHETIC_LABEL_ORIGINS) if has_label_origin else "FALSE"
+        synthetic_combined_sql = f"({synthetic_marker_sql}) OR ({synthetic_origin_sql})"
+        manual_feedback_sql = f"({manual_origin_sql}) OR ({inspector_sql})"
+
+        cur.execute(
+            f"""
+            SELECT
+                COUNT(*) AS total_rows,
+                COUNT(*) FILTER (WHERE {synthetic_marker_sql}) AS synthetic_marker_rows,
+                COUNT(*) FILTER (WHERE {synthetic_origin_sql}) AS synthetic_origin_rows,
+                COUNT(*) FILTER (WHERE {synthetic_combined_sql}) AS synthetic_combined_rows,
+                COUNT(*) FILTER (WHERE {inspector_sql}) AS inspector_rows,
+                COUNT(*) FILTER (WHERE {manual_feedback_sql}) AS manual_feedback_rows
+            FROM inspector_labels
+            """
+        )
+        (
+            total_labels,
+            synthetic_labels_by_marker,
+            synthetic_labels_by_origin,
+            synthetic_labels_combined,
+            labels_with_inspector,
+            manual_origin_labels,
+        ) = cur.fetchone()
+
+    total_labels = int(total_labels or 0)
+    synthetic_labels_by_marker = int(synthetic_labels_by_marker or 0)
+    synthetic_labels_by_origin = int(synthetic_labels_by_origin or 0)
+    synthetic_labels_combined = int(synthetic_labels_combined or 0)
+    labels_with_inspector = int(labels_with_inspector or 0)
+    manual_origin_labels = int(manual_origin_labels or 0)
+
+    synthetic_labels_by_link = 0
+    if has_label_assessment_ref and has_assessment_model_version:
+        synthetic_predicate = _build_synthetic_model_version_predicate("a.model_version")
+        exclusion_clauses: list[str] = []
+        if has_label_origin:
+            exclusion_clauses.append(_build_label_origin_predicate("l.label_origin", REAL_LABEL_ORIGINS))
+        if has_label_inspector:
+            exclusion_clauses.append("l.inspector_id IS NOT NULL")
+
+        exclusion_sql = " OR ".join(f"({clause})" for clause in exclusion_clauses) if exclusion_clauses else "FALSE"
+        cur.execute(
+            f"""
+            SELECT COUNT(*)
+            FROM inspector_labels l
+            JOIN ai_risk_assessments a ON a.id = l.assessment_id
+            WHERE {synthetic_predicate}
+              AND NOT ({exclusion_sql})
+            """
+        )
+        synthetic_labels_by_link = int((cur.fetchone() or [0])[0] or 0)
+
+    synthetic_labels = max(synthetic_labels_combined, synthetic_labels_by_link)
+
+    assessment_real_rows = max(0, total_assessments - synthetic_assessments)
+    label_real_rows = max(0, total_labels - synthetic_labels)
+
+    assessment_real_ratio = _safe_div(assessment_real_rows, total_assessments)
+    label_real_ratio = _safe_div(label_real_rows, total_labels)
+    manual_label_ratio = _safe_div(manual_origin_labels, total_labels)
+
+    audit_meta = _safe_read_json(MODEL_DIR / "audit_value_model_meta.json")
+    vat_meta = _safe_read_json(MODEL_DIR / "vat_refund_model_meta.json")
+    audit_quality = _safe_read_json(MODEL_DIR / AUDIT_QUALITY_REPORT_FILE)
+    vat_quality = _safe_read_json(MODEL_DIR / VAT_QUALITY_REPORT_FILE)
+
+    audit_quality_pass = bool((audit_quality.get("acceptance_gates") or {}).get("overall_pass", False))
+    vat_quality_pass = bool((vat_quality.get("acceptance_gates") or {}).get("overall_pass", False))
+
+    audit_model_file = MODEL_DIR / "audit_value_model.joblib"
+    vat_model_file = MODEL_DIR / "vat_refund_model.joblib"
+    artifacts_ready = bool(audit_model_file.exists() and vat_model_file.exists())
+
+    audit_samples = int(audit_meta.get("sample_count") or 0) if isinstance(audit_meta, dict) else 0
+    vat_samples = int(vat_meta.get("sample_count") or 0) if isinstance(vat_meta, dict) else 0
+
+    hard_checks = {
+        "enough_observation_rows": bool(total_assessments >= 500 and total_labels >= 500),
+        "non_synthetic_assessment_ratio": bool(assessment_real_ratio >= 0.80),
+        "non_synthetic_label_ratio": bool(label_real_ratio >= 0.80),
+        "model_artifacts_ready": artifacts_ready,
+        "quality_gates_pass": bool(audit_quality_pass and vat_quality_pass),
+        "trained_sample_volume_ok": bool(audit_samples >= 200 and vat_samples >= 200),
+    }
+
+    assessed_lineage_ratio = _safe_div(
+        total_assessments - missing_assessment_model_version,
+        total_assessments,
+    ) if has_assessment_model_version else 1.0
+    soft_checks = {
+        "manual_feedback_present": bool(manual_origin_labels >= 50 or manual_label_ratio >= 0.10),
+        "assessment_model_version_lineage": bool(assessed_lineage_ratio >= 0.80),
+    }
+
+    failed_hard = [name for name, passed in hard_checks.items() if not passed]
+    failed_soft = [name for name, passed in soft_checks.items() if not passed]
+
+    reasons: list[str] = []
+    if "enough_observation_rows" in failed_hard:
+        reasons.append("Chưa đủ số mẫu đánh giá (cần tối thiểu 500 assessments và 500 labels).")
+    if "non_synthetic_assessment_ratio" in failed_hard:
+        reasons.append("Tỷ lệ assessment synthetic còn cao, chưa đạt ngưỡng dữ liệu thật.")
+    if "non_synthetic_label_ratio" in failed_hard:
+        reasons.append("Tỷ lệ nhãn synthetic/bootstrap còn cao, cần bổ sung nhãn thực tế.")
+    if "model_artifacts_ready" in failed_hard:
+        reasons.append("Thiếu artifact model Audit/VAT đã train.")
+    if "quality_gates_pass" in failed_hard:
+        reasons.append("Quality gate Audit/VAT chưa pass hoàn toàn.")
+    if "trained_sample_volume_ok" in failed_hard:
+        reasons.append("Mẫu huấn luyện trong metadata model chưa đạt ngưỡng tối thiểu.")
+    if "manual_feedback_present" in failed_soft:
+        reasons.append("Nhãn do thanh tra nhập thực tế còn ít, cần tăng phản hồi hiện trường.")
+    if "assessment_model_version_lineage" in failed_soft:
+        reasons.append("Độ phủ model_version trên assessment còn thấp, cần hoàn thiện lineage.")
+
+    hard_ready = len(failed_hard) == 0
+    ready_for_real_ops = hard_ready and len(failed_soft) == 0
+    status = "ready" if ready_for_real_ops else ("warning" if hard_ready else "blocked")
+
+    return {
+        "status": status,
+        "ready_for_real_ops": ready_for_real_ops,
+        "hard_ready": hard_ready,
+        "hard_checks": hard_checks,
+        "soft_checks": soft_checks,
+        "reasons": reasons,
+        "reason_count": len(reasons),
+        "metrics": {
+            "total_assessments": total_assessments,
+            "synthetic_assessments": synthetic_assessments,
+            "real_assessment_ratio": round(float(assessment_real_ratio), 4),
+            "missing_assessment_model_version": missing_assessment_model_version,
+            "total_labels": total_labels,
+            "synthetic_labels": synthetic_labels,
+            "synthetic_labels_by_marker": synthetic_labels_by_marker,
+            "synthetic_labels_by_origin": synthetic_labels_by_origin,
+            "synthetic_labels_by_link": synthetic_labels_by_link,
+            "real_label_ratio": round(float(label_real_ratio), 4),
+            "labels_with_inspector": labels_with_inspector,
+            "manual_origin_labels": manual_origin_labels,
+            "manual_label_ratio": round(float(manual_label_ratio), 4),
+            "audit_model_samples": audit_samples,
+            "vat_model_samples": vat_samples,
+        },
+        "artifacts": {
+            "audit_model": bool(audit_model_file.exists()),
+            "vat_model": bool(vat_model_file.exists()),
+            "audit_quality_report": bool(audit_quality),
+            "vat_quality_report": bool(vat_quality),
+            "audit_quality_pass": audit_quality_pass,
+            "vat_quality_pass": vat_quality_pass,
+            "audit_trained_at": audit_meta.get("trained_at") if isinstance(audit_meta, dict) else None,
+            "vat_trained_at": vat_meta.get("trained_at") if isinstance(vat_meta, dict) else None,
+        },
+        "generated_at": datetime.utcnow().isoformat() + "Z",
+    }
+
+
+def _compute_intervention_effectiveness(
+    cur,
+    window_days: int = 90,
+    top_k: int = 50,
+    include_data_reality: bool = False,
+) -> dict[str, Any]:
+    data_reality = _compute_specialized_data_reality(cur) if include_data_reality else None
     columns = _table_columns(cur, "inspector_labels")
     required = {
         "intervention_action",
@@ -1796,7 +2100,7 @@ def _compute_intervention_effectiveness(cur, window_days: int = 90, top_k: int =
     missing_columns = sorted(required - columns)
 
     if missing_columns:
-        return {
+        payload = {
             "window_days": int(window_days),
             "top_k": int(top_k),
             "schema_ready": False,
@@ -1804,6 +2108,9 @@ def _compute_intervention_effectiveness(cur, window_days: int = 90, top_k: int =
             "message": "Schema KPI chưa sẵn sàng. Cần chạy migration mới cho inspector_labels.",
             "generated_at": datetime.utcnow().isoformat(),
         }
+        if data_reality is not None:
+            payload["data_reality"] = data_reality
+        return payload
 
     cur.execute(
         """
@@ -1903,7 +2210,7 @@ def _compute_intervention_effectiveness(cur, window_days: int = 90, top_k: int =
     precision_at_top_k, top_k_count = _compute_precision_at_k(cur, window_days=window_days, k=top_k)
     false_negative_rate_high_risk = _safe_div(low_intensity_confirmed, confirmed_fraud_labels)
 
-    return {
+    payload = {
         "window_days": int(window_days),
         "top_k": int(top_k),
         "schema_ready": True,
@@ -1932,9 +2239,18 @@ def _compute_intervention_effectiveness(cur, window_days: int = 90, top_k: int =
         "by_intervention_action": by_action,
         "generated_at": datetime.utcnow().isoformat(),
     }
+    if data_reality is not None:
+        payload["data_reality"] = data_reality
+    return payload
 
 
-def _compute_vat_refund_effectiveness(cur, window_days: int = 90, top_k: int = 100) -> dict[str, Any]:
+def _compute_vat_refund_effectiveness(
+    cur,
+    window_days: int = 90,
+    top_k: int = 100,
+    include_data_reality: bool = False,
+) -> dict[str, Any]:
+    data_reality = _compute_specialized_data_reality(cur) if include_data_reality else None
     columns = _table_columns(cur, "inspector_labels")
     required = {
         "label_type",
@@ -1951,7 +2267,7 @@ def _compute_vat_refund_effectiveness(cur, window_days: int = 90, top_k: int = 1
     missing_columns = sorted(required - columns)
 
     if missing_columns:
-        return {
+        payload = {
             "window_days": int(window_days),
             "top_k": int(top_k),
             "schema_ready": False,
@@ -1959,6 +2275,9 @@ def _compute_vat_refund_effectiveness(cur, window_days: int = 90, top_k: int = 1
             "message": "Schema KPI VAT chưa sẵn sàng. Cần chạy migration mới cho inspector_labels.",
             "generated_at": datetime.utcnow().isoformat(),
         }
+        if data_reality is not None:
+            payload["data_reality"] = data_reality
+        return payload
 
     cur.execute(
         """
@@ -2086,7 +2405,7 @@ def _compute_vat_refund_effectiveness(cur, window_days: int = 90, top_k: int = 1
             }
         )
 
-    return {
+    payload = {
         "window_days": int(window_days),
         "top_k": int(top_k),
         "schema_ready": True,
@@ -2118,6 +2437,9 @@ def _compute_vat_refund_effectiveness(cur, window_days: int = 90, top_k: int = 1
         "by_intervention_action": by_action,
         "generated_at": datetime.utcnow().isoformat(),
     }
+    if data_reality is not None:
+        payload["data_reality"] = data_reality
+    return payload
 
 
 @router.get("/vat_effectiveness")
@@ -2134,7 +2456,25 @@ def get_vat_refund_effectiveness(window_days: int = 90, top_k: int = 100):
     try:
         conn = psycopg2.connect(db_url)
         cur = conn.cursor()
-        payload = _compute_vat_refund_effectiveness(cur, window_days=window_days, top_k=top_k)
+        payload = _compute_vat_refund_effectiveness(
+            cur,
+            window_days=window_days,
+            top_k=top_k,
+            include_data_reality=True,
+        )
+
+        data_reality = payload.get("data_reality") if isinstance(payload, dict) else None
+        if isinstance(data_reality, dict):
+            try:
+                _persist_data_reality_audit_log(
+                    cur,
+                    source_endpoint="vat_refund_effectiveness",
+                    data_reality=data_reality,
+                )
+                conn.commit()
+            except Exception:
+                conn.rollback()
+
         cur.close()
         conn.close()
         return payload
@@ -2524,7 +2864,25 @@ def get_intervention_effectiveness(window_days: int = 90, top_k: int = 50):
     try:
         conn = psycopg2.connect(db_url)
         cur = conn.cursor()
-        payload = _compute_intervention_effectiveness(cur, window_days=window_days, top_k=top_k)
+        payload = _compute_intervention_effectiveness(
+            cur,
+            window_days=window_days,
+            top_k=top_k,
+            include_data_reality=True,
+        )
+
+        data_reality = payload.get("data_reality") if isinstance(payload, dict) else None
+        if isinstance(data_reality, dict):
+            try:
+                _persist_data_reality_audit_log(
+                    cur,
+                    source_endpoint="intervention_effectiveness",
+                    data_reality=data_reality,
+                )
+                conn.commit()
+            except Exception:
+                conn.rollback()
+
         cur.close()
         conn.close()
         return payload
@@ -2538,7 +2896,13 @@ def get_intervention_effectiveness(window_days: int = 90, top_k: int = 50):
         }
 
 
-def _compute_audit_value_effectiveness(cur, window_days: int = 90, top_k: int = 50) -> dict[str, Any]:
+def _compute_audit_value_effectiveness(
+    cur,
+    window_days: int = 90,
+    top_k: int = 50,
+    include_data_reality: bool = False,
+) -> dict[str, Any]:
+    data_reality = _compute_specialized_data_reality(cur) if include_data_reality else None
     columns = _table_columns(cur, "inspector_labels")
     required = {
         "expected_recovery",
@@ -2553,7 +2917,7 @@ def _compute_audit_value_effectiveness(cur, window_days: int = 90, top_k: int = 
     missing_columns = sorted(required - columns)
 
     if missing_columns:
-        return {
+        payload = {
             "schema_ready": False,
             "window_days": int(window_days),
             "top_k": int(top_k),
@@ -2561,6 +2925,9 @@ def _compute_audit_value_effectiveness(cur, window_days: int = 90, top_k: int = 
             "message": "Schema KPI audit value chưa sẵn sàng. Cần chạy migration mới cho inspector_labels.",
             "generated_at": datetime.utcnow().isoformat(),
         }
+        if data_reality is not None:
+            payload["data_reality"] = data_reality
+        return payload
 
     cur.execute(
         """
@@ -2653,7 +3020,7 @@ def _compute_audit_value_effectiveness(cur, window_days: int = 90, top_k: int = 
             }
         )
 
-    return {
+    payload = {
         "schema_ready": True,
         "window_days": int(window_days),
         "top_k": int(top_k),
@@ -2681,6 +3048,9 @@ def _compute_audit_value_effectiveness(cur, window_days: int = 90, top_k: int = 
         "by_lane": by_lane,
         "generated_at": datetime.utcnow().isoformat(),
     }
+    if data_reality is not None:
+        payload["data_reality"] = data_reality
+    return payload
 
 
 @router.get("/audit_value_effectiveness")
@@ -2696,7 +3066,25 @@ def get_audit_value_effectiveness(window_days: int = 90, top_k: int = 50):
     try:
         conn = psycopg2.connect(db_url)
         cur = conn.cursor()
-        payload = _compute_audit_value_effectiveness(cur, window_days=window_days, top_k=top_k)
+        payload = _compute_audit_value_effectiveness(
+            cur,
+            window_days=window_days,
+            top_k=top_k,
+            include_data_reality=True,
+        )
+
+        data_reality = payload.get("data_reality") if isinstance(payload, dict) else None
+        if isinstance(data_reality, dict):
+            try:
+                _persist_data_reality_audit_log(
+                    cur,
+                    source_endpoint="audit_value_effectiveness",
+                    data_reality=data_reality,
+                )
+                conn.commit()
+            except Exception:
+                conn.rollback()
+
         cur.close()
         conn.close()
         return payload
@@ -3005,6 +3393,48 @@ def _build_specialized_rollout_status_payload(include_split_snapshot: bool = Tru
                 "Re-open rollout review when artifacts are complete.",
             ]
 
+    data_reality = None
+    try:
+        db_url = _resolve_db_url()
+        conn = psycopg2.connect(db_url)
+        cur = conn.cursor()
+        data_reality = _compute_specialized_data_reality(cur)
+        if isinstance(data_reality, dict):
+            try:
+                _persist_data_reality_audit_log(
+                    cur,
+                    source_endpoint="specialized_rollout_status",
+                    data_reality=data_reality,
+                )
+                conn.commit()
+            except Exception:
+                conn.rollback()
+        cur.close()
+        conn.close()
+    except Exception as exc:
+        data_reality = {
+            "status": "error",
+            "ready_for_real_ops": False,
+            "hard_ready": False,
+            "hard_checks": {},
+            "soft_checks": {},
+            "reasons": [f"Không thể kiểm tra dữ liệu train thật: {str(exc)}"],
+            "reason_count": 1,
+            "metrics": {},
+            "artifacts": {},
+            "generated_at": datetime.utcnow().isoformat() + "Z",
+        }
+
+    if isinstance(data_reality, dict) and not bool(data_reality.get("ready_for_real_ops", False)):
+        if rollout_status == "ready_for_phase_d":
+            rollout_status = "review_required"
+
+        reason_rows = data_reality.get("reasons") if isinstance(data_reality.get("reasons"), list) else []
+        primary_reason = str(reason_rows[0]) if reason_rows else "Dữ liệu huấn luyện/chạy chưa đạt chuẩn vận hành thật."
+        hard_action = f"Khóa kích hoạt Phase D: {primary_reason}"
+        if hard_action not in recommended_actions:
+            recommended_actions = [hard_action, *recommended_actions]
+
     return {
         "available": available,
         "availability": availability_flags,
@@ -3053,6 +3483,7 @@ def _build_specialized_rollout_status_payload(include_split_snapshot: bool = Tru
         },
         "recommended_actions": recommended_actions,
         "split_trigger_snapshot": split_snapshot,
+        "data_reality": data_reality,
         "generated_at": datetime.utcnow().isoformat(),
     }
 
@@ -3088,6 +3519,134 @@ def get_specialized_rollout_status(include_split_snapshot: bool = True):
             "error": f"Không thể tải specialized rollout status: {str(e)}",
             "generated_at": datetime.utcnow().isoformat(),
         }
+
+
+@router.get("/data_reality_audit_logs")
+def get_data_reality_audit_logs(
+    limit: int = 200,
+    source_endpoint: Optional[str] = None,
+    status: Optional[str] = None,
+    blocked_only: bool = False,
+):
+    """
+    Dedicated audit endpoint for data_reality gate history.
+    Useful to track when/why readiness is blocked across intervention/specialized endpoints.
+    """
+    safe_limit = max(1, min(int(limit or 200), 1000))
+    db_url = _resolve_db_url()
+
+    conn = None
+    cur = None
+    try:
+        conn = psycopg2.connect(db_url)
+        cur = conn.cursor()
+
+        if not _table_columns(cur, DATA_REALITY_AUDIT_TABLE):
+            return {
+                "items": [],
+                "count": 0,
+                "message": "Chưa có bảng data_reality_audit_logs.",
+                "generated_at": datetime.utcnow().isoformat(),
+            }
+
+        where_clauses: list[str] = []
+        query_params: list[Any] = []
+
+        if source_endpoint:
+            where_clauses.append("source_endpoint = %s")
+            query_params.append(str(source_endpoint).strip())
+
+        if status:
+            where_clauses.append("LOWER(status) = %s")
+            query_params.append(str(status).strip().lower())
+
+        if blocked_only:
+            where_clauses.append("ready_for_real_ops = FALSE")
+
+        where_sql = f"WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
+
+        cur.execute(
+            f"SELECT COUNT(*) FROM {DATA_REALITY_AUDIT_TABLE} {where_sql}",
+            tuple(query_params),
+        )
+        total_rows = int((cur.fetchone() or [0])[0] or 0)
+
+        cur.execute(
+            f"""
+            SELECT
+                id,
+                source_endpoint,
+                status,
+                ready_for_real_ops,
+                hard_ready,
+                reasons,
+                hard_checks,
+                soft_checks,
+                metrics,
+                generated_at,
+                created_at
+            FROM {DATA_REALITY_AUDIT_TABLE}
+            {where_sql}
+            ORDER BY id DESC
+            LIMIT %s
+            """,
+            tuple([*query_params, safe_limit]),
+        )
+
+        items = []
+        for row in cur.fetchall():
+            (
+                row_id,
+                row_source,
+                row_status,
+                row_ready,
+                row_hard_ready,
+                row_reasons,
+                row_hard_checks,
+                row_soft_checks,
+                row_metrics,
+                row_generated_at,
+                row_created_at,
+            ) = row
+
+            decoded_reasons = _decode_json_blob(row_reasons) or []
+
+            items.append(
+                {
+                    "id": int(row_id),
+                    "source_endpoint": row_source,
+                    "status": row_status,
+                    "ready_for_real_ops": bool(row_ready),
+                    "hard_ready": bool(row_hard_ready),
+                    "reasons": decoded_reasons,
+                    "reason_count": len(decoded_reasons),
+                    "hard_checks": _decode_json_blob(row_hard_checks) or {},
+                    "soft_checks": _decode_json_blob(row_soft_checks) or {},
+                    "metrics": _decode_json_blob(row_metrics) or {},
+                    "generated_at": row_generated_at.isoformat() if isinstance(row_generated_at, datetime) else row_generated_at,
+                    "created_at": row_created_at.isoformat() if isinstance(row_created_at, datetime) else row_created_at,
+                }
+            )
+
+        return {
+            "count": len(items),
+            "total_rows": total_rows,
+            "items": items,
+            "generated_at": datetime.utcnow().isoformat(),
+        }
+    except Exception as exc:
+        return {
+            "count": 0,
+            "total_rows": 0,
+            "items": [],
+            "message": f"Không thể đọc data_reality audit logs: {str(exc)}",
+            "generated_at": datetime.utcnow().isoformat(),
+        }
+    finally:
+        if cur is not None:
+            cur.close()
+        if conn is not None:
+            conn.close()
 
 
 @router.post("/kpi_snapshots/capture")

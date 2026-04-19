@@ -143,6 +143,7 @@ def test_inspector_label_accepts_outcome_kpi_fields(client):
         "label_type": "fraud_confirmed",
         "confidence": "high",
         "assessment_id": 13,
+        "evidence_summary": "Inspector verified recovery evidence from audited invoice trail",
         "intervention_action": "field_audit",
         "intervention_attempted": True,
         "outcome_status": "partial_recovered",

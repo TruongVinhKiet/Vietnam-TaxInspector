@@ -214,6 +214,7 @@ function applyDelinquencySplitTriggerGate(rawStatus) {
     syncInterventionLegendState();
     syncModalGovernanceState();
     renderFilterToolbarState();
+    syncDelinquencyWorkspaceLink();
 }
 
 
@@ -710,6 +711,40 @@ function parseInitialStateFromUrl() {
 }
 
 
+function buildInterventionWorkspaceUrl() {
+    const params = new URLSearchParams();
+    params.set("source", "delinquency");
+    params.set("focus", "actions");
+    params.set("window_days", "90");
+    params.set("top_k", "50");
+
+    if (state.currentPage > 1) {
+        params.set("page", String(state.currentPage));
+    }
+    if (state.searchKeyword) {
+        params.set("q", state.searchKeyword);
+    }
+    if (state.freshnessFilter) {
+        params.set("freshness", state.freshnessFilter);
+    }
+    if (state.interventionFilter) {
+        params.set("intervention_filter", state.interventionFilter);
+    }
+    if (state.sortBy && state.sortBy !== "risk_desc") {
+        params.set("sort_by", state.sortBy);
+    }
+
+    return `intervention.html?${params.toString()}`;
+}
+
+
+function syncDelinquencyWorkspaceLink() {
+    const link = document.getElementById("delinq-open-intervention-workspace");
+    if (!link) return;
+    link.href = buildInterventionWorkspaceUrl();
+}
+
+
 function syncUrlState() {
     const params = new URLSearchParams(window.location.search);
 
@@ -746,6 +781,7 @@ function syncUrlState() {
     const query = params.toString();
     const nextUrl = `${window.location.pathname}${query ? `?${query}` : ""}`;
     window.history.replaceState({}, "", nextUrl);
+    syncDelinquencyWorkspaceLink();
 }
 
 
@@ -1651,6 +1687,7 @@ document.addEventListener("DOMContentLoaded", () => {
     renderFilterModalDraft();
     renderFilterToolbarState();
     syncInterventionLegendState();
+    syncDelinquencyWorkspaceLink();
     attachPaginationHandler();
     fetchDelinquencySplitTriggerGate();
     loadDelinquencyData(state.currentPage);

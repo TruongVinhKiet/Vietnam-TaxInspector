@@ -108,6 +108,10 @@ SPECIALIZED_MODEL_SPECS = {
 
 _specialized_model_cache: dict[str, Optional[dict[str, Any]]] = {}
 
+REAL_LABEL_ORIGINS = {"manual_inspector", "field_verified", "imported_casework"}
+BLOCKED_LABEL_ORIGINS = {"bootstrap_generated", "auto_seed"}
+KNOWN_LABEL_ORIGINS = REAL_LABEL_ORIGINS | BLOCKED_LABEL_ORIGINS
+
 # ---- Singleton pipeline ----
 _pipeline = None
 
@@ -2999,6 +3003,44 @@ def submit_inspector_label(
     Submit a ground-truth label from an inspector.
     Used for model retraining and false positive reduction.
     """
+    new_label = _build_inspector_label_entity(
+        label=label,
+        current_user=current_user,
+        db=db,
+    )
+    db.add(new_label)
+    db.commit()
+    db.refresh(new_label)
+
+    return schemas.InspectorLabelResponse.model_validate(new_label)
+
+
+def _normalize_label_origin(raw_origin: Optional[str]) -> str:
+    normalized = str(raw_origin or "manual_inspector").strip().lower()
+    if normalized in KNOWN_LABEL_ORIGINS:
+        return normalized
+    return "manual_inspector"
+
+
+def _contains_synthetic_marker(raw_text: Optional[str]) -> bool:
+    text = str(raw_text or "").strip().lower()
+    if not text:
+        return False
+
+    for marker in getattr(monitoring_router, "SYNTHETIC_LABEL_MARKERS", ()):  # defensive reuse
+        marker_text = str(marker or "").strip().lower()
+        if marker_text and marker_text in text:
+            return True
+    return False
+
+
+def _build_inspector_label_entity(
+    *,
+    label: schemas.InspectorLabelCreate,
+    current_user: models.User,
+    db: Session,
+) -> models.InspectorLabel:
+    linked_assessment_model_version: Optional[str] = None
     if label.assessment_id is not None:
         assessment = (
             db.query(models.AIRiskAssessment)
@@ -3012,6 +3054,30 @@ def submit_inspector_label(
                 status_code=400,
                 detail="assessment_id không khớp với tax_code.",
             )
+        raw_assessment_model_version = getattr(assessment, "model_version", None)
+        linked_assessment_model_version = str(raw_assessment_model_version).strip()[:80] if raw_assessment_model_version else None
+
+    resolved_label_origin = _normalize_label_origin(label.label_origin)
+    if resolved_label_origin in BLOCKED_LABEL_ORIGINS:
+        raise HTTPException(
+            status_code=400,
+            detail="API ghi nhãn thực địa không chấp nhận label_origin synthetic/bootstrap.",
+        )
+
+    evidence_summary = str(label.evidence_summary or "").strip()
+    if len(evidence_summary) < 12:
+        raise HTTPException(
+            status_code=400,
+            detail="Nhãn thực địa cần evidence_summary tối thiểu 12 ký tự.",
+        )
+    if _contains_synthetic_marker(evidence_summary):
+        raise HTTPException(
+            status_code=400,
+            detail="evidence_summary chứa marker synthetic/bootstrap nên bị từ chối.",
+        )
+
+    provided_model_version = str(label.model_version or "").strip()[:80] or None
+    resolved_model_version = provided_model_version or linked_assessment_model_version
 
     resolved_intervention_attempted = bool(label.intervention_attempted or label.decision)
     resolved_outcome_status = label.outcome_status
@@ -3028,13 +3094,15 @@ def submit_inspector_label(
     if resolved_outcome_recorded_at is None and resolved_outcome_status in terminal_status:
         resolved_outcome_recorded_at = datetime.utcnow()
 
-    new_label = models.InspectorLabel(
+    return models.InspectorLabel(
         tax_code=label.tax_code,
         inspector_id=current_user.id,
         label_type=label.label_type,
         confidence=label.confidence,
+        label_origin=resolved_label_origin,
         assessment_id=label.assessment_id,
-        evidence_summary=label.evidence_summary,
+        model_version=resolved_model_version,
+        evidence_summary=evidence_summary,
         decision=label.decision,
         decision_date=label.decision_date,
         tax_period=label.tax_period,
@@ -3051,11 +3119,105 @@ def submit_inspector_label(
         outcome_recorded_at=resolved_outcome_recorded_at,
         kpi_window_days=label.kpi_window_days,
     )
-    db.add(new_label)
-    db.commit()
-    db.refresh(new_label)
 
-    return schemas.InspectorLabelResponse.model_validate(new_label)
+
+@router.post("/inspector-labels/bulk", response_model=schemas.InspectorLabelBulkResult)
+def submit_inspector_labels_bulk(
+    payload: schemas.InspectorLabelBulkCreate,
+    current_user: models.User = Depends(auth.get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Bulk ingest real inspector labels.
+
+    strict_mode=true  -> reject all when any row is invalid
+    strict_mode=false -> accept valid rows and return per-row errors
+    """
+    errors: list[dict[str, Any]] = []
+
+    if payload.strict_mode:
+        rows: list[models.InspectorLabel] = []
+        for idx, item in enumerate(payload.labels):
+            try:
+                rows.append(
+                    _build_inspector_label_entity(
+                        label=item,
+                        current_user=current_user,
+                        db=db,
+                    )
+                )
+            except HTTPException as exc:
+                errors.append(
+                    {
+                        "index": idx,
+                        "tax_code": item.tax_code,
+                        "detail": exc.detail,
+                    }
+                )
+
+        if errors:
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "message": "Bulk ingest bị từ chối do có dòng không hợp lệ.",
+                    "errors": errors,
+                },
+            )
+
+        db.add_all(rows)
+        db.commit()
+
+        created_ids: list[int] = []
+        for row in rows:
+            db.refresh(row)
+            if isinstance(row.id, int):
+                created_ids.append(row.id)
+
+        return schemas.InspectorLabelBulkResult(
+            inserted=len(created_ids),
+            rejected=0,
+            created_ids=created_ids,
+            errors=[],
+        )
+
+    created_ids: list[int] = []
+    for idx, item in enumerate(payload.labels):
+        try:
+            row = _build_inspector_label_entity(
+                label=item,
+                current_user=current_user,
+                db=db,
+            )
+            db.add(row)
+            db.commit()
+            db.refresh(row)
+            if isinstance(row.id, int):
+                created_ids.append(row.id)
+        except HTTPException as exc:
+            db.rollback()
+            errors.append(
+                {
+                    "index": idx,
+                    "tax_code": item.tax_code,
+                    "detail": exc.detail,
+                }
+            )
+        except Exception as exc:
+            db.rollback()
+            errors.append(
+                {
+                    "index": idx,
+                    "tax_code": item.tax_code,
+                    "detail": f"Lỗi hệ thống khi lưu label: {str(exc)}",
+                }
+            )
+
+    return schemas.InspectorLabelBulkResult(
+        inserted=len(created_ids),
+        rejected=len(errors),
+        created_ids=created_ids,
+        errors=errors,
+    )
 
 
 @router.get("/inspector-labels/{tax_code}")

@@ -49,8 +49,13 @@ FRAUD_FEATURE_SET_VERSION = "fraud_inference_features_v1"
 TEMPORAL_AUC_DROP_MAX = 0.08
 TEMPORAL_PR_AUC_DROP_MAX = 0.10
 SLICE_MIN_AUC = 0.60
-SLICE_MIN_PR_AUC = 0.45
 SLICE_MIN_SAMPLES = 80
+
+PR_AUC_CORE_FLOOR = 0.12
+PR_AUC_SLICE_FLOOR = 0.08
+PR_AUC_THRESHOLD_CAP = 0.50
+PR_AUC_CORE_LIFT = 4.0
+PR_AUC_SLICE_LIFT = 2.5
 
 
 def _expected_calibration_error(y_true, y_prob, bins: int = 10) -> float:
@@ -113,6 +118,16 @@ def _evaluate_probability_metrics(y_true: np.ndarray, y_prob: np.ndarray) -> dic
         snapshot["available"] = True
 
     return snapshot
+
+
+def _derive_pr_auc_thresholds(positive_rate: float) -> tuple[float, float]:
+    """Derive class-imbalance-aware PR-AUC gates from the observed positive rate."""
+    rate = float(np.clip(positive_rate, 1e-6, 0.5))
+
+    core_threshold = min(PR_AUC_THRESHOLD_CAP, max(PR_AUC_CORE_FLOOR, rate * PR_AUC_CORE_LIFT))
+    slice_threshold = min(core_threshold, max(PR_AUC_SLICE_FLOOR, rate * PR_AUC_SLICE_LIFT))
+
+    return round(core_threshold, 6), round(slice_threshold, 6)
 
 
 def _build_split_indices(frame: pd.DataFrame, y: np.ndarray) -> dict:
@@ -394,12 +409,14 @@ def main():
     xgb_brier = brier_score_loss(y_test, y_prob_cal)
     xgb_ece_raw = _expected_calibration_error(y_test, y_prob_raw, bins=10)
     xgb_ece = _expected_calibration_error(y_test, y_prob_cal, bins=10)
+    pr_auc_core_threshold, pr_auc_slice_threshold = _derive_pr_auc_thresholds(float(np.mean(y_test)))
 
     print(f"       XGBoost AUC (raw):        {xgb_auc_raw:.4f}")
     print(f"       XGBoost AUC (calibrated): {xgb_auc:.4f}")
     print(f"       PR-AUC   (raw/cal):       {xgb_pr_auc_raw:.4f} / {xgb_pr_auc:.4f}")
     print(f"       Brier    (raw/cal):       {xgb_brier_raw:.4f} / {xgb_brier:.4f}")
     print(f"       ECE      (raw/cal):       {xgb_ece_raw:.4f} / {xgb_ece:.4f}")
+    print(f"       PR-AUC gate (core/slice): {pr_auc_core_threshold:.4f} / {pr_auc_slice_threshold:.4f}")
     print(f"\n       Classification Report (Test Set):")
     print(classification_report(y_test, y_pred, target_names=["Normal", "Fraud"]))
 
@@ -523,9 +540,9 @@ def main():
             "pass": bool(float(xgb_auc) >= 0.70),
         },
         "pr_auc_min": {
-            "threshold": 0.50,
+            "threshold": pr_auc_core_threshold,
             "actual": round(float(xgb_pr_auc), 6),
-            "pass": bool(float(xgb_pr_auc) >= 0.50),
+            "pass": bool(float(xgb_pr_auc) >= pr_auc_core_threshold),
         },
         "brier_max": {
             "threshold": 0.30,
@@ -600,7 +617,7 @@ def main():
     min_slice_pr_auc = slice_summary.get("min_pr_auc")
     if min_slice_pr_auc is None:
         soft_criteria["slice_min_pr_auc_soft"] = {
-            "threshold": SLICE_MIN_PR_AUC,
+            "threshold": pr_auc_slice_threshold,
             "actual": None,
             "pass": True,
             "soft_gate": True,
@@ -608,9 +625,9 @@ def main():
         }
     else:
         soft_criteria["slice_min_pr_auc_soft"] = {
-            "threshold": SLICE_MIN_PR_AUC,
+            "threshold": pr_auc_slice_threshold,
             "actual": round(float(min_slice_pr_auc), 6),
-            "pass": bool(float(min_slice_pr_auc) >= SLICE_MIN_PR_AUC),
+            "pass": bool(float(min_slice_pr_auc) >= pr_auc_slice_threshold),
             "soft_gate": True,
         }
 

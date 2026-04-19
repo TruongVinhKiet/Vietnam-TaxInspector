@@ -161,7 +161,7 @@
         setProgress("error", 0);
 
         const statusEl = byId("dashboard-delinquency-health-status");
-        if (statusEl) statusEl.textContent = "ERROR";
+        if (statusEl) statusEl.textContent = "LỖI";
 
         const subtextEl = byId("dashboard-delinquency-health-subtext");
         if (subtextEl) subtextEl.textContent = "Không thể tải trạng thái sức khỏe từ backend.";
@@ -206,6 +206,16 @@
         if (status === "insufficient_artifacts") return "THIẾU TỆP";
         if (status === "review_required") return "CẦN RÀ SOÁT";
         return "LỖI";
+    }
+
+    function mapDecisionStatusLabel(rawStatus) {
+        const normalized = String(rawStatus || "").toLowerCase();
+        if (normalized === "go") return "PHÊ DUYỆT";
+        if (normalized === "conditional_go") return "PHÊ DUYỆT CÓ ĐIỀU KIỆN";
+        if (normalized === "no_go") return "KHÔNG PHÊ DUYỆT";
+        if (normalized === "review_required") return "CẦN RÀ SOÁT";
+        if (!normalized || normalized === "unavailable") return "CHƯA CÓ DỮ LIỆU";
+        return normalized.replaceAll("_", " ").toUpperCase();
     }
 
     function setRolloutBadge(status) {
@@ -275,7 +285,7 @@
         const decision = payload?.artifacts?.go_no_go || {};
         const decisionEl = byId("dashboard-rollout-decision");
         if (decisionEl) {
-            const decisionText = String(decision?.decision_status || "unavailable").replaceAll("_", " ").toUpperCase();
+            const decisionText = mapDecisionStatusLabel(decision?.decision_status);
             decisionEl.textContent = `${decisionText} • pha_d=${decision?.go_live_phase_d ? "CÓ" : "KHÔNG"}`;
         }
 
@@ -315,7 +325,7 @@
         const subtextEl = byId("dashboard-rollout-subtext");
         if (subtextEl) {
             const readyText = payload?.phase_d_candidate ? "Ứng viên Pha D" : "Ưu tiên tích hợp";
-            subtextEl.textContent = `Trạng thái triển khai ${status.toUpperCase()} • ${readyText}`;
+            subtextEl.textContent = `Trạng thái triển khai ${rolloutBadgeLabel(status)} • ${readyText}`;
         }
 
         const updatedEl = byId("dashboard-rollout-updated");
@@ -588,7 +598,7 @@
 
         const trackStatus = splitPayload?.track_status;
         if (!trackStatus || typeof trackStatus !== "object") {
-            holder.innerHTML = '<p class="text-slate-400 italic">Không có dữ liệu track status.</p>';
+            holder.innerHTML = '<p class="text-slate-400 italic">Không có dữ liệu trạng thái theo tuyến.</p>';
             return;
         }
 
@@ -611,7 +621,7 @@
         });
 
         if (!sortedTracks.length) {
-            holder.innerHTML = '<p class="text-slate-400 italic">Không có track KPI nào được cấu hình.</p>';
+            holder.innerHTML = '<p class="text-slate-400 italic">Không có tuyến KPI nào được cấu hình.</p>';
             return;
         }
 
@@ -636,7 +646,7 @@
                             <span class="text-[10px] font-bold px-2 py-0.5 rounded ${ready ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"}">${ready ? "SẴN SÀNG" : "ĐANG KHÓA"}</span>
                         </div>
                         <p class="text-[11px] text-slate-500 mt-1">Đạt ${passCount}/${enabledRules.length} quy tắc • Đang chặn ${Number(trackPayload.blocking_rule_count || 0)}</p>
-                        <p class="text-[11px] mt-1 ${passRateClass}">Tỷ lệ đạt theo track (14 ngày): ${escapeHtml(passRateText)}</p>
+                        <p class="text-[11px] mt-1 ${passRateClass}">Tỷ lệ đạt theo tuyến (14 ngày): ${escapeHtml(passRateText)}</p>
                     </div>
                 `;
             })
@@ -827,7 +837,7 @@
         setKpiBadge("error", "LỖI");
         setKpiFreshnessBadge("unknown", "KHÔNG RÕ");
         setKpiAlertLevel("critical");
-        setKpiAlertCodesUnavailable("Không thể tải alert codes từ split_trigger_alerts.");
+        setKpiAlertCodesUnavailable("Không thể tải mã cảnh báo từ split_trigger_alerts.");
 
         const subtextEl = byId("dashboard-kpi-subtext");
         if (subtextEl) {
@@ -866,7 +876,7 @@
 
         const trackHolder = byId("dashboard-kpi-track-status");
         if (trackHolder) {
-            trackHolder.innerHTML = '<p class="text-red-600 italic">Không thể tải track status.</p>';
+            trackHolder.innerHTML = '<p class="text-red-600 italic">Không thể tải trạng thái theo tuyến.</p>';
         }
 
         const metricHolder = byId("dashboard-kpi-latest-metrics");

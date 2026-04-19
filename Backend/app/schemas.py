@@ -630,7 +630,15 @@ class InspectorLabelCreate(BaseModel):
     tax_code: str
     label_type: str = Field(..., description="fraud_confirmed, fraud_rejected, delinquency_confirmed, etc.")
     confidence: Literal["low", "medium", "high"] = "medium"
+    label_origin: Optional[Literal[
+        "manual_inspector",
+        "field_verified",
+        "imported_casework",
+        "bootstrap_generated",
+        "auto_seed",
+    ]] = None
     assessment_id: Optional[int] = None
+    model_version: Optional[str] = None
     evidence_summary: Optional[str] = None
     decision: Optional[str] = None
     decision_date: Optional[date] = None
@@ -669,6 +677,8 @@ class InspectorLabelResponse(BaseModel):
     assessment_id: Optional[int] = None
     label_type: str
     confidence: str = "medium"
+    label_origin: str = "manual_inspector"
+    model_version: Optional[str] = None
     evidence_summary: Optional[str] = None
     decision: Optional[str] = None
     decision_date: Optional[date] = None
@@ -686,6 +696,18 @@ class InspectorLabelResponse(BaseModel):
     outcome_recorded_at: Optional[datetime] = None
     kpi_window_days: int = 90
     created_at: Optional[datetime] = None
+
+
+class InspectorLabelBulkCreate(BaseModel):
+    labels: List[InspectorLabelCreate] = Field(..., min_length=1, max_length=500)
+    strict_mode: bool = True
+
+
+class InspectorLabelBulkResult(BaseModel):
+    inserted: int = 0
+    rejected: int = 0
+    errors: List[Dict[str, Any]] = Field(default_factory=list)
+    created_ids: List[int] = Field(default_factory=list)
 
 
 # --- Multi-Scenario What-If Comparison (Program C) ---

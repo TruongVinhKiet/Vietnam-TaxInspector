@@ -63,35 +63,46 @@ def _update_batch_status(batch_id: int, **kwargs):
         db.close()
 
 
-def _save_assessments(assessments: list):
-    """Save individual risk assessments to DB."""
+def _save_assessments(assessments: list, chunk_size: int = 2000):
+    """Save individual risk assessments to DB using chunked bulk inserts."""
     from app.models import AIRiskAssessment
+
+    if not assessments:
+        return
+
+    safe_chunk_size = max(200, int(chunk_size or 2000))
+
+    def _to_record(a: dict) -> dict:
+        return {
+            "batch_id": a.get("batch_id"),
+            "tax_code": str(a.get("tax_code", "")),
+            "company_name": a.get("company_name"),
+            "industry": a.get("industry"),
+            "year": int(a.get("year") or 0),
+            "revenue": float(a.get("revenue") or 0.0),
+            "total_expenses": float(a.get("total_expenses") or 0.0),
+            "f1_divergence": float(a.get("f1_divergence") or 0.0),
+            "f2_ratio_limit": float(a.get("f2_ratio_limit") or 0.0),
+            "f3_vat_structure": float(a.get("f3_vat_structure") or 0.0),
+            "f4_peer_comparison": float(a.get("f4_peer_comparison") or 0.0),
+            "anomaly_score": float(a.get("anomaly_score") or 0.0),
+            "model_confidence": float(a.get("model_confidence") or 0.0),
+            "model_version": a.get("model_version"),
+            "risk_score": float(a.get("risk_score") or 0.0),
+            "risk_level": a.get("risk_level", "low"),
+            "red_flags": a.get("red_flags") or [],
+            "shap_explanation": a.get("shap_explanation"),
+            "yearly_history": a.get("yearly_history"),
+        }
+
     db = SessionLocal()
     try:
-        for a in assessments:
-            record = AIRiskAssessment(
-                batch_id=a.get("batch_id"),
-                tax_code=a["tax_code"],
-                company_name=a.get("company_name"),
-                industry=a.get("industry"),
-                year=a.get("year"),
-                revenue=a.get("revenue"),
-                total_expenses=a.get("total_expenses"),
-                f1_divergence=a.get("f1_divergence"),
-                f2_ratio_limit=a.get("f2_ratio_limit"),
-                f3_vat_structure=a.get("f3_vat_structure"),
-                f4_peer_comparison=a.get("f4_peer_comparison"),
-                anomaly_score=a.get("anomaly_score"),
-                model_confidence=a.get("model_confidence"),
-                model_version=a.get("model_version"),
-                risk_score=a.get("risk_score", 0),
-                risk_level=a.get("risk_level", "low"),
-                red_flags=a.get("red_flags"),
-                shap_explanation=a.get("shap_explanation"),
-                yearly_history=a.get("yearly_history"),
-            )
-            db.add(record)
-        db.commit()
+        total = len(assessments)
+        for start in range(0, total, safe_chunk_size):
+            chunk = assessments[start:start + safe_chunk_size]
+            rows = [_to_record(a) for a in chunk]
+            db.bulk_insert_mappings(AIRiskAssessment, rows)
+            db.commit()
     except Exception as e:
         db.rollback()
         print(f"[ERROR] _save_assessments: {e}")
@@ -130,14 +141,27 @@ def run_batch_analysis(file_path: str, batch_id: int) -> dict:
         # Load and run pipeline
         pipeline = get_pipeline()
 
+        last_reported = 0
+
         def progress_cb(processed, total):
-            _update_batch_status(batch_id, processed_rows=processed)
+            nonlocal last_reported
+            # Throttle DB progress writes to reduce lock/contention for very large batches.
+            if processed == total or (processed - last_reported) >= 1000:
+                _update_batch_status(batch_id, processed_rows=processed)
+                last_reported = processed
 
         result = pipeline.predict_batch(df, batch_id=batch_id,
                                          progress_callback=progress_cb)
 
+        # Persisting many rows can take noticeable time; expose a finalizing status.
+        _update_batch_status(
+            batch_id,
+            status="finalizing",
+            processed_rows=result["total_companies"],
+        )
+
         # Save individual assessments to DB
-        _save_assessments(result["assessments"])
+        _save_assessments(result["assessments"], chunk_size=2000)
 
         # Save summary statistics to batch record
         _update_batch_status(

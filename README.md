@@ -187,6 +187,9 @@ Biến môi trường tùy chọn:
 # 1) Chạy pipeline specialized (không seed lại)
 Backend/venv/Scripts/python.exe Backend/app/scripts/run_specialized_training_pipeline.py --skip-seed
 
+# 1.1) Bật policy lọc nhãn synthetic khỏi train set specialized
+Backend/venv/Scripts/python.exe Backend/app/scripts/run_specialized_training_pipeline.py --skip-seed --label-origin-policy exclude_synthetic
+
 # 2) Kiểm tra go/no-go artifact mới nhất
 Backend/venv/Scripts/python.exe Backend/app/scripts/run_specialized_go_no_go_review.py
 
@@ -195,6 +198,20 @@ Backend/venv/Scripts/python.exe -m pytest Backend/tests/test_monitoring_kpi_work
 
 # 4) Chạy regression test go/no-go decision logic
 Backend/venv/Scripts/python.exe -m pytest Backend/tests/test_specialized_go_no_go_review.py -q
+
+# 5) Audit và backfill lineage model_version (khuyến nghị chạy trước rollout)
+Backend/venv/Scripts/python.exe Backend/data/backfill_model_lineage.py --dry-run
+Backend/venv/Scripts/python.exe Backend/data/backfill_model_lineage.py --batch-size 5000
+
+# 6) Import nhãn thực địa theo lô (CSV) để giảm synthetic pressure
+Backend/venv/Scripts/python.exe Backend/app/scripts/import_real_inspector_labels.py --input-csv Backend/data/uploads/real_labels.csv --dry-run
+Backend/venv/Scripts/python.exe Backend/app/scripts/import_real_inspector_labels.py --input-csv Backend/data/uploads/real_labels.csv --strict-mode --reject-report Backend/data/uploads/real_labels_rejected.csv
+
+# 7) Kiểm tra schema specialized và tự động thêm cột/bảng thiếu (ALTER/CREATE)
+Backend/venv/Scripts/python.exe Backend/app/scripts/ensure_specialized_schema.py
+
+# 8) Sinh file casework lớn (>5000 mẫu) tương thích importer
+Backend/venv/Scripts/python.exe Backend/data/generate_casework_labels_csv.py --rows 6000 --output-csv Backend/data/uploads/casework_labels_6000.csv
 ```
 
 ### Tiêu chí "Done" để đóng dự án

@@ -28,6 +28,7 @@ from typing import Any
 import numpy as np
 from sklearn.metrics import average_precision_score, roc_auc_score
 from sqlalchemy import func, or_
+from sqlalchemy.orm import load_only
 
 BACKEND_DIR = Path(__file__).resolve().parents[2]
 if str(BACKEND_DIR) not in sys.path:
@@ -170,6 +171,31 @@ def _load_track_rows(
 
     query = (
         db.query(InspectorLabel, AIRiskAssessment)
+        .options(
+            load_only(
+                InspectorLabel.id,
+                InspectorLabel.assessment_id,
+                InspectorLabel.created_at,
+                InspectorLabel.label_type,
+                InspectorLabel.outcome_status,
+                InspectorLabel.amount_recovered,
+                InspectorLabel.expected_recovery,
+            ),
+            load_only(
+                AIRiskAssessment.id,
+                AIRiskAssessment.tax_code,
+                AIRiskAssessment.risk_score,
+                AIRiskAssessment.anomaly_score,
+                AIRiskAssessment.model_confidence,
+                AIRiskAssessment.revenue,
+                AIRiskAssessment.total_expenses,
+                AIRiskAssessment.f1_divergence,
+                AIRiskAssessment.f2_ratio_limit,
+                AIRiskAssessment.f3_vat_structure,
+                AIRiskAssessment.f4_peer_comparison,
+                AIRiskAssessment.red_flags,
+            ),
+        )
         .join(AIRiskAssessment, AIRiskAssessment.id == InspectorLabel.assessment_id)
         .filter(
             InspectorLabel.assessment_id.isnot(None),

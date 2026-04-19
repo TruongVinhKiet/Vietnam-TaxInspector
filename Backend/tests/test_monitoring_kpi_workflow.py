@@ -199,6 +199,98 @@ class _PolicyConnection:
         return None
 
 
+class _DataRealityAuditCursor:
+    def __init__(self, rows: list[dict], has_table: bool = True):
+        self._rows = []
+        self._store = list(rows)
+        self._has_table = bool(has_table)
+
+    def _filtered(self, query: str, params: tuple | None) -> list[dict]:
+        compact = " ".join(query.lower().split())
+        filtered = list(self._store)
+        values = list(params or ())
+        idx = 0
+
+        if "source_endpoint = %s" in compact and idx < len(values):
+            source_endpoint = str(values[idx])
+            idx += 1
+            filtered = [row for row in filtered if str(row.get("source_endpoint")) == source_endpoint]
+
+        if "lower(status) = %s" in compact and idx < len(values):
+            status_value = str(values[idx]).lower()
+            idx += 1
+            filtered = [row for row in filtered if str(row.get("status") or "").lower() == status_value]
+
+        if "ready_for_real_ops = false" in compact:
+            filtered = [row for row in filtered if not bool(row.get("ready_for_real_ops"))]
+
+        return filtered
+
+    def execute(self, query, params=None):
+        compact = " ".join(query.lower().split())
+
+        if "from information_schema.columns" in compact:
+            table_name = params[0] if params else ""
+            if self._has_table and table_name == monitoring.DATA_REALITY_AUDIT_TABLE:
+                self._rows = [("id",), ("source_endpoint",), ("status",)]
+            else:
+                self._rows = []
+            return
+
+        if compact.startswith("select count(*) from data_reality_audit_logs"):
+            filtered = self._filtered(query, params)
+            self._rows = [(len(filtered),)]
+            return
+
+        if "from data_reality_audit_logs" in compact and "limit %s" in compact:
+            values = tuple(params or ())
+            limit = int(values[-1]) if values else 100
+            filtered = self._filtered(query, values[:-1])
+            filtered.sort(key=lambda row: int(row.get("id") or 0), reverse=True)
+
+            rendered = []
+            for row in filtered[:limit]:
+                rendered.append(
+                    (
+                        int(row.get("id") or 0),
+                        row.get("source_endpoint"),
+                        row.get("status"),
+                        bool(row.get("ready_for_real_ops")),
+                        bool(row.get("hard_ready")),
+                        json.dumps(row.get("reasons") or []),
+                        json.dumps(row.get("hard_checks") or {}),
+                        json.dumps(row.get("soft_checks") or {}),
+                        json.dumps(row.get("metrics") or {}),
+                        row.get("generated_at"),
+                        row.get("created_at"),
+                    )
+                )
+            self._rows = rendered
+            return
+
+        raise AssertionError(f"Unexpected SQL in audit-log test stub: {query}")
+
+    def fetchall(self):
+        return list(self._rows)
+
+    def fetchone(self):
+        return self._rows[0] if self._rows else None
+
+    def close(self):
+        return None
+
+
+class _DataRealityAuditConnection:
+    def __init__(self, rows: list[dict], has_table: bool = True):
+        self.cursor_obj = _DataRealityAuditCursor(rows=rows, has_table=has_table)
+
+    def cursor(self):
+        return self.cursor_obj
+
+    def close(self):
+        return None
+
+
 def test_persist_kpi_snapshots_inserts_expected_rows():
     cursor = _SnapshotCursor()
     payload = {
@@ -430,6 +522,85 @@ def test_upsert_kpi_policy_endpoint_forbids_non_admin(client):
 
     assert response.status_code == 403
     assert "admin" in response.json().get("detail", "").lower()
+
+
+def test_data_reality_audit_logs_filters_and_limits(client, monkeypatch):
+    base_time = datetime(2026, 4, 19, 10, 0, 0)
+    rows = [
+        {
+            "id": 1,
+            "source_endpoint": "specialized_rollout_status",
+            "status": "blocked",
+            "ready_for_real_ops": False,
+            "hard_ready": False,
+            "reasons": ["reason-a", "reason-b"],
+            "hard_checks": {"enough_observation_rows": True},
+            "soft_checks": {"manual_feedback_present": False},
+            "metrics": {"real_label_ratio": 0.12},
+            "generated_at": base_time,
+            "created_at": base_time,
+        },
+        {
+            "id": 2,
+            "source_endpoint": "specialized_rollout_status",
+            "status": "ready",
+            "ready_for_real_ops": True,
+            "hard_ready": True,
+            "reasons": [],
+            "hard_checks": {"enough_observation_rows": True},
+            "soft_checks": {"manual_feedback_present": True},
+            "metrics": {"real_label_ratio": 0.92},
+            "generated_at": base_time,
+            "created_at": base_time,
+        },
+        {
+            "id": 3,
+            "source_endpoint": "intervention_effectiveness",
+            "status": "blocked",
+            "ready_for_real_ops": False,
+            "hard_ready": False,
+            "reasons": ["reason-c"],
+            "hard_checks": {"model_artifacts_ready": False},
+            "soft_checks": {},
+            "metrics": {},
+            "generated_at": base_time,
+            "created_at": base_time,
+        },
+    ]
+
+    fake_conn = _DataRealityAuditConnection(rows=rows, has_table=True)
+    monkeypatch.setattr(monitoring.psycopg2, "connect", lambda *_args, **_kwargs: fake_conn)
+
+    response = client.get(
+        "/api/monitoring/data_reality_audit_logs"
+        "?source_endpoint=specialized_rollout_status"
+        "&status=blocked"
+        "&blocked_only=true"
+        "&limit=1"
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["total_rows"] == 1
+    assert payload["count"] == 1
+    assert len(payload["items"]) == 1
+    assert payload["items"][0]["id"] == 1
+    assert payload["items"][0]["status"] == "blocked"
+    assert payload["items"][0]["ready_for_real_ops"] is False
+    assert payload["items"][0]["reasons"] == ["reason-a", "reason-b"]
+
+
+def test_data_reality_audit_logs_returns_empty_when_table_missing(client, monkeypatch):
+    fake_conn = _DataRealityAuditConnection(rows=[], has_table=False)
+    monkeypatch.setattr(monitoring.psycopg2, "connect", lambda *_args, **_kwargs: fake_conn)
+
+    response = client.get("/api/monitoring/data_reality_audit_logs")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["count"] == 0
+    assert payload["items"] == []
+    assert "Chưa có bảng" in payload.get("message", "")
 
 
 def test_split_trigger_alerts_returns_safe_payload_on_db_error(client, monkeypatch):

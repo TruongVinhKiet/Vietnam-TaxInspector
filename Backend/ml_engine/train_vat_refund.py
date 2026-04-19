@@ -15,6 +15,7 @@ Artifacts:
 Usage:
     python -m ml_engine.train_vat_refund
     python ml_engine/train_vat_refund.py --lookback-days 540
+    python ml_engine/train_vat_refund.py --label-origin-policy exclude_synthetic
 """
 
 import argparse
@@ -59,6 +60,9 @@ FEATURE_COLUMNS = [
 ]
 
 VAT_KEYWORDS = ("vat", "hoa don", "hoan thue", "invoice", "input", "output")
+REAL_LABEL_ORIGINS = ("manual_inspector", "field_verified", "imported_casework")
+SYNTHETIC_LABEL_ORIGINS = ("bootstrap_generated", "auto_seed")
+VALID_LABEL_ORIGIN_POLICIES = ("exclude_synthetic", "real_only", "all")
 
 
 def _to_float(value: Any, default: float = 0.0) -> float:
@@ -80,6 +84,26 @@ def _coerce_json_like(value: Any) -> Any:
         except Exception:
             return []
     return []
+
+
+def _normalize_label_origin_policy(raw_policy: str | None) -> str:
+    normalized = str(raw_policy or "").strip().lower()
+    if normalized in VALID_LABEL_ORIGIN_POLICIES:
+        return normalized
+    return "exclude_synthetic"
+
+
+def _build_label_origin_filter_sql(policy: str, canonical_origin_sql: str | None = None) -> str:
+    resolved_policy = _normalize_label_origin_policy(policy)
+    canonical_origin_sql = canonical_origin_sql or "COALESCE(NULLIF(btrim(LOWER(COALESCE(l.label_origin, ''))), ''), 'manual_inspector')"
+    real_tokens = ", ".join(f"'{token}'" for token in REAL_LABEL_ORIGINS)
+    synthetic_tokens = ", ".join(f"'{token}'" for token in SYNTHETIC_LABEL_ORIGINS)
+
+    if resolved_policy == "all":
+        return "TRUE"
+    if resolved_policy == "real_only":
+        return f"{canonical_origin_sql} IN ({real_tokens})"
+    return f"{canonical_origin_sql} NOT IN ({synthetic_tokens})"
 
 
 def _count_vat_flags(raw_flags: Any) -> int:
@@ -246,15 +270,55 @@ def _resolve_default_db_url() -> str:
     return "postgresql://postgres:postgres@localhost/tax_inspector"
 
 
-def load_training_data(db_url: str, lookback_days: int) -> pd.DataFrame:
+def _load_table_columns(conn, table_name: str) -> set[str]:
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT column_name
+            FROM information_schema.columns
+            WHERE table_schema = ANY(current_schemas(false))
+              AND table_name = %s
+            """,
+            (table_name,),
+        )
+        return {
+            str(row[0]).strip().lower()
+            for row in cur.fetchall()
+            if row and row[0]
+        }
+
+
+def load_training_data(db_url: str, lookback_days: int, label_origin_policy: str) -> pd.DataFrame:
     import psycopg2
     from psycopg2.extras import RealDictCursor
 
-    query = """
+    conn = psycopg2.connect(db_url)
+    try:
+        inspector_label_columns = _load_table_columns(conn, "inspector_labels")
+        has_label_origin = "label_origin" in inspector_label_columns
+        has_model_version = "model_version" in inspector_label_columns
+
+        canonical_origin_sql = (
+            "COALESCE(NULLIF(btrim(LOWER(COALESCE(l.label_origin, ''))), ''), 'manual_inspector')"
+            if has_label_origin
+            else "'manual_inspector'"
+        )
+        origin_filter_sql = _build_label_origin_filter_sql(label_origin_policy, canonical_origin_sql)
+
+        label_origin_select_sql = f"{canonical_origin_sql} AS label_origin"
+        label_model_version_select_sql = (
+            "l.model_version AS label_model_version"
+            if has_model_version
+            else "NULL::VARCHAR AS label_model_version"
+        )
+
+        query = f"""
         SELECT
             l.id AS label_id,
             l.tax_code,
             l.label_type,
+            {label_origin_select_sql},
+            {label_model_version_select_sql},
             l.outcome_status,
             l.amount_recovered,
             l.created_at AS label_created_at,
@@ -279,6 +343,7 @@ def load_training_data(db_url: str, lookback_days: int) -> pd.DataFrame:
                 f3_vat_structure,
                 f4_peer_comparison,
                 red_flags,
+                model_version,
                 created_at
             FROM ai_risk_assessments a
             WHERE a.tax_code = l.tax_code
@@ -286,6 +351,7 @@ def load_training_data(db_url: str, lookback_days: int) -> pd.DataFrame:
             LIMIT 1
         ) a ON TRUE
         WHERE l.created_at >= (NOW() - (%s || ' days')::interval)
+          AND ({origin_filter_sql})
           AND (
                      LOWER(COALESCE(l.label_type, '')) LIKE '%%vat%%'
                  OR LOWER(COALESCE(l.label_type, '')) LIKE '%%refund%%'
@@ -294,8 +360,6 @@ def load_training_data(db_url: str, lookback_days: int) -> pd.DataFrame:
         ORDER BY l.created_at ASC
     """
 
-    conn = psycopg2.connect(db_url)
-    try:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute(query, (int(lookback_days),))
             rows = cur.fetchall()
@@ -305,14 +369,33 @@ def load_training_data(db_url: str, lookback_days: int) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-def main(db_url: str, lookback_days: int, min_samples: int) -> int:
+def main(db_url: str, lookback_days: int, min_samples: int, label_origin_policy: str) -> int:
     print("=" * 64)
     print("  VAT Refund Risk Model Training")
     print("=" * 64)
 
     print("\n[1/6] Loading VAT/refund labels...")
-    frame = load_training_data(db_url=db_url, lookback_days=lookback_days)
+    resolved_policy = _normalize_label_origin_policy(label_origin_policy)
+    print(f"       label_origin_policy={resolved_policy}")
+    frame = load_training_data(
+        db_url=db_url,
+        lookback_days=lookback_days,
+        label_origin_policy=resolved_policy,
+    )
     print(f"       Loaded labels: {len(frame):,}")
+
+    if len(frame) > 0 and "label_origin" in frame.columns:
+        origin_counts = (
+            frame["label_origin"]
+            .fillna("manual_inspector")
+            .astype(str)
+            .str.strip()
+            .replace({"": "manual_inspector"})
+            .value_counts()
+            .to_dict()
+        )
+        origin_summary = ", ".join(f"{k}:{int(v)}" for k, v in sorted(origin_counts.items()))
+        print(f"       Label origins: {origin_summary}")
 
     if len(frame) < max(30, min_samples):
         print(f"[ABORT] Not enough labels for training (need >= {max(30, min_samples)}).")
@@ -482,6 +565,7 @@ def main(db_url: str, lookback_days: int, min_samples: int) -> int:
         "track": "vat_refund",
         "model_version": VAT_MODEL_VERSION,
         "feature_set_version": VAT_FEATURE_SET_VERSION,
+        "label_origin_policy": resolved_policy,
         "feature_columns": FEATURE_COLUMNS,
         "trained_at": datetime.utcnow().isoformat() + "Z",
         "sample_count": int(len(y)),
@@ -502,15 +586,25 @@ def main(db_url: str, lookback_days: int, min_samples: int) -> int:
 
 
 if __name__ == "__main__":
+    default_label_origin_policy = _normalize_label_origin_policy(
+        os.getenv("VAT_REFUND_LABEL_ORIGIN_POLICY", "exclude_synthetic")
+    )
     parser = argparse.ArgumentParser(description="Train VAT Refund model artifacts")
     parser.add_argument("--db-url", type=str, default=_resolve_default_db_url())
     parser.add_argument("--lookback-days", type=int, default=int(os.getenv("VAT_REFUND_LOOKBACK_DAYS", "365")))
     parser.add_argument("--min-samples", type=int, default=int(os.getenv("VAT_REFUND_MIN_SAMPLES", "80")))
+    parser.add_argument(
+        "--label-origin-policy",
+        type=str,
+        choices=list(VALID_LABEL_ORIGIN_POLICIES),
+        default=default_label_origin_policy,
+    )
     args = parser.parse_args()
 
     exit_code = main(
         db_url=args.db_url,
         lookback_days=max(30, int(args.lookback_days)),
         min_samples=max(20, int(args.min_samples)),
+        label_origin_policy=args.label_origin_policy,
     )
     sys.exit(exit_code)

@@ -342,6 +342,36 @@ function buildBackUrl(page, freshness) {
 }
 
 
+function buildDetailInterventionWorkspaceUrl(pageState, taxCode) {
+    const params = new URLSearchParams();
+    params.set("source", "delinquency-detail");
+    params.set("focus", "actions");
+    params.set("window_days", "90");
+    params.set("top_k", "50");
+
+    const normalizedTaxCode = String(taxCode || "").trim();
+    if (normalizedTaxCode) {
+        params.set("tax_code", normalizedTaxCode);
+    }
+
+    if (pageState?.page > 1) {
+        params.set("page", String(pageState.page));
+    }
+    if (pageState?.freshness) {
+        params.set("freshness", pageState.freshness);
+    }
+
+    return `intervention.html?${params.toString()}`;
+}
+
+
+function syncDetailWorkspaceLink(pageState, taxCode) {
+    const link = document.getElementById("detail-open-intervention-workspace");
+    if (!link) return;
+    link.href = buildDetailInterventionWorkspaceUrl(pageState, taxCode);
+}
+
+
 function renderMetaBadges(detail) {
     const holder = document.getElementById("detail-meta-badges");
     if (!holder) return;
@@ -532,6 +562,8 @@ document.addEventListener("DOMContentLoaded", async () => {
         backLink.href = buildBackUrl(pageState.page, pageState.freshness);
     }
 
+    syncDetailWorkspaceLink(pageState, pageState.taxCode);
+
     if (!pageState.taxCode) {
         setStatus("Thiếu mã số thuế (tax_code) trong đường dẫn.", "error");
         setText("detail-company-name", "Không xác định doanh nghiệp");
@@ -542,6 +574,7 @@ document.addEventListener("DOMContentLoaded", async () => {
 
     try {
         const detail = await fetchDelinquencyDetail(pageState.taxCode);
+        syncDetailWorkspaceLink(pageState, detail?.tax_code || pageState.taxCode);
         renderDetail(detail);
     } catch (error) {
         console.error("Delinquency detail fetch error:", error);

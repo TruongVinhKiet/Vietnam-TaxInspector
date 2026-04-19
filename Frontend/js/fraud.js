@@ -779,6 +779,55 @@ async function checkFraudRisk() {
 }
 
 
+function buildWorkspaceDeepLink(targetPage, options = {}) {
+    const params = new URLSearchParams();
+    params.set('source', 'fraud');
+    params.set('window_days', String(options.windowDays || 90));
+    params.set('top_k', String(options.topK || 50));
+
+    const focus = String(options.focus || '').trim().toLowerCase();
+    if (focus) {
+        params.set('focus', focus);
+    }
+
+    const taxCode = String(options.taxCode || '').trim();
+    if (taxCode) {
+        params.set('tax_code', taxCode);
+    }
+
+    return `${targetPage}?${params.toString()}`;
+}
+
+
+function syncFraudWorkspaceLinks(data) {
+    const taxCode = String(data?.tax_code || '').trim();
+
+    const decisionLink = document.getElementById('decision-open-intervention-link');
+    if (decisionLink) {
+        decisionLink.href = buildWorkspaceDeepLink('intervention.html', {
+            focus: 'actions',
+            taxCode,
+        });
+    }
+
+    const vatLink = document.getElementById('vat-open-specialized-link');
+    if (vatLink) {
+        vatLink.href = buildWorkspaceDeepLink('specialized.html', {
+            focus: 'vat',
+            taxCode,
+        });
+    }
+
+    const auditLink = document.getElementById('audit-open-specialized-link');
+    if (auditLink) {
+        auditLink.href = buildWorkspaceDeepLink('specialized.html', {
+            focus: 'audit',
+            taxCode,
+        });
+    }
+}
+
+
 function renderSingleResult(data) {
     hideSingleResultSkeleton();
 
@@ -797,6 +846,7 @@ function renderSingleResult(data) {
     document.getElementById('result-revenue').textContent = formatVND(data.revenue);
     document.getElementById('result-expenses').textContent = formatVND(data.total_expenses);
     document.getElementById('result-year').textContent = data.year || '---';
+    syncFraudWorkspaceLinks(data);
     renderFraudSplitTriggerGate(data.split_trigger_status || null);
 
     animateRiskScore(data.risk_score || 0, data);
@@ -2220,20 +2270,29 @@ function startPolling(batchId) {
 
 
             const pct = status.progress_percent || 0;
+            const normalizedStatus = String(status.status || '').toLowerCase();
             document.getElementById('progress-bar').style.width = `${pct}%`;
             document.getElementById('progress-percent').textContent = `${pct}%`;
-            document.getElementById('progress-detail').textContent = `Đã phân tích ${status.processed_rows || 0} / ${status.total_rows || '?'} doanh nghiệp`;
+            const baseProgressText = `Đã phân tích ${status.processed_rows || 0} / ${status.total_rows || '?'} doanh nghiệp`;
+            const isFinalizingTail = normalizedStatus === 'finalizing' || (pct >= 100 && normalizedStatus === 'processing');
+            document.getElementById('progress-detail').textContent = isFinalizingTail
+                ? `${baseProgressText} • đang đồng bộ kết quả vào hệ thống`
+                : baseProgressText;
+
+            if (isFinalizingTail) {
+                document.getElementById('progress-title').textContent = 'Đang hoàn tất lưu kết quả...';
+            }
             const progressTrack = document.getElementById('progress-track');
             if (progressTrack) {
                 progressTrack.setAttribute('aria-valuenow', String(pct));
                 progressTrack.setAttribute('aria-valuetext', `${pct}%`);
             }
 
-            if (status.status === 'done') {
+            if (normalizedStatus === 'done') {
                 stopPollingLoop();
                 showToast('Phân tích hoàn tất!', `Đã xử lý thành công ${status.processed_rows} doanh nghiệp.`, 'success', 6000);
                 loadBatchResults(batchId);
-            } else if (status.status === 'failed') {
+            } else if (normalizedStatus === 'failed') {
                 stopPollingLoop();
                 showToast('Phân tích thất bại', status.error_message || 'Lỗi không xác định', 'error', 8000);
                 resetBatchUI();

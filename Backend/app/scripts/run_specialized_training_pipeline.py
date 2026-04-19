@@ -17,6 +17,9 @@ Skip seeding and only retrain models:
 
 Dry-run commands only:
     python app/scripts/run_specialized_training_pipeline.py --dry-run
+
+Use only real/non-synthetic label origins during training:
+    python app/scripts/run_specialized_training_pipeline.py --label-origin-policy exclude_synthetic
 """
 
 from __future__ import annotations
@@ -169,6 +172,7 @@ def run_pipeline(args: argparse.Namespace) -> int:
     audit_cmd = [
         py,
         "ml_engine/train_audit_value.py",
+        "--label-origin-policy", str(args.label_origin_policy),
     ]
     if args.audit_lookback_days is not None:
         audit_cmd.extend(["--lookback-days", str(args.audit_lookback_days)])
@@ -179,6 +183,7 @@ def run_pipeline(args: argparse.Namespace) -> int:
     vat_cmd = [
         py,
         "ml_engine/train_vat_refund.py",
+        "--label-origin-policy", str(args.label_origin_policy),
     ]
     if args.vat_lookback_days is not None:
         vat_cmd.extend(["--lookback-days", str(args.vat_lookback_days)])
@@ -243,6 +248,13 @@ def main() -> int:
     parser.add_argument("--seed-lookback-days", type=int, default=540, help="Lookback days for generated timestamps")
     parser.add_argument("--audit-lookback-days", type=int, default=None, help="Override lookback days for audit training")
     parser.add_argument("--vat-lookback-days", type=int, default=None, help="Override lookback days for VAT training")
+    parser.add_argument(
+        "--label-origin-policy",
+        type=str,
+        choices=["exclude_synthetic", "real_only", "all"],
+        default="exclude_synthetic",
+        help="Filter policy for inspector label origins used in specialized training",
+    )
     parser.add_argument("--skip-pilot", action="store_true", help="Skip pilot model-vs-heuristic comparison")
     parser.add_argument("--skip-go-no-go", action="store_true", help="Skip go/no-go review stage")
     parser.add_argument("--pilot-lookback-days", type=int, default=540, help="Lookback days used by pilot cohort")
