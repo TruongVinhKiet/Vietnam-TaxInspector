@@ -17,7 +17,7 @@ from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 
 from .database import engine, Base
-from .routers import scoring, graph, delinquency, auth, ai_analysis, monitoring
+from .routers import scoring, graph, delinquency, auth, ai_analysis, monitoring, simulation, osint
 from .security import limiter, SecurityHeadersMiddleware, rate_limit_exceeded_handler
 
 
@@ -318,6 +318,8 @@ app.include_router(graph.router)
 app.include_router(delinquency.router)
 app.include_router(ai_analysis.router)
 app.include_router(monitoring.router)
+app.include_router(simulation.router)
+app.include_router(osint.router)
 
 
 @app.get("/", tags=["Health"])

@@ -253,8 +253,8 @@ class GraphConstructor:
             feat = [
                 age_days / 3650.0,                              # normalized age
                 0.0,                                            # BLANKED out risk_score to prevent data leakage
-                float(c.get("lat", 0)) / 90.0,                 # normalized lat
-                float(c.get("lng", 0)) / 180.0,                # normalized lng
+                float(c.get("lat") or 0) / 90.0,                # normalized lat
+                float(c.get("lng") or 0) / 180.0,               # normalized lng
                 deg / max(1, max(degree.values())),             # normalized degree
                 math.log1p(in_amt) / 25.0,                     # normalized in_amount
                 math.log1p(out_amt) / 25.0,                    # normalized out_amount
@@ -433,10 +433,14 @@ class GraphConstructor:
             G.add_edge(s, b, amount=float(inv["amount"]))
 
         cycles = []
+        max_cycle_len = max(3, min(20, int(os.getenv("GNN_CYCLE_MAX_LEN", "10"))))
+        max_cycle_count = max(1, min(5000, int(os.getenv("GNN_CYCLE_MAX_COUNT", "1200"))))
         try:
-            for cycle in nx.simple_cycles(G, length_bound=6):
+            for cycle in nx.simple_cycles(G, length_bound=max_cycle_len):
                 if len(cycle) >= 3:
                     cycles.append(cycle)
+                if len(cycles) >= max_cycle_count:
+                    break
         except Exception:
             pass
         return cycles
@@ -853,6 +857,16 @@ class GNNInference:
                 "group": "circular" if is_circular else "normal",
             })
 
+        circular_edge_count = sum(1 for edge in result_edges if edge.get("is_circular"))
+        cycle_backed_circular_edges = sum(
+            1
+            for edge in result_edges
+            if edge.get("is_circular") and (edge.get("from"), edge.get("to")) in cycle_edges
+        )
+        circular_edge_cycle_coverage = (
+            float(cycle_backed_circular_edges) / float(max(1, circular_edge_count))
+        )
+
         # ── Extract path-level evidence ──
         evidence_paths = []
         if self.path_extractor and cycles:
@@ -874,6 +888,12 @@ class GNNInference:
             "total_invoices": len(result_edges),
             "logs": logs,
             "attention_weights": attention_data[:50],
+            "forensic_metrics": {
+                "cycle_count": len(cycles),
+                "circular_edge_count": circular_edge_count,
+                "cycle_backed_circular_edge_count": cycle_backed_circular_edges,
+                "circular_edge_cycle_coverage": round(circular_edge_cycle_coverage, 4),
+            },
             "model_loaded": self._loaded,
             "ensemble_active": self.ensemble_model is not None,
             "decision_thresholds": {
@@ -892,6 +912,7 @@ class GNNInference:
         from datetime import datetime
         logs = []
         now = datetime.now()
+        max_cycle_logs = max(1, min(50, int(os.getenv("GNN_CYCLE_LOG_MAX_ITEMS", "10"))))
 
         # Log 1: Summary
         shell_nodes = [n for n in nodes if n["is_shell"]]
@@ -913,18 +934,24 @@ class GNNInference:
                 "timestamp": (now - timedelta(minutes=3)).strftime("%Y-%m-%d %H:%M:%S"),
                 "severity": "high",
                 "title": f"Nhận diện {len(shell_nodes)} chủ thể vỏ bọc (Shell Corp)",
-                "description": f"AI xác định các công ty có xác suất vỏ bọc cao: {names}... "
-                               f"Đặc điểm chung: tuổi đời doanh nghiệp ngắn, giao dịch giá trị lớn.",
+                "description": f"Danh sách nổi bật theo xác suất shell: {names}...",
             })
 
-        for cycle in cycles[:3]:
+        for cycle in cycles[:max_cycle_logs]:
             cycle_str = " → ".join(cycle[:4]) + f" → {cycle[0]}"
             logs.append({
                 "timestamp": (now - timedelta(minutes=1)).strftime("%Y-%m-%d %H:%M:%S"),
                 "severity": "critical",
                 "title": f"Xoay vòng: {cycle_str}",
-                "description": f"Phát hiện dòng tiền quay vòng qua {len(cycle)} chủ thể trong vòng 48-72h. "
-                               f"Không có dữ liệu vận tải/kho bãi tương ứng.",
+                "description": f"Chu trình có {len(cycle)} chủ thể, được trích xuất trực tiếp từ đồ thị giao dịch có hướng.",
+            })
+
+        if len(cycles) > max_cycle_logs:
+            logs.append({
+                "timestamp": now.strftime("%Y-%m-%d %H:%M:%S"),
+                "severity": "medium",
+                "title": f"Hiển thị {max_cycle_logs}/{len(cycles)} vòng giao dịch",
+                "description": "Nhật ký đang hiển thị mẫu các vòng có mức ưu tiên cao nhất.",
             })
 
         if circ_edges:

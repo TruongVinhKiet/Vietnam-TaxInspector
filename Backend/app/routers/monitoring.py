@@ -53,6 +53,29 @@ DELINQUENCY_DRIFT_FEATURES = (
     "prob_90d",
 )
 
+OSINT_DRIFT_FEATURES = (
+    "n_dom_subs",
+    "n_rel_types",
+    "max_own_pct",
+    "inv_in_bn",
+    "inv_out_bn",
+    "max_dom_risk",
+    "avg_dom_risk",
+    "juris_risk",
+)
+
+SIMULATION_DRIFT_FEATURES = (
+    "vat",
+    "cit",
+    "audit",
+    "penalty",
+    "interest",
+    "growth",
+    "base_rate",
+    "avg_margin",
+    "company_count",
+)
+
 VALID_POLICY_COMPARATORS = {">=", ">", "<=", "<", "=="}
 ADMIN_POLICY_ROLES = {"admin"}
 KPI_BLOCKING_STATUSES = {"fail", "insufficient_data", "no_metric", "cooldown_active"}
@@ -199,6 +222,30 @@ def _load_fraud_baseline_stats() -> dict:
     try:
         with open(baseline_path, "r", encoding="utf-8") as f:
             return json.load(f)
+    except Exception:
+        return {}
+
+
+def _load_osint_baseline_stats() -> dict:
+    baseline_path = MODEL_DIR / "osint_drift_baseline.json"
+    if not baseline_path.exists():
+        return {}
+    try:
+        with open(baseline_path, "r", encoding="utf-8") as f:
+            payload = json.load(f)
+            return payload if isinstance(payload, dict) else {}
+    except Exception:
+        return {}
+
+
+def _load_simulation_baseline_stats() -> dict:
+    baseline_path = MODEL_DIR / "simulation_drift_baseline.json"
+    if not baseline_path.exists():
+        return {}
+    try:
+        with open(baseline_path, "r", encoding="utf-8") as f:
+            payload = json.load(f)
+            return payload if isinstance(payload, dict) else {}
     except Exception:
         return {}
 
@@ -623,6 +670,152 @@ def _build_fraud_quality_summary(include_criteria: bool = False) -> dict:
     }
 
 
+def _build_osint_quality_summary(include_criteria: bool = False) -> dict[str, Any]:
+    quality_path = MODEL_DIR / "osint_quality_report.json"
+    config_path = MODEL_DIR / "osint_config.json"
+    model_path = MODEL_DIR / "osint_risk_model.joblib"
+
+    quality_payload = _safe_read_json(quality_path)
+    config_payload = _safe_read_json(config_path)
+    drift_payload = _build_osint_drift_report(min_samples=10)
+
+    quality_available = bool(quality_payload)
+    model_available = model_path.exists()
+
+    metrics = quality_payload.get("metrics", {}) if isinstance(quality_payload, dict) else {}
+    gates = quality_payload.get("acceptance_gates", {}) if isinstance(quality_payload, dict) else {}
+    criteria = gates.get("criteria", {}) if isinstance(gates, dict) else {}
+    dataset = quality_payload.get("dataset", {}) if isinstance(quality_payload, dict) else {}
+
+    auc = _float_or_none(metrics.get("auc"))
+    pr_auc = _float_or_none(metrics.get("pr_auc"))
+
+    if isinstance(gates, dict) and "overall_pass" in gates:
+        performance_pass = bool(gates.get("overall_pass"))
+    elif auc is not None and pr_auc is not None:
+        performance_pass = bool(auc >= 0.60 and pr_auc >= 0.35)
+    else:
+        performance_pass = None
+
+    drift_severity = str(drift_payload.get("drift_severity", "insufficient_data"))
+    if not quality_available and not model_available:
+        status = "unknown"
+    elif performance_pass is False:
+        status = "degraded"
+    elif drift_severity in {"high", "medium"}:
+        status = "warning"
+    elif performance_pass is True:
+        status = "healthy"
+    else:
+        status = "warning"
+
+    return {
+        "status": status,
+        "generated_at": datetime.utcnow().isoformat() + "Z",
+        "model_info": {
+            "model_version": quality_payload.get("model_version") or config_payload.get("model_version"),
+            "model_type": config_payload.get("model_type"),
+            "updated_at": _file_updated_at(model_path) or _file_updated_at(config_path),
+            "model_available": model_available,
+            "quality_report_available": quality_available,
+            "drift_baseline_available": bool(_load_osint_baseline_stats()),
+        },
+        "gate_summary": {
+            "performance_pass": performance_pass,
+            "all_pass": bool(performance_pass is True),
+        },
+        "performance": {
+            "available": quality_available,
+            "sample_size": int(dataset.get("total_samples", 0)) if isinstance(dataset, dict) else 0,
+            "metrics": {
+                "auc": auc,
+                "pr_auc": pr_auc,
+            },
+            "criteria": criteria if include_criteria and isinstance(criteria, dict) else {},
+        },
+        "drift": {
+            "detected": bool(drift_payload.get("drift_detected", False)),
+            "severity": drift_severity,
+            "drifted_features": drift_payload.get("drifted_features", []),
+            "recommendation": drift_payload.get("recommendation", ""),
+        },
+    }
+
+
+def _build_simulation_quality_summary(include_criteria: bool = False) -> dict[str, Any]:
+    quality_path = MODEL_DIR / "simulation_quality_report.json"
+    config_path = MODEL_DIR / "simulation_config.json"
+    model_path = MODEL_DIR / "simulation_lgbm.joblib"
+
+    quality_payload = _safe_read_json(quality_path)
+    config_payload = _safe_read_json(config_path)
+    drift_payload = _build_simulation_drift_report(min_samples=5)
+
+    quality_available = bool(quality_payload)
+    model_available = model_path.exists()
+
+    metrics = quality_payload.get("metrics", {}) if isinstance(quality_payload, dict) else {}
+    gates = quality_payload.get("acceptance_gates", {}) if isinstance(quality_payload, dict) else {}
+    criteria = gates.get("criteria", {}) if isinstance(gates, dict) else {}
+    dataset = quality_payload.get("dataset", {}) if isinstance(quality_payload, dict) else {}
+
+    r2 = _float_or_none(metrics.get("r2"))
+    rmse = _float_or_none(metrics.get("rmse"))
+    mae = _float_or_none(metrics.get("mae"))
+
+    if isinstance(gates, dict) and "overall_pass" in gates:
+        performance_pass = bool(gates.get("overall_pass"))
+    elif r2 is not None and rmse is not None:
+        performance_pass = bool(r2 >= 0.90 and rmse <= 0.08)
+    else:
+        performance_pass = None
+
+    drift_severity = str(drift_payload.get("drift_severity", "insufficient_data"))
+    if not quality_available and not model_available:
+        status = "unknown"
+    elif performance_pass is False:
+        status = "degraded"
+    elif drift_severity in {"high", "medium"}:
+        status = "warning"
+    elif performance_pass is True:
+        status = "healthy"
+    else:
+        status = "warning"
+
+    return {
+        "status": status,
+        "generated_at": datetime.utcnow().isoformat() + "Z",
+        "model_info": {
+            "model_version": quality_payload.get("model_version") or config_payload.get("model_version"),
+            "model_type": config_payload.get("model_type"),
+            "updated_at": _file_updated_at(model_path) or _file_updated_at(config_path),
+            "model_available": model_available,
+            "quality_report_available": quality_available,
+            "drift_baseline_available": bool(_load_simulation_baseline_stats()),
+        },
+        "gate_summary": {
+            "performance_pass": performance_pass,
+            "all_pass": bool(performance_pass is True),
+        },
+        "performance": {
+            "available": quality_available,
+            "sample_size": int(dataset.get("total_samples", 0)) if isinstance(dataset, dict) else 0,
+            "metrics": {
+                "r2": r2,
+                "rmse": rmse,
+                "mae": mae,
+            },
+            "criteria": criteria if include_criteria and isinstance(criteria, dict) else {},
+        },
+        "drift": {
+            "detected": bool(drift_payload.get("drift_detected", False)),
+            "severity": drift_severity,
+            "drifted_features": drift_payload.get("drifted_features", []),
+            "recommendation": drift_payload.get("recommendation", ""),
+        },
+    }
+
+
 def get_db_connection():
     try:
         conn = psycopg2.connect(
@@ -649,6 +842,380 @@ def _resolve_db_url() -> str:
     port = os.getenv("DB_PORT", "5432")
     db_name = os.getenv("DB_NAME", "TaxInspector")
     return f"postgresql://{user}:{password}@{host}:{port}/{db_name}"
+
+
+def _empty_feature_snapshot(feature_names: tuple[str, ...]) -> dict[str, list[float]]:
+    return {name: [] for name in feature_names}
+
+
+def _fetch_osint_feature_snapshot() -> tuple[dict[str, list[float]], dict[str, Any]]:
+    """Build current OSINT feature snapshot from database tables."""
+    snapshot = _empty_feature_snapshot(OSINT_DRIFT_FEATURES)
+    metadata: dict[str, Any] = {
+        "offshore_entities": 0,
+        "ownership_links": 0,
+        "invoice_rows": 0,
+    }
+
+    conn = None
+    try:
+        conn = psycopg2.connect(_resolve_db_url())
+        with conn.cursor() as cur:
+            cur.execute("SELECT tax_code, province FROM companies WHERE industry = 'Offshore Entity'")
+            offshore_rows = cur.fetchall()
+            metadata["offshore_entities"] = len(offshore_rows)
+
+            if not offshore_rows:
+                return snapshot, metadata
+
+            cur.execute(
+                """
+                SELECT
+                    ol.parent_tax_code AS offshore_tax_code,
+                    ol.child_tax_code AS domestic_tax_code,
+                    ol.relationship_type,
+                    ol.ownership_percent,
+                    COALESCE(c.risk_score, 0) AS risk_score
+                FROM ownership_links ol
+                JOIN companies c ON c.tax_code = ol.child_tax_code
+                WHERE ol.parent_tax_code IN (
+                    SELECT tax_code FROM companies WHERE industry = 'Offshore Entity'
+                )
+                """
+            )
+            link_rows = cur.fetchall()
+            metadata["ownership_links"] = len(link_rows)
+
+            cur.execute("SELECT seller_tax_code, buyer_tax_code, amount FROM invoices")
+            invoice_rows = cur.fetchall()
+            metadata["invoice_rows"] = len(invoice_rows)
+
+        invoice_in: dict[str, float] = {}
+        invoice_out: dict[str, float] = {}
+        for seller_tax_code, buyer_tax_code, amount in invoice_rows:
+            amount_value = float(amount or 0.0)
+            seller = str(seller_tax_code)
+            buyer = str(buyer_tax_code)
+            invoice_out[seller] = invoice_out.get(seller, 0.0) + amount_value
+            invoice_in[buyer] = invoice_in.get(buyer, 0.0) + amount_value
+
+        links_by_parent: dict[str, list[tuple[Any, ...]]] = {}
+        for row in link_rows:
+            parent_tax_code = str(row[0])
+            links_by_parent.setdefault(parent_tax_code, []).append(row)
+
+        jurisdiction_risk = {
+            "Cayman Islands": 5.0,
+            "British Virgin Islands (BVI)": 5.0,
+            "Panama": 5.0,
+            "Seychelles": 4.0,
+            "Bahamas": 4.0,
+            "Cyprus": 3.0,
+            "Hong Kong": 2.0,
+            "Singapore": 2.0,
+        }
+
+        for offshore_tax_code, offshore_country in offshore_rows:
+            tax_code = str(offshore_tax_code)
+            country = str(offshore_country or "")
+            links = links_by_parent.get(tax_code, [])
+
+            n_dom_subs = float(len(links))
+            n_rel_types = float(len({str(link[2] or "") for link in links}))
+            max_own = float(max((float(link[3] or 0.0) for link in links), default=0.0))
+
+            total_inv_in = 0.0
+            total_inv_out = 0.0
+            domestic_risks: list[float] = []
+
+            for link in links:
+                child_tax_code = str(link[1])
+                total_inv_in += float(invoice_in.get(child_tax_code, 0.0))
+                total_inv_out += float(invoice_out.get(child_tax_code, 0.0))
+                domestic_risks.append(float(link[4] or 0.0))
+
+            max_dom_risk = float(max(domestic_risks)) if domestic_risks else 0.0
+            avg_dom_risk = float(sum(domestic_risks) / len(domestic_risks)) if domestic_risks else 0.0
+            juris_risk = float(jurisdiction_risk.get(country, 1.0))
+
+            snapshot["n_dom_subs"].append(n_dom_subs)
+            snapshot["n_rel_types"].append(n_rel_types)
+            snapshot["max_own_pct"].append(max_own)
+            snapshot["inv_in_bn"].append(total_inv_in / 1e9)
+            snapshot["inv_out_bn"].append(total_inv_out / 1e9)
+            snapshot["max_dom_risk"].append(max_dom_risk)
+            snapshot["avg_dom_risk"].append(avg_dom_risk)
+            snapshot["juris_risk"].append(juris_risk)
+
+    except Exception as exc:
+        metadata["error"] = str(exc)
+        log_event(logger, "warning", "monitoring_osint_snapshot_failed", error=str(exc))
+    finally:
+        if conn is not None:
+            conn.close()
+
+    return snapshot, metadata
+
+
+def _fetch_simulation_feature_snapshot() -> tuple[dict[str, list[float]], dict[str, Any]]:
+    """Build current simulation feature snapshot from industry baseline aggregates."""
+    snapshot = _empty_feature_snapshot(SIMULATION_DRIFT_FEATURES)
+    metadata: dict[str, Any] = {"industries": 0}
+
+    conn = None
+    try:
+        conn = psycopg2.connect(_resolve_db_url())
+        with conn.cursor() as cur:
+            where_sql = "c.industry IS NOT NULL AND c.industry != '' AND c.industry != 'Offshore Entity'"
+
+            cur.execute(
+                f"""
+                SELECT
+                    c.industry,
+                    COUNT(DISTINCT c.tax_code) AS company_count,
+                    COALESCE(AVG(tr.revenue), 0) AS avg_revenue
+                FROM companies c
+                LEFT JOIN tax_returns tr ON tr.tax_code = c.tax_code
+                WHERE {where_sql}
+                GROUP BY c.industry
+                """
+            )
+            industry_rows = cur.fetchall()
+
+            cur.execute(
+                f"""
+                SELECT
+                    c.industry,
+                    COUNT(DISTINCT dp.tax_code) AS delinquent_count,
+                    COUNT(DISTINCT c.tax_code) AS total_count
+                FROM companies c
+                LEFT JOIN delinquency_predictions dp
+                    ON dp.tax_code = c.tax_code AND dp.prob_90d >= 0.5
+                WHERE {where_sql}
+                GROUP BY c.industry
+                """
+            )
+            delinquency_rows = cur.fetchall()
+
+            cur.execute(
+                """
+                SELECT c.industry, COUNT(DISTINCT tp.tax_code)
+                FROM tax_payments tp
+                JOIN companies c ON c.tax_code = tp.tax_code
+                WHERE tp.status IN ('overdue', 'partial')
+                GROUP BY c.industry
+                """
+            )
+            overdue_rows = cur.fetchall()
+
+        delinquency_map = {
+            str(industry): {
+                "delinq_count": int(delinq_count or 0),
+                "total": int(total_count or 0),
+            }
+            for industry, delinq_count, total_count in delinquency_rows
+        }
+        overdue_map = {
+            str(industry): int(count or 0)
+            for industry, count in overdue_rows
+        }
+
+        industry_margins = {
+            "Xây dựng": 0.06,
+            "Bất động sản": 0.12,
+            "Thương mại XNK": 0.04,
+            "Sản xuất công nghiệp": 0.08,
+            "Nông nghiệp": 0.05,
+            "Vận tải & Logistics": 0.07,
+            "Công nghệ thông tin": 0.15,
+            "Dịch vụ tài chính": 0.18,
+            "Y tế & Dược phẩm": 0.14,
+            "Giáo dục & Đào tạo": 0.10,
+            "Thực phẩm & Đồ uống": 0.09,
+            "May mặc & Giầy da": 0.06,
+            "Khoáng sản & Năng lượng": 0.11,
+            "Du lịch & Khách sạn": 0.08,
+            "Viễn thông": 0.13,
+        }
+
+        for industry, company_count, _avg_revenue in industry_rows:
+            industry_name = str(industry)
+            count_value = int(company_count or 0)
+
+            delinquency_info = delinquency_map.get(industry_name, {"delinq_count": 0, "total": count_value})
+            base_rate = float(delinquency_info["delinq_count"]) / max(1, int(delinquency_info["total"]))
+            if base_rate == 0:
+                base_rate = float(overdue_map.get(industry_name, 0)) / max(1, count_value)
+
+            avg_margin = float(industry_margins.get(industry_name, 0.08))
+            if base_rate > 0:
+                base_rate = max(0.02, min(0.95, base_rate))
+            else:
+                base_rate = max(0.05, avg_margin * 1.5)
+
+            snapshot["vat"].append(10.0)
+            snapshot["cit"].append(20.0)
+            snapshot["audit"].append(5.0)
+            snapshot["penalty"].append(1.0)
+            snapshot["interest"].append(6.0)
+            snapshot["growth"].append(6.5)
+            snapshot["base_rate"].append(float(base_rate))
+            snapshot["avg_margin"].append(float(avg_margin))
+            snapshot["company_count"].append(float(count_value))
+
+        metadata["industries"] = len(industry_rows)
+
+    except Exception as exc:
+        metadata["error"] = str(exc)
+        log_event(logger, "warning", "monitoring_simulation_snapshot_failed", error=str(exc))
+    finally:
+        if conn is not None:
+            conn.close()
+
+    return snapshot, metadata
+
+
+def _build_baseline_feature_drift_report(
+    *,
+    feature_names: tuple[str, ...],
+    baseline_payload: dict[str, Any],
+    current_snapshot: dict[str, list[float]],
+    min_samples: int,
+    warning_threshold: float = 0.45,
+    drift_threshold: float = 1.0,
+) -> dict[str, Any]:
+    features_report: dict[str, Any] = {}
+    drifted_features: list[str] = []
+    sufficient_features = 0
+
+    baseline_features = baseline_payload.get("features", {}) if isinstance(baseline_payload, dict) else {}
+
+    for feature_name in feature_names:
+        recent_values = [float(v) for v in current_snapshot.get(feature_name, []) if isinstance(v, (int, float))]
+        model_baseline = baseline_features.get(feature_name, {}) if isinstance(baseline_features, dict) else {}
+
+        baseline_values: list[float] = []
+        baseline_mean = 0.0
+        baseline_std = 0.0
+        baseline_source = "missing"
+
+        if isinstance(model_baseline, dict) and model_baseline:
+            baseline_mean = float(model_baseline.get("mean", 0.0))
+            baseline_std = float(model_baseline.get("std", 0.0))
+
+            q0 = _float_or_none(model_baseline.get("q0"))
+            q100 = _float_or_none(model_baseline.get("q100"))
+
+            if q0 is None or q100 is None:
+                spread = max(1e-6, 2.0 * baseline_std)
+                q0 = baseline_mean - spread
+                q100 = baseline_mean + spread
+
+            if q100 < q0:
+                q0, q100 = q100, q0
+
+            baseline_values = list(np.linspace(q0, q100, 101))
+            baseline_source = "model_baseline"
+
+        if len(recent_values) < min_samples or len(baseline_values) < min_samples:
+            features_report[feature_name] = {
+                "status": "insufficient_data",
+                "recent_samples": len(recent_values),
+                "baseline_samples": len(baseline_values),
+                "baseline_source": baseline_source,
+            }
+            continue
+
+        sufficient_features += 1
+        raw_distance = _wasserstein_like(recent_values, baseline_values)
+        iqr = float(np.percentile(baseline_values, 75) - np.percentile(baseline_values, 25))
+        scale = iqr if iqr > 1e-6 else max(baseline_std, 1.0)
+        normalized_distance = raw_distance / scale
+
+        if normalized_distance >= drift_threshold:
+            status = "drift"
+            drifted_features.append(feature_name)
+        elif normalized_distance >= warning_threshold:
+            status = "warning"
+        else:
+            status = "stable"
+
+        features_report[feature_name] = {
+            "wasserstein_distance": round(raw_distance, 6),
+            "normalized_distance": round(normalized_distance, 6),
+            "status": status,
+            "recent_samples": len(recent_values),
+            "baseline_samples": len(baseline_values),
+            "recent_mean": round(float(np.mean(recent_values)), 6),
+            "baseline_mean": round(float(baseline_mean), 6),
+            "baseline_source": baseline_source,
+        }
+
+    if sufficient_features == 0:
+        drift_detected = False
+        drift_severity = "insufficient_data"
+        recommendation = "Insufficient feature telemetry for drift decision."
+    elif drifted_features:
+        drift_detected = True
+        drift_severity = "high" if len(drifted_features) >= 2 else "medium"
+        recommendation = "Feature drift detected. Validate model quality and schedule retraining if drift persists."
+    else:
+        drift_detected = False
+        drift_severity = "low"
+        recommendation = "No significant drift detected."
+
+    current_rows = max((len(values) for values in current_snapshot.values()), default=0)
+
+    return {
+        "drift_detected": drift_detected,
+        "drift_severity": drift_severity,
+        "drifted_features": drifted_features,
+        "features": features_report,
+        "recommendation": recommendation,
+        "min_samples": int(min_samples),
+        "sample_summary": {
+            "current_rows": int(current_rows),
+            "baseline_source": "model_drift_baseline",
+        },
+    }
+
+
+def _build_osint_drift_report(min_samples: int = 10) -> dict[str, Any]:
+    baseline_payload = _load_osint_baseline_stats()
+    current_snapshot, metadata = _fetch_osint_feature_snapshot()
+
+    report = _build_baseline_feature_drift_report(
+        feature_names=OSINT_DRIFT_FEATURES,
+        baseline_payload=baseline_payload,
+        current_snapshot=current_snapshot,
+        min_samples=min_samples,
+    )
+    report["model_version"] = baseline_payload.get("model_version")
+    report["baseline_created_at"] = baseline_payload.get("created_at")
+    report["sample_summary"] = {
+        **report.get("sample_summary", {}),
+        **metadata,
+    }
+    return report
+
+
+def _build_simulation_drift_report(min_samples: int = 5) -> dict[str, Any]:
+    baseline_payload = _load_simulation_baseline_stats()
+    current_snapshot, metadata = _fetch_simulation_feature_snapshot()
+
+    report = _build_baseline_feature_drift_report(
+        feature_names=SIMULATION_DRIFT_FEATURES,
+        baseline_payload=baseline_payload,
+        current_snapshot=current_snapshot,
+        min_samples=min_samples,
+    )
+    report["model_version"] = baseline_payload.get("model_version")
+    report["baseline_created_at"] = baseline_payload.get("created_at")
+    report["sample_summary"] = {
+        **report.get("sample_summary", {}),
+        **metadata,
+    }
+    return report
 
 
 @router.post("/feedback")
@@ -714,6 +1281,10 @@ async def mlops_health_check():
             "fraud_isolation_forest": (model_dir / "isolation_forest.joblib").exists(),
             "fraud_calibrator": (model_dir / "fraud_calibrator.joblib").exists(),
             "fraud_manifest": (model_dir / "fraud_model_manifest.json").exists(),
+            "osint_model": (model_dir / "osint_risk_model.joblib").exists(),
+            "osint_drift_baseline": (model_dir / "osint_drift_baseline.json").exists(),
+            "simulation_model": (model_dir / "simulation_lgbm.joblib").exists(),
+            "simulation_drift_baseline": (model_dir / "simulation_drift_baseline.json").exists(),
             "audit_value_model": (model_dir / "audit_value_model.joblib").exists(),
             "audit_value_calibrator": (model_dir / "audit_value_calibrator.joblib").exists(),
             "vat_refund_model": (model_dir / "vat_refund_model.joblib").exists(),
@@ -886,6 +1457,72 @@ async def get_fraud_quality_summary(include_criteria: bool = False):
         quality_report_available=response.get("model_info", {}).get("quality_report_available", False),
     )
     return response
+
+
+@router.get("/osint_quality")
+async def get_osint_quality_summary(include_criteria: bool = False):
+    """OSINT model quality summary including drift against training baseline."""
+    response = _build_osint_quality_summary(include_criteria=include_criteria)
+    log_event(
+        logger,
+        "info",
+        "monitoring_osint_quality_generated",
+        status=response.get("status", "unknown"),
+        drift_severity=response.get("drift", {}).get("severity", "unknown"),
+        quality_report_available=response.get("model_info", {}).get("quality_report_available", False),
+    )
+    return response
+
+
+@router.get("/simulation_quality")
+async def get_simulation_quality_summary(include_criteria: bool = False):
+    """Simulation model quality summary including drift against baseline."""
+    response = _build_simulation_quality_summary(include_criteria=include_criteria)
+    log_event(
+        logger,
+        "info",
+        "monitoring_simulation_quality_generated",
+        status=response.get("status", "unknown"),
+        drift_severity=response.get("drift", {}).get("severity", "unknown"),
+        quality_report_available=response.get("model_info", {}).get("quality_report_available", False),
+    )
+    return response
+
+
+@router.get("/osint_drift")
+async def get_osint_drift_report(min_samples: int = 10):
+    """Drift report for OSINT features vs. osint_drift_baseline.json."""
+    if min_samples < 1:
+        raise HTTPException(status_code=400, detail="min_samples must be >= 1")
+
+    report = _build_osint_drift_report(min_samples=min_samples)
+    log_event(
+        logger,
+        "info",
+        "monitoring_osint_drift_generated",
+        drift_detected=report.get("drift_detected", False),
+        drifted_features=len(report.get("drifted_features", [])),
+        severity=report.get("drift_severity", "unknown"),
+    )
+    return report
+
+
+@router.get("/simulation_drift")
+async def get_simulation_drift_report(min_samples: int = 5):
+    """Drift report for simulation baseline features vs. simulation_drift_baseline.json."""
+    if min_samples < 1:
+        raise HTTPException(status_code=400, detail="min_samples must be >= 1")
+
+    report = _build_simulation_drift_report(min_samples=min_samples)
+    log_event(
+        logger,
+        "info",
+        "monitoring_simulation_drift_generated",
+        drift_detected=report.get("drift_detected", False),
+        drifted_features=len(report.get("drifted_features", [])),
+        severity=report.get("drift_severity", "unknown"),
+    )
+    return report
 
 
 # ════════════════════════════════════════════════════════════════

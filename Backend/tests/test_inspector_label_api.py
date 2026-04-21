@@ -60,7 +60,7 @@ def client():
 
 
 def test_inspector_label_requires_authentication(client):
-    fake_db = _FakeDB(_AssessmentRow(assessment_id=10, tax_code="01010001"))
+    fake_db = _FakeDB(_AssessmentRow(assessment_id=10, tax_code="0101000001"))
 
     def _override_get_db():
         yield fake_db
@@ -68,7 +68,7 @@ def test_inspector_label_requires_authentication(client):
     app.dependency_overrides[get_db] = _override_get_db
 
     payload = {
-        "tax_code": "01010001",
+        "tax_code": "0101000001",
         "label_type": "fraud_confirmed",
         "confidence": "high",
         "assessment_id": 10,
@@ -79,7 +79,7 @@ def test_inspector_label_requires_authentication(client):
 
 
 def test_inspector_label_binds_current_user_as_inspector(client):
-    fake_db = _FakeDB(_AssessmentRow(assessment_id=11, tax_code="01010001"))
+    fake_db = _FakeDB(_AssessmentRow(assessment_id=11, tax_code="0101000001"))
 
     def _override_get_db():
         yield fake_db
@@ -88,7 +88,7 @@ def test_inspector_label_binds_current_user_as_inspector(client):
     app.dependency_overrides[auth.get_current_user] = lambda: SimpleNamespace(id=7, badge_id="B007")
 
     payload = {
-        "tax_code": "01010001",
+        "tax_code": "0101000001",
         "label_type": "fraud_confirmed",
         "confidence": "high",
         "assessment_id": 11,
@@ -99,7 +99,7 @@ def test_inspector_label_binds_current_user_as_inspector(client):
 
     assert response.status_code == 200
     body = response.json()
-    assert body["tax_code"] == "01010001"
+    assert body["tax_code"] == "0101000001"
     assert body["inspector_id"] == 7
     assert body["assessment_id"] == 11
 
@@ -108,7 +108,7 @@ def test_inspector_label_binds_current_user_as_inspector(client):
 
 
 def test_inspector_label_rejects_mismatched_assessment_tax_code(client):
-    fake_db = _FakeDB(_AssessmentRow(assessment_id=12, tax_code="09999999"))
+    fake_db = _FakeDB(_AssessmentRow(assessment_id=12, tax_code="0999999999"))
 
     def _override_get_db():
         yield fake_db
@@ -117,7 +117,7 @@ def test_inspector_label_rejects_mismatched_assessment_tax_code(client):
     app.dependency_overrides[auth.get_current_user] = lambda: SimpleNamespace(id=9, badge_id="B009")
 
     payload = {
-        "tax_code": "01010001",
+        "tax_code": "0101000001",
         "label_type": "fraud_rejected",
         "confidence": "medium",
         "assessment_id": 12,
@@ -130,7 +130,7 @@ def test_inspector_label_rejects_mismatched_assessment_tax_code(client):
 
 
 def test_inspector_label_accepts_outcome_kpi_fields(client):
-    fake_db = _FakeDB(_AssessmentRow(assessment_id=13, tax_code="01010001"))
+    fake_db = _FakeDB(_AssessmentRow(assessment_id=13, tax_code="0101000001"))
 
     def _override_get_db():
         yield fake_db
@@ -139,7 +139,7 @@ def test_inspector_label_accepts_outcome_kpi_fields(client):
     app.dependency_overrides[auth.get_current_user] = lambda: SimpleNamespace(id=11, badge_id="B011")
 
     payload = {
-        "tax_code": "01010001",
+        "tax_code": "0101000001",
         "label_type": "fraud_confirmed",
         "confidence": "high",
         "assessment_id": 13,

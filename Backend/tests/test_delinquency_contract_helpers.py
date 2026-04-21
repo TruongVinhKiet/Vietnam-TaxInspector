@@ -100,7 +100,7 @@ def test_router_prediction_age_and_freshness():
 
 
 def test_baseline_prediction_no_data_contract_fields():
-    result = delinquency._build_baseline_prediction(_EmptyDB(), "01010001", "Cong ty A")
+    result = delinquency._build_baseline_prediction(_EmptyDB(), "0101000001", "Cong ty A")
 
     assert result["score_source"] == "no_data"
     assert result["freshness"] == "unknown"
@@ -227,16 +227,31 @@ def test_normalize_freshness_filter_rejects_invalid_values():
         delinquency._normalize_freshness_filter("very_old")
 
 
+def test_normalize_tax_code_for_contract_accepts_10_and_legacy_9_digits():
+    assert delinquency._normalize_tax_code_for_contract("0101000001") == "0101000001"
+    assert delinquency._normalize_tax_code_for_contract("101000001") == "0101000001"
+
+
+def test_normalize_tax_code_for_response_rejects_invalid_values():
+    assert delinquency._normalize_tax_code_for_response("abc") is None
+    assert delinquency._normalize_tax_code_for_response("0101") is None
+
+
+def test_build_tax_code_lookup_candidates_handles_legacy_aliases():
+    assert delinquency._build_tax_code_lookup_candidates("0101000001") == ["0101000001", "101000001"]
+    assert delinquency._build_tax_code_lookup_candidates("101000001") == ["101000001", "0101000001"]
+
+
 def test_build_batch_candidate_tax_codes_with_requested_codes():
-    db = _BatchCandidateDB(rows=[("0101",), ("0102",)])
+    db = _BatchCandidateDB(rows=[("0101000001",), ("101000002",), ("INVALID",)])
     candidates = delinquency._build_batch_candidate_tax_codes(
         db,
-        requested_tax_codes=["0101", "", "0102", "0101"],
+        requested_tax_codes=["0101000001", "", "0101000002", "0101000001"],
         limit=10,
         refresh_existing=True,
     )
 
-    assert candidates == ["0101", "0102"]
+    assert candidates == ["0101000001", "101000002"]
 
 
 def test_infer_score_source_from_model_version():

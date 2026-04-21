@@ -1692,3 +1692,43 @@ document.addEventListener("DOMContentLoaded", () => {
     fetchDelinquencySplitTriggerGate();
     loadDelinquencyData(state.currentPage);
 });
+
+
+// Tab switching logic for Delinquency vs Simulation
+document.addEventListener("DOMContentLoaded", () => {
+    const tabList = document.getElementById("tab-delinq-list");
+    const tabSim = document.getElementById("tab-sim");
+    const sectionList = document.getElementById("delinq-list-section");
+    const sectionSim = document.getElementById("simulation-section");
+
+    if (tabList && tabSim && sectionList && sectionSim) {
+        tabList.addEventListener("click", () => {
+            tabList.setAttribute("aria-selected", "true");
+            tabList.classList.remove("bg-transparent", "text-slate-500", "hover:bg-slate-200");
+            tabList.classList.add("bg-primary-container", "text-white");
+            
+            tabSim.setAttribute("aria-selected", "false");
+            tabSim.classList.remove("bg-primary-container", "text-white");
+            tabSim.classList.add("bg-transparent", "text-slate-500", "hover:bg-slate-200");
+            
+            sectionList.classList.remove("hidden");
+            sectionSim.classList.add("hidden");
+        });
+
+        tabSim.addEventListener("click", () => {
+            tabSim.setAttribute("aria-selected", "true");
+            tabSim.classList.remove("bg-transparent", "text-slate-500", "hover:bg-slate-200");
+            tabSim.classList.add("bg-primary-container", "text-white");
+            
+            tabList.setAttribute("aria-selected", "false");
+            tabList.classList.remove("bg-primary-container", "text-white");
+            tabList.classList.add("bg-transparent", "text-slate-500", "hover:bg-slate-200");
+            
+            sectionList.classList.add("hidden");
+            sectionSim.classList.remove("hidden");
+            
+            // Trigger resize event for Chart.js to render correctly after unhiding
+            window.dispatchEvent(new Event('resize'));
+        });
+    }
+});

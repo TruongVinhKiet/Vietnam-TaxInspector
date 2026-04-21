@@ -20,6 +20,7 @@ from sqlalchemy import func, desc, and_
 from typing import Optional, Any
 from datetime import date, datetime, timedelta
 from collections import Counter
+import re
 
 from ..database import get_db
 from .. import models, schemas
@@ -44,6 +45,51 @@ _health_alert_state = {
 }
 
 _delinquency_pipeline = None
+
+_TAX_CODE_10_PATTERN = re.compile(r"^\d{10}$")
+_TAX_CODE_9_PATTERN = re.compile(r"^\d{9}$")
+
+
+def _normalize_tax_code_for_contract(value: Optional[str]) -> str:
+    raw = str(value or "").strip()
+    if _TAX_CODE_10_PATTERN.fullmatch(raw):
+        return raw
+    if _TAX_CODE_9_PATTERN.fullmatch(raw):
+        return f"0{raw}"
+    raise ValueError(f"Invalid tax_code format: {raw}")
+
+
+def _normalize_tax_code_for_response(value: Optional[str]) -> Optional[str]:
+    try:
+        return _normalize_tax_code_for_contract(value)
+    except ValueError:
+        return None
+
+
+def _build_tax_code_lookup_candidates(value: Optional[str]) -> list[str]:
+    raw = str(value or "").strip()
+    if not raw:
+        return []
+
+    candidates = [raw]
+    normalized = _normalize_tax_code_for_response(raw)
+    if normalized and normalized not in candidates:
+        candidates.append(normalized)
+
+    if _TAX_CODE_10_PATTERN.fullmatch(raw) and raw.startswith("0"):
+        legacy = raw[1:]
+        if legacy not in candidates:
+            candidates.append(legacy)
+
+    return candidates
+
+
+def _resolve_company_by_tax_code(db: Session, tax_code: str):
+    for code in _build_tax_code_lookup_candidates(tax_code):
+        company = db.query(models.Company).filter(models.Company.tax_code == code).first()
+        if company:
+            return company
+    return None
 
 
 def _classify_cluster(prob_30d: float, prob_60d: float, prob_90d: float) -> str:
@@ -772,6 +818,10 @@ def _build_baseline_prediction(db: Session, tax_code: str, company_name: str) ->
     This is used when no ML model prediction is cached yet (Phase 0 baseline).
     The real ML model (Program A) will replace this in Phase 1A.
     """
+    normalized_tax_code = _normalize_tax_code_for_response(tax_code)
+    if normalized_tax_code is None:
+        return {}
+
     history = _build_payment_history_summary(db, tax_code)
 
     if not history["data_available"] or history["total_periods"] == 0:
@@ -785,7 +835,7 @@ def _build_baseline_prediction(db: Session, tax_code: str, company_name: str) ->
             early_warning=early_warning,
         )
         return {
-            "tax_code": tax_code,
+            "tax_code": normalized_tax_code,
             "company_name": company_name,
             "probability": 0.0,
             "prob_30d": 0.0,
@@ -840,7 +890,7 @@ def _build_baseline_prediction(db: Session, tax_code: str, company_name: str) ->
     )
 
     return {
-        "tax_code": tax_code,
+        "tax_code": normalized_tax_code,
         "company_name": company_name,
         "probability": overall_prob,
         "prob_30d": prob_30d,
@@ -930,16 +980,26 @@ def get_delinquency_forecast(
     # If we have cached predictions, return them
     if predictions_db:
         tax_codes = [pred.tax_code for pred in predictions_db]
+        lookup_tax_codes = []
+        for code in tax_codes:
+            for candidate in _build_tax_code_lookup_candidates(code):
+                if candidate not in lookup_tax_codes:
+                    lookup_tax_codes.append(candidate)
+
         company_rows = (
             db.query(models.Company.tax_code, models.Company.name)
-            .filter(models.Company.tax_code.in_(tax_codes))
+            .filter(models.Company.tax_code.in_(lookup_tax_codes))
             .all()
         )
         company_name_map = {tc: name for tc, name in company_rows}
 
         items = []
         for pred in predictions_db:
-            company_name = company_name_map.get(pred.tax_code, "")
+            normalized_tax_code = _normalize_tax_code_for_response(pred.tax_code)
+            if normalized_tax_code is None:
+                continue
+
+            company_name = company_name_map.get(pred.tax_code, "") or company_name_map.get(normalized_tax_code, "")
             payment_summary = _build_payment_history_summary(db, pred.tax_code)
             early_warning = _build_early_warning_payload(db, pred.tax_code, payment_summary)
             prob_30d, prob_60d, prob_90d, monotonic_adjusted = _normalize_horizon_probs(
@@ -965,7 +1025,7 @@ def get_delinquency_forecast(
                 ]
 
             items.append({
-                "tax_code": pred.tax_code,
+                "tax_code": normalized_tax_code,
                 "company_name": company_name,
                 "probability": prob_90d,
                 "prob_30d": prob_30d,
@@ -1009,11 +1069,12 @@ def get_delinquency_forecast(
     # Fallback: build statistical baseline from payment data for top companies
     companies_with_payments = (
         db.query(models.TaxPayment.tax_code)
+        .filter(models.TaxPayment.tax_code.isnot(None))
         .distinct()
         .limit(200)
         .all()
     )
-    tax_codes = [r[0] for r in companies_with_payments]
+    tax_codes = [r[0] for r in companies_with_payments if _normalize_tax_code_for_response(r[0]) is not None]
 
     company_rows = (
         db.query(models.Company.tax_code, models.Company.name)
@@ -1043,6 +1104,8 @@ def get_delinquency_forecast(
     for tc in tax_codes:
         company_name = company_name_map.get(tc, "")
         baseline = _build_baseline_prediction(db, tc, company_name)
+        if not baseline:
+            continue
         if baseline["probability"] >= min_probability:
             if not cluster or (cluster.lower() in baseline["cluster"].lower()):
                 if not freshness_filter or baseline.get("freshness") == freshness_filter:
@@ -1143,22 +1206,24 @@ def get_delinquency_detail(tax_code: str, db: Session = Depends(get_db)):
     """
     Get delinquency prediction detail for a specific company.
     """
-    company = db.query(models.Company).filter(models.Company.tax_code == tax_code).first()
+    company = _resolve_company_by_tax_code(db, tax_code)
     if not company:
         raise HTTPException(status_code=404, detail="Không tìm thấy doanh nghiệp với MST này.")
+
+    resolved_tax_code = company.tax_code
 
     # Check cached ML prediction first
     cached = (
         db.query(models.DelinquencyPrediction)
-        .filter(models.DelinquencyPrediction.tax_code == tax_code)
+        .filter(models.DelinquencyPrediction.tax_code == resolved_tax_code)
         .order_by(desc(models.DelinquencyPrediction.created_at))
         .first()
     )
 
     if cached:
         split_trigger_status = _build_split_trigger_status_context(snapshot_source="delinquency_detail_cached")
-        payment_summary = _build_payment_history_summary(db, tax_code)
-        early_warning = _build_early_warning_payload(db, tax_code, payment_summary)
+        payment_summary = _build_payment_history_summary(db, resolved_tax_code)
+        early_warning = _build_early_warning_payload(db, resolved_tax_code, payment_summary)
         prob_30d, prob_60d, prob_90d, monotonic_adjusted = _normalize_horizon_probs(
             cached.prob_30d,
             cached.prob_60d,
@@ -1180,8 +1245,11 @@ def get_delinquency_detail(tax_code: str, db: Session = Depends(get_db)):
                 {"reason": r.get("reason", ""), "weight": float(r.get("weight", 0))}
                 for r in cached.top_reasons if isinstance(r, dict)
             ]
+        normalized_tax_code = _normalize_tax_code_for_response(cached.tax_code)
+        if normalized_tax_code is None:
+            raise HTTPException(status_code=422, detail="MST doanh nghiệp không hợp lệ theo chuẩn 10 chữ số.")
         return {
-            "tax_code": cached.tax_code,
+            "tax_code": normalized_tax_code,
             "company_name": company.name,
             "probability": prob_90d,
             "prob_30d": prob_30d,
@@ -1204,7 +1272,9 @@ def get_delinquency_detail(tax_code: str, db: Session = Depends(get_db)):
 
     # Fallback to statistical baseline
     split_trigger_status = _build_split_trigger_status_context(snapshot_source="delinquency_detail_baseline")
-    baseline_payload = _build_baseline_prediction(db, tax_code, company.name)
+    baseline_payload = _build_baseline_prediction(db, resolved_tax_code, company.name)
+    if not baseline_payload:
+        raise HTTPException(status_code=422, detail="MST doanh nghiệp không hợp lệ theo chuẩn 10 chữ số.")
     baseline_payload["split_trigger_status"] = split_trigger_status
     return baseline_payload
 
@@ -1230,9 +1300,18 @@ def _build_batch_candidate_tax_codes(
         if not cleaned:
             return []
 
+        expanded = []
+        expanded_seen = set()
+        for code in cleaned:
+            for candidate in _build_tax_code_lookup_candidates(code):
+                if candidate in expanded_seen:
+                    continue
+                expanded_seen.add(candidate)
+                expanded.append(candidate)
+
         rows = (
             db.query(models.TaxPayment.tax_code)
-            .filter(models.TaxPayment.tax_code.in_(cleaned))
+            .filter(models.TaxPayment.tax_code.in_(expanded))
             .distinct()
             .all()
         )
@@ -1246,6 +1325,8 @@ def _build_batch_candidate_tax_codes(
             .all()
         )
         candidates = [row[0] for row in rows if row and row[0]]
+
+    candidates = [code for code in candidates if _normalize_tax_code_for_response(code) is not None]
 
     if not refresh_existing and candidates:
         today = date.today()
@@ -1270,18 +1351,36 @@ def _predict_and_persist_tax_code(
     pipeline,
     refresh_existing: bool,
 ) -> dict:
-    company = db.query(models.Company).filter(models.Company.tax_code == tax_code).first()
+    lookup_candidates = _build_tax_code_lookup_candidates(tax_code)
+    company = None
+    for code in lookup_candidates:
+        company = db.query(models.Company).filter(models.Company.tax_code == code).first()
+        if company:
+            break
+
+    resolved_tax_code = company.tax_code if company else tax_code
+    normalized_tax_code = _normalize_tax_code_for_response(resolved_tax_code)
+    if normalized_tax_code is None:
+        return {
+            "tax_code": "0000000000",
+            "status": "failed",
+            "score_source": "inference_error",
+            "prob_90d": None,
+            "model_version": None,
+            "message": "MST không hợp lệ theo chuẩn 10 chữ số.",
+        }
+
     company_name = company.name if company else ""
 
     payments = (
         db.query(models.TaxPayment)
-        .filter(models.TaxPayment.tax_code == tax_code)
+        .filter(models.TaxPayment.tax_code.in_(lookup_candidates))
         .order_by(models.TaxPayment.due_date.asc())
         .all()
     )
     if not payments:
         return {
-            "tax_code": tax_code,
+            "tax_code": normalized_tax_code,
             "status": "skipped",
             "score_source": "no_data",
             "prob_90d": None,
@@ -1295,7 +1394,7 @@ def _predict_and_persist_tax_code(
 
             tax_returns = (
                 db.query(models.TaxReturn)
-                .filter(models.TaxReturn.tax_code == tax_code)
+                .filter(models.TaxReturn.tax_code.in_(lookup_candidates))
                 .order_by(models.TaxReturn.filing_date.asc())
                 .all()
             )
@@ -1303,7 +1402,7 @@ def _predict_and_persist_tax_code(
             payments_df = pd.DataFrame(_serialize_payments(payments))
             tax_returns_df = pd.DataFrame(_serialize_tax_returns(tax_returns))
             company_info = {
-                "tax_code": tax_code,
+                "tax_code": resolved_tax_code,
                 "name": company_name,
                 "industry": company.industry if company else None,
                 # Company model stores geographic slice as province.
@@ -1324,8 +1423,8 @@ def _predict_and_persist_tax_code(
             score_source = "ml_model"
             info_message = "Dự báo bằng model ML temporal delinquency."
         except Exception as exc:
-            print(f"[WARN] Delinquency batch predict failed for {tax_code}: {exc}")
-            baseline = _build_baseline_prediction(db, tax_code, company_name)
+            print(f"[WARN] Delinquency batch predict failed for {resolved_tax_code}: {exc}")
+            baseline = _build_baseline_prediction(db, resolved_tax_code, company_name)
             prob_30d, prob_60d, prob_90d, monotonic_adjusted = _normalize_horizon_probs(
                 baseline.get("prob_30d"),
                 baseline.get("prob_60d"),
@@ -1338,7 +1437,7 @@ def _predict_and_persist_tax_code(
             score_source = baseline.get("score_source") or "inference_error"
             info_message = "ML không khả dụng, dùng baseline để không gián đoạn dịch vụ."
     else:
-        baseline = _build_baseline_prediction(db, tax_code, company_name)
+        baseline = _build_baseline_prediction(db, resolved_tax_code, company_name)
         prob_30d, prob_60d, prob_90d, monotonic_adjusted = _normalize_horizon_probs(
             baseline.get("prob_30d"),
             baseline.get("prob_60d"),
@@ -1353,19 +1452,19 @@ def _predict_and_persist_tax_code(
 
     if refresh_existing:
         db.query(models.DelinquencyPrediction).filter(
-            models.DelinquencyPrediction.tax_code == tax_code,
+            models.DelinquencyPrediction.tax_code == resolved_tax_code,
             models.DelinquencyPrediction.prediction_date == date.today(),
         ).delete(synchronize_session=False)
 
     had_existing = (
         db.query(models.DelinquencyPrediction.id)
-        .filter(models.DelinquencyPrediction.tax_code == tax_code)
+        .filter(models.DelinquencyPrediction.tax_code == resolved_tax_code)
         .first()
         is not None
     )
 
     row = models.DelinquencyPrediction(
-        tax_code=tax_code,
+        tax_code=resolved_tax_code,
         prediction_date=date.today(),
         prob_30d=prob_30d,
         prob_60d=prob_60d,
@@ -1379,7 +1478,7 @@ def _predict_and_persist_tax_code(
     db.commit()
 
     return {
-        "tax_code": tax_code,
+        "tax_code": normalized_tax_code,
         "status": "updated" if had_existing else "created",
         "score_source": score_source,
         "prob_90d": prob_90d,

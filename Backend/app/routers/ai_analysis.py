@@ -19,6 +19,7 @@ import uuid
 import threading
 import json
 import math
+import re
 import joblib
 import numpy as np
 from datetime import datetime
@@ -114,6 +115,7 @@ KNOWN_LABEL_ORIGINS = REAL_LABEL_ORIGINS | BLOCKED_LABEL_ORIGINS
 
 # ---- Singleton pipeline ----
 _pipeline = None
+TAX_CODE_REGEX = re.compile(r"^[0-9]{10}$")
 
 
 def get_pipeline() -> TaxFraudPipeline:
@@ -255,6 +257,16 @@ def _to_float(value: Any, default: float = 0.0) -> float:
         return float(value)
     except (TypeError, ValueError):
         return float(default)
+
+
+def _require_numeric_tax_code(tax_code: str) -> str:
+    normalized = str(tax_code or "").strip()
+    if not TAX_CODE_REGEX.fullmatch(normalized):
+        raise HTTPException(
+            status_code=422,
+            detail="tax_code phai la chuoi so gom dung 10 chu so.",
+        )
+    return normalized
 
 
 def _to_int(value: Any) -> Optional[int]:
@@ -2008,30 +2020,17 @@ def single_query(tax_code: str, db: Session = Depends(get_db)):
     Chế độ 1: Tra cứu đơn lẻ.
     Tìm dữ liệu 3 năm gần nhất trong DB, chạy AI pipeline real-time.
     Nếu không có trong DB, trả về lỗi kèm gợi ý upload CSV.
-    Hỗ trợ tra cứu bằng Tên DN: nếu tax_code không phải là số thuần,
-    hệ thống sẽ tìm DN theo tên (ILIKE) rồi lấy MST.
     """
-    resolved_tax_code = tax_code
-    company = None
+    resolved_tax_code = _require_numeric_tax_code(tax_code)
+    company = db.query(models.Company).filter(
+        models.Company.tax_code == resolved_tax_code
+    ).first()
 
-    # --- Hỗ trợ tra cứu bằng tên doanh nghiệp ---
-    if not tax_code.replace("-", "").isdigit():
-        # Treat input as company name search
-        company = db.query(models.Company).filter(
-            models.Company.name.ilike(f"%{tax_code}%")
-        ).first()
-        if company:
-            resolved_tax_code = company.tax_code
-        else:
-            raise HTTPException(
-                status_code=404,
-                detail=f"Không tìm thấy doanh nghiệp tên '{tax_code}'. "
-                       "Hãy nhập MST chính xác hoặc upload CSV."
-            )
-    else:
-        company = db.query(models.Company).filter(
-            models.Company.tax_code == resolved_tax_code
-        ).first()
+    if not company:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Không tìm thấy doanh nghiệp MST {resolved_tax_code}. Hãy kiểm tra lại dữ liệu hoặc upload CSV.",
+        )
 
     # Check if we have tax returns for this company
     tax_returns = (
@@ -2730,13 +2729,15 @@ def what_if_simulation(tax_code: str, adjustments: dict, db: Session = Depends(g
         "total_expenses": 30     // Tăng chi phí 30%
     }
     """
+    normalized_tax_code = _require_numeric_tax_code(tax_code)
+
     # Find cached assessment
-    cached = _get_latest_cached_assessment(tax_code, db)
+    cached = _get_latest_cached_assessment(normalized_tax_code, db)
 
     if not cached:
         raise HTTPException(
             status_code=404,
-            detail=f"Chưa có dữ liệu phân tích cho MST {tax_code}. Hãy phân tích AI trước."
+            detail=f"Chưa có dữ liệu phân tích cho MST {normalized_tax_code}. Hãy phân tích AI trước."
         )
 
     try:
@@ -2772,11 +2773,12 @@ def what_if_grid(tax_code: str, payload: Optional[dict] = None, db: Session = De
         "expense_steps": [30, 20, 10, 0, -10, -20, -30]
     }
     """
-    cached = _get_latest_cached_assessment(tax_code, db)
+    normalized_tax_code = _require_numeric_tax_code(tax_code)
+    cached = _get_latest_cached_assessment(normalized_tax_code, db)
     if not cached:
         raise HTTPException(
             status_code=404,
-            detail=f"Chưa có dữ liệu phân tích cho MST {tax_code}. Hãy phân tích AI trước."
+            detail=f"Chưa có dữ liệu phân tích cho MST {normalized_tax_code}. Hãy phân tích AI trước."
         )
 
     body = payload if isinstance(payload, dict) else {}
@@ -2859,9 +2861,11 @@ def multi_scenario_comparison(
     Each scenario adjusts financial parameters by percentage and simulates risk score.
     Returns comparative analysis with confidence intervals and recommended actions.
     """
+    normalized_tax_code = _require_numeric_tax_code(tax_code)
+
     # Resolve company
     company = db.query(models.Company).filter(
-        models.Company.tax_code == tax_code
+        models.Company.tax_code == normalized_tax_code
     ).first()
     if not company:
         raise HTTPException(status_code=404, detail="Không tìm thấy doanh nghiệp.")
@@ -2869,7 +2873,7 @@ def multi_scenario_comparison(
     # Get baseline assessment
     cached = (
         db.query(models.AIRiskAssessment)
-        .filter(models.AIRiskAssessment.tax_code == tax_code)
+        .filter(models.AIRiskAssessment.tax_code == normalized_tax_code)
         .order_by(models.AIRiskAssessment.created_at.desc())
         .first()
     )
@@ -2901,7 +2905,7 @@ def multi_scenario_comparison(
         )
 
     base_data = {
-        "tax_code": tax_code,
+        "tax_code": normalized_tax_code,
         "company_name": company.name or "",
         "industry": cached.industry or company.industry or "Unknown",
         "year": cached.year or 2024,
@@ -2983,7 +2987,7 @@ def multi_scenario_comparison(
     worst = max(scenario_results, key=lambda s: s.simulated_risk_score) if scenario_results else None
 
     return schemas.MultiScenarioResponse(
-        tax_code=tax_code,
+        tax_code=normalized_tax_code,
         company_name=company.name or "",
         baseline_risk_score=baseline_score,
         baseline_risk_level=baseline_level,
@@ -3040,6 +3044,8 @@ def _build_inspector_label_entity(
     current_user: models.User,
     db: Session,
 ) -> models.InspectorLabel:
+    normalized_label_tax_code = _require_numeric_tax_code(label.tax_code)
+
     linked_assessment_model_version: Optional[str] = None
     if label.assessment_id is not None:
         assessment = (
@@ -3049,7 +3055,7 @@ def _build_inspector_label_entity(
         )
         if assessment is None:
             raise HTTPException(status_code=404, detail="Không tìm thấy assessment_id tương ứng.")
-        if assessment.tax_code and assessment.tax_code != label.tax_code:
+        if assessment.tax_code and assessment.tax_code != normalized_label_tax_code:
             raise HTTPException(
                 status_code=400,
                 detail="assessment_id không khớp với tax_code.",
@@ -3095,7 +3101,7 @@ def _build_inspector_label_entity(
         resolved_outcome_recorded_at = datetime.utcnow()
 
     return models.InspectorLabel(
-        tax_code=label.tax_code,
+        tax_code=normalized_label_tax_code,
         inspector_id=current_user.id,
         label_type=label.label_type,
         confidence=label.confidence,
@@ -3226,16 +3232,18 @@ def get_inspector_labels(
     db: Session = Depends(get_db),
 ):
     """Get all inspector labels for a specific company."""
+    normalized_tax_code = _require_numeric_tax_code(tax_code)
+
     labels = (
         db.query(models.InspectorLabel)
-        .filter(models.InspectorLabel.tax_code == tax_code)
+        .filter(models.InspectorLabel.tax_code == normalized_tax_code)
         .order_by(models.InspectorLabel.created_at.desc())
         .limit(100)
         .all()
     )
 
     return {
-        "tax_code": tax_code,
+        "tax_code": normalized_tax_code,
         "labels": [schemas.InspectorLabelResponse.model_validate(l) for l in labels],
         "total": len(labels),
     }

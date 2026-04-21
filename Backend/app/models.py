@@ -295,6 +295,28 @@ class OwnershipLink(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
+class OffshoreEntity(Base):
+    """
+    Offshore entity master data.
+    - entity_code: external/alphanumeric offshore identity
+    - proxy_tax_code: internal numeric proxy used for relational joins
+    """
+    __tablename__ = "offshore_entities"
+
+    id = Column(Integer, primary_key=True, index=True)
+    entity_code = Column(String(30), unique=True, nullable=False, index=True)
+    proxy_tax_code = Column(String(20), ForeignKey("companies.tax_code", ondelete="SET NULL"), unique=True, nullable=True, index=True)
+    name = Column(String(255), nullable=False)
+    country = Column(String(100), nullable=False)
+    jurisdiction_risk_weight = Column(Float, default=0.5)
+    risk_score = Column(Float, default=50.0)
+    entity_type = Column(String(50), default="shell_company")
+    registration_date = Column(Date, nullable=True)
+    status = Column(String(30), default="active")
+    data_source = Column(String(100), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
 class DelinquencyPrediction(Base):
     """
     Cached predictions from the temporal delinquency model (Program A).

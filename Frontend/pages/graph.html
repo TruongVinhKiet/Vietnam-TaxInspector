@@ -477,7 +477,7 @@
                 <span class="material-symbols-outlined">gavel</span>
                 <span class="text-sm">Chuyên đề Thanh tra</span>
             </a>
-            <a class="nav-item text-slate-400 hover:text-white transition-colors hover:bg-white/5 flex items-center gap-3 px-4 py-3 scale-95 active:scale-90 transition-transform rounded-lg"
+<a class="nav-item text-slate-400 hover:text-white transition-colors hover:bg-white/5 flex items-center gap-3 px-4 py-3 scale-95 active:scale-90 transition-transform rounded-lg"
                 href="profile.html" data-page="profile.html" data-title="Tài khoản Cán bộ">
                 <span class="material-symbols-outlined">account_circle</span>
                 <span class="text-sm">Tài khoản</span>
@@ -600,11 +600,16 @@
                     <span class="material-symbols-outlined text-[14px]">corporate_fare</span>
                     Doanh nghiệp
                 </button>
+                <button id="workbench-tab-osint" class="workbench-tab" role="tab" aria-selected="false" aria-controls="osint-section" tabindex="-1" data-mode="osint" aria-label="Chuyển sang bảng tình báo offshore">
+                    <span class="material-symbols-outlined text-[14px]">travel_explore</span>
+                    Tình báo Offshore/UBO
+                </button>
             </div>
             <p id="workbench-shortcut-hint" class="mt-2 text-[10px] font-semibold text-slate-500 tracking-wide">
                 Phím tắt: <span class="font-black text-primary-container">G</span> Bản đồ,
                 <span class="font-black text-primary-container">F</span> Điều tra số,
                 <span class="font-black text-primary-container">C</span> Doanh nghiệp,
+                <span class="font-black text-primary-container">O</span> Offshore/UBO,
                 <span class="font-black text-primary-container">Esc</span> xóa tiêu điểm.
             </p>
 
@@ -629,6 +634,19 @@
                         <p class="label">Mức độ điều tra</p>
                         <p id="summary-risk-level" class="value">--</p>
                         <p id="summary-risk-hint" class="hint">Đang chờ phân tích</p>
+                    </div>
+                </div>
+            </div>
+
+            <div id="graph-risk-analytics" class="mt-4 w-full max-w-5xl hidden">
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-3">
+                    <div class="bg-white rounded-xl border border-outline-variant/20 px-4 py-3">
+                        <p class="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-2">Phân bổ Rủi ro trong Cụm</p>
+                        <div id="graph-risk-bars" class="space-y-2"></div>
+                    </div>
+                    <div class="bg-white rounded-xl border border-outline-variant/20 px-4 py-3">
+                        <p class="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-2">Tập trung Rủi ro (Cumulative)</p>
+                        <div id="graph-cumulative-risk" class="space-y-3"></div>
                     </div>
                 </div>
             </div>
@@ -698,21 +716,7 @@
                 </div>
 
                 <!-- Legend Overlay -->
-                <div class="absolute bottom-28 left-6 space-y-2 z-30">
-                    <div class="flex items-center gap-2 text-[10px] text-slate-400 font-bold uppercase">
-                        <div class="w-5 h-0.5 bg-slate-500"></div> Luồng bình thường
-                    </div>
-                    <div class="flex items-center gap-2 text-[10px] text-[#dc2626] font-bold uppercase">
-                        <div class="w-5 h-0.5 bg-[#dc2626]" style="border-top: 2px dashed #dc2626;"></div> Luồng xoay
-                        vòng
-                    </div>
-                    <div class="flex items-center gap-2 text-[10px] text-amber-400 font-bold uppercase">
-                        <div class="w-3 h-3 rounded-full border-2 border-amber-400 bg-transparent"></div> Nút nghi vấn
-                    </div>
-                    <div class="flex items-center gap-2 text-[10px] text-red-400 font-bold uppercase">
-                        <div class="w-3 h-3 rounded-full bg-red-800 border-2 border-red-400"></div> Chủ thể vỏ bọc
-                    </div>
-                </div>
+                <div id="graph-legend-interactive" class="absolute bottom-28 left-6 flex flex-col gap-1.5 z-30"></div>
 
                 <!-- Time-Slider Filter -->
                 <div class="h-24 bg-slate-900 border-t border-white/5 px-6 flex items-center gap-8">
@@ -933,6 +937,57 @@
                 </div>
             </div>
         </div>
+    
+        <!-- OSINT Section -->
+        <div id="osint-section" class="px-10 pb-10 flex-1 flex-col justify-end mt-4 hidden" style="display: none;">
+            <!-- Jurisdiction List + UBO Table side by side -->
+<div class="grid grid-cols-1 lg:grid-cols-3 gap-8 mb-10">
+<!-- Jurisdictions -->
+<div class="bg-white rounded-xl shadow-[0_20px_40px_rgba(0,33,71,0.06)] overflow-hidden fade-in" style="animation-delay:0.3s">
+<div class="px-6 py-4 border-b border-slate-100">
+<h3 class="text-sm font-black text-primary-container tracking-tight flex items-center gap-2">
+<span class="material-symbols-outlined text-[18px]">public</span> Offshore Jurisdictions
+</h3>
+</div>
+<div id="osint-jurisdictions" class="max-h-[500px] overflow-y-auto">
+<div class="text-xs text-slate-400 p-4">Đang tải...</div>
+</div>
+</div>
+
+<!-- UBO Table -->
+<div class="lg:col-span-2 bg-white rounded-xl shadow-[0_20px_40px_rgba(0,33,71,0.06)] overflow-hidden fade-in" style="animation-delay:0.4s">
+<div class="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
+<h3 class="text-sm font-black text-primary-container tracking-tight flex items-center gap-2">
+<span class="material-symbols-outlined text-[18px]">person_search</span> Danh sách UBO Rủi ro Cao
+</h3>
+<span id="osint-pag-info" class="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Đang tải...</span>
+</div>
+<div class="overflow-x-auto">
+<table class="w-full">
+<thead class="bg-slate-50">
+<tr class="text-[10px] font-bold text-slate-500 uppercase tracking-wider">
+<th class="px-4 py-3 text-left">Entity</th>
+<th class="px-4 py-3 text-left">Quốc gia</th>
+<th class="px-4 py-3 text-left">Risk</th>
+<th class="px-4 py-3 text-left">Liên kết</th>
+<th class="px-4 py-3 text-left">Loại quan hệ</th>
+<th class="px-4 py-3 text-left">Hành động</th>
+</tr>
+</thead>
+<tbody id="osint-ubo-tbody">
+<tr><td colspan="6" class="text-center text-xs text-slate-400 py-8">Đang tải...</td></tr>
+</tbody>
+</table>
+</div>
+<div class="px-6 py-4 border-t border-slate-100 flex items-center justify-end gap-2">
+<div id="osint-pagination" class="flex items-center gap-2"></div>
+</div>
+</div>
+</div>
+
+
+        </div>
+
     </main>
 
     <!-- Scripts -->
@@ -970,6 +1025,7 @@
     </script>
 
     <div id="graph-toast-region" aria-live="polite" aria-atomic="false"></div>
+<script src="../js/osint.js?v=4.0"></script>
 </body>
 
 </html>

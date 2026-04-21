@@ -13,6 +13,7 @@ Nếu Celery/Redis không khả dụng, task chạy đồng bộ (synchronous).
 
 import os
 import json
+import re
 import traceback
 from datetime import datetime
 from pathlib import Path
@@ -36,6 +37,7 @@ except Exception:
 
 # Singleton pipeline instance (loaded once)
 _pipeline = None
+TAX_CODE_PATTERN = re.compile(r"^\d{10}$")
 
 
 def get_pipeline():
@@ -61,6 +63,33 @@ def _update_batch_status(batch_id: int, **kwargs):
         print(f"[ERROR] _update_batch_status: {e}")
     finally:
         db.close()
+
+
+def _normalize_and_validate_tax_codes(df: pd.DataFrame) -> pd.DataFrame:
+    """Normalize tax_code column and enforce strict 10-digit numeric format."""
+    if "tax_code" not in df.columns:
+        raise ValueError("CSV thiếu cột tax_code.")
+
+    normalized = df["tax_code"].astype("string").str.strip()
+    df["tax_code"] = normalized
+
+    valid_mask = normalized.notna() & normalized.str.match(TAX_CODE_PATTERN)
+    if valid_mask.all():
+        return df
+
+    invalid_codes = (
+        normalized[~valid_mask]
+        .dropna()
+        .astype(str)
+        .unique()
+        .tolist()
+    )
+    invalid_preview = ", ".join(invalid_codes[:10]) if invalid_codes else "<empty>"
+    raise ValueError(
+        "Phát hiện tax_code không hợp lệ. "
+        "Yêu cầu đúng định dạng 10 chữ số (ví dụ: 0101234567). "
+        f"Mẫu lỗi: {invalid_preview}"
+    )
 
 
 def _save_assessments(assessments: list, chunk_size: int = 2000):
@@ -126,12 +155,7 @@ def run_batch_analysis(file_path: str, batch_id: int) -> dict:
 
         # Read CSV with tax_code as string to preserve leading-zero MST values.
         df = pd.read_csv(file_path, dtype={"tax_code": "string"}, low_memory=False)
-        if "tax_code" in df.columns:
-            df["tax_code"] = (
-                df["tax_code"]
-                .astype("string")
-                .str.strip()
-            )
+        df = _normalize_and_validate_tax_codes(df)
         # Use number of unique companies as total (not CSV row count)
         # because progress_callback in pipeline counts per-company, not per-row
         total_companies = df["tax_code"].nunique() if "tax_code" in df.columns else len(df)

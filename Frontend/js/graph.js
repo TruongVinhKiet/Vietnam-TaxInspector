@@ -17,6 +17,14 @@ const GRAPH_API_BASE =
 
 const FORENSIC_TAB_ACTIVE_CLASS = "py-2 text-[10px] font-black uppercase text-primary-container border-b-2 border-primary-container tracking-widest transition-colors";
 const FORENSIC_TAB_INACTIVE_CLASS = "py-2 text-[10px] font-black uppercase text-slate-400 border-b-2 border-transparent hover:text-primary-container tracking-widest transition-colors";
+const GRAPH_LEGEND_ITEMS = [
+    { id: "normal_flow", label: "Luồng bình thường", type: "edge", color: "#334155", dash: false },
+    { id: "circular_flow", label: "Luồng xoay vòng", type: "edge", color: "#ba1a1a", dash: true },
+    { id: "normal_node", label: "Doanh nghiệp thường", type: "node", color: "#002147" },
+    { id: "suspicious_node", label: "Nút nghi vấn", type: "node", color: "#1e293b" },
+    { id: "shell_node", label: "Chủ thể vỏ bọc", type: "node", color: "#ba1a1a" },
+    { id: "offshore_node", label: "Offshore/UBO", type: "node", color: "#f43f5e" },
+];
 
 // ════════════════════════════════════════════════════════════════
 //  State
@@ -35,12 +43,28 @@ let graphRenderState = {
     lines: null,
     edgeLabels: null,
 };
+let graphLegendState = {
+    normal_flow: true,
+    circular_flow: true,
+    normal_node: true,
+    suspicious_node: true,
+    shell_node: true,
+    offshore_node: true,
+};
 let graphSplitTriggerGate = null;
 
 let allCompanies = [];
 let filteredCompanies = [];
 let currentCompanyPage = 1;
 const COMPANY_PAGE_SIZE = 10;
+const FORENSIC_FALLBACK_MAX_LOGS = 20;
+const FORENSIC_FALLBACK_MAX_PATHS = 80;
+const FORENSIC_FALLBACK_MAX_HOPS = 16;
+const FORENSIC_MERGED_LOG_LIMIT = 80;
+const FORENSIC_RING_PATH_LIMIT = 80;
+const FORENSIC_OWNERSHIP_PATH_LIMIT = 80;
+const FORENSIC_CYCLE_MAX_LEN = 8;
+const FORENSIC_CYCLE_MAX_COUNT = 120;
 
 
 function escapeHtml(value) {
@@ -79,6 +103,154 @@ function setElementText(id, value) {
 function formatThreshold(value) {
     const n = Number(value);
     return Number.isFinite(n) ? n.toFixed(2) : "--";
+}
+
+
+function getNodeLegendCategory(node) {
+    if (node && node.is_offshore) return "offshore_node";
+    if (node && node.is_shell) return "shell_node";
+    if (node && node.group === "suspicious") return "suspicious_node";
+    return "normal_node";
+}
+
+
+function getEdgeLegendCategory(edge) {
+    return edge && edge.is_circular ? "circular_flow" : "normal_flow";
+}
+
+
+function isLegendVisible(category) {
+    return graphLegendState[category] !== false;
+}
+
+
+function renderInteractiveLegend() {
+    const container = document.getElementById("graph-legend-interactive");
+    if (!container) return;
+
+    container.innerHTML = GRAPH_LEGEND_ITEMS.map((item) => {
+        const isActive = isLegendVisible(item.id);
+        const lineSwatch = item.type === "edge"
+            ? `<span class="inline-block w-5 h-0.5 rounded" style="background:${item.color};${item.dash ? `border-top:2px dashed ${item.color};background:transparent;height:0;` : ""}"></span>`
+            : `<span class="inline-block w-3 h-3 rounded-full" style="background:${item.color}"></span>`;
+        return `
+            <button
+                type="button"
+                data-legend-id="${item.id}"
+                aria-pressed="${isActive ? "true" : "false"}"
+                class="legend-toggle-item flex items-center gap-2 text-[10px] font-bold uppercase px-2 py-1 rounded-md transition-colors ${isActive ? "text-slate-200 bg-slate-800/60" : "text-slate-500 bg-slate-900/30"}">
+                ${lineSwatch}
+                <span>${item.label}</span>
+            </button>
+        `;
+    }).join("");
+
+    container.querySelectorAll("[data-legend-id]").forEach((btn) => {
+        btn.addEventListener("click", (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            const legendId = btn.getAttribute("data-legend-id");
+            if (!legendId || !(legendId in graphLegendState)) return;
+            graphLegendState[legendId] = !graphLegendState[legendId];
+            renderInteractiveLegend();
+            applyLegendVisibility();
+        });
+    });
+}
+
+
+function renderGraphRiskAnalytics(data) {
+    const panel = document.getElementById("graph-risk-analytics");
+    const barsHost = document.getElementById("graph-risk-bars");
+    const cumulativeHost = document.getElementById("graph-cumulative-risk");
+    if (!panel || !barsHost || !cumulativeHost) return;
+
+    const nodes = Array.isArray(data?.nodes) ? data.nodes : [];
+    if (!nodes.length) {
+        panel.classList.add("hidden");
+        return;
+    }
+
+    panel.classList.remove("hidden");
+
+    const bucketDefs = [
+        { key: "critical", label: "Nghiêm trọng", color: "#ef4444", test: (score) => score >= 80 },
+        { key: "high", label: "Cao", color: "#f97316", test: (score) => score >= 60 && score < 80 },
+        { key: "medium", label: "Trung bình", color: "#f59e0b", test: (score) => score >= 40 && score < 60 },
+        { key: "low", label: "Thấp", color: "#10b981", test: (score) => score < 40 },
+    ];
+
+    const counts = { critical: 0, high: 0, medium: 0, low: 0 };
+    let totalRisk = 0;
+    const scoreList = [];
+
+    nodes.forEach((node) => {
+        const score = Math.max(0, Math.min(100, toFiniteNumber(node?.risk_score, 0)));
+        totalRisk += score;
+        scoreList.push(score);
+        const bucket = bucketDefs.find((def) => def.test(score));
+        if (bucket) counts[bucket.key] += 1;
+    });
+
+    barsHost.innerHTML = bucketDefs.map((def) => {
+        const count = counts[def.key] || 0;
+        const pct = nodes.length ? (count / nodes.length) * 100 : 0;
+        return `
+            <div>
+                <div class="flex items-center justify-between text-[10px] font-bold text-slate-500 uppercase">
+                    <span>${def.label}</span>
+                    <span>${count} (${pct.toFixed(1)}%)</span>
+                </div>
+                <div class="mt-1 h-2 rounded-full bg-slate-200 overflow-hidden">
+                    <div class="h-full rounded-full" style="width:${pct.toFixed(2)}%;background:${def.color}"></div>
+                </div>
+            </div>
+        `;
+    }).join("");
+
+    const sortedScores = [...scoreList].sort((a, b) => b - a);
+    const top10Count = Math.max(1, Math.ceil(sortedScores.length * 0.1));
+    const top20Count = Math.max(1, Math.ceil(sortedScores.length * 0.2));
+    const top10Risk = sortedScores.slice(0, top10Count).reduce((acc, value) => acc + value, 0);
+    const top20Risk = sortedScores.slice(0, top20Count).reduce((acc, value) => acc + value, 0);
+    const top10Share = totalRisk > 0 ? (top10Risk / totalRisk) * 100 : 0;
+    const top20Share = totalRisk > 0 ? (top20Risk / totalRisk) * 100 : 0;
+
+    cumulativeHost.innerHTML = `
+        <div>
+            <div class="flex items-center justify-between text-[10px] font-bold uppercase text-slate-500">
+                <span>Top 10% doanh nghiệp</span>
+                <span>${top10Share.toFixed(1)}% tổng rủi ro</span>
+            </div>
+            <div class="mt-1 h-2 rounded-full bg-slate-200 overflow-hidden">
+                <div class="h-full rounded-full bg-rose-500" style="width:${Math.min(100, top10Share).toFixed(2)}%"></div>
+            </div>
+        </div>
+        <div>
+            <div class="flex items-center justify-between text-[10px] font-bold uppercase text-slate-500">
+                <span>Top 20% doanh nghiệp</span>
+                <span>${top20Share.toFixed(1)}% tổng rủi ro</span>
+            </div>
+            <div class="mt-1 h-2 rounded-full bg-slate-200 overflow-hidden">
+                <div class="h-full rounded-full bg-orange-500" style="width:${Math.min(100, top20Share).toFixed(2)}%"></div>
+            </div>
+        </div>
+    `;
+}
+
+
+function applyLegendVisibility() {
+    if (!svg) return;
+
+    svg.selectAll(".node")
+        .transition().duration(180)
+        .style("opacity", (d) => (isLegendVisible(getNodeLegendCategory(d)) ? 1 : 0.08));
+
+    svg.selectAll(".node-label")
+        .transition().duration(180)
+        .style("opacity", (d) => (isLegendVisible(getNodeLegendCategory(d)) ? 1 : 0.08));
+
+    applyTimelineFilter(timelineMonth, { refreshBadge: true });
 }
 
 
@@ -595,14 +767,85 @@ async function loadGraph(taxCode) {
 
 
 async function safeGraphJson(url) {
+    const startedAt = Date.now();
     try {
         const res = await graphFetch(url);
-        if (!res.ok) return null;
-        return await res.json();
+        if (!res.ok) {
+            return {
+                ok: false,
+                statusCode: res.status,
+                payload: null,
+                dataStatus: "http_error",
+                durationMs: Date.now() - startedAt,
+            };
+        }
+
+        const payload = await res.json();
+        if (!payload || typeof payload !== "object") {
+            return {
+                ok: false,
+                statusCode: res.status,
+                payload: null,
+                dataStatus: "invalid_payload",
+                durationMs: Date.now() - startedAt,
+            };
+        }
+
+        return {
+            ok: true,
+            statusCode: res.status,
+            payload,
+            dataStatus: "ok",
+            durationMs: Date.now() - startedAt,
+        };
     } catch (err) {
         console.warn("Graph supplemental API warning:", err);
-        return null;
+        return {
+            ok: false,
+            statusCode: null,
+            payload: null,
+            dataStatus: "request_failed",
+            durationMs: Date.now() - startedAt,
+            error: String(err?.message || err || "unknown_error"),
+        };
     }
+}
+
+
+function normalizeForensicDataStatus(status, fallback = "unavailable") {
+    const normalized = String(status || "").trim().toLowerCase();
+    return normalized || String(fallback || "unavailable").trim().toLowerCase();
+}
+
+
+function isForensicDataUnavailable(status) {
+    const normalized = normalizeForensicDataStatus(status);
+    return normalized === "request_failed"
+        || normalized === "http_error"
+        || normalized === "invalid_payload"
+        || normalized === "unavailable";
+}
+
+
+function formatForensicDataStatus(status) {
+    const normalized = normalizeForensicDataStatus(status);
+    const labels = {
+        ok: "OK",
+        request_failed: "Lỗi kết nối",
+        http_error: "API lỗi",
+        invalid_payload: "Payload lỗi",
+        unavailable: "Không khả dụng",
+        no_invoice_context: "Thiếu ngữ cảnh hóa đơn",
+        no_ownership_links: "Thiếu liên kết sở hữu",
+        ownership_outside_invoice_scope: "Sở hữu ngoài phạm vi hóa đơn",
+        no_parent_child_pairs_in_invoice_scope: "Không có cặp cha-con trong phạm vi",
+        no_related_party_trades_found: "Chưa có giao dịch liên đới",
+        no_cycles_detected: "Chưa phát hiện vòng",
+        no_cycles_with_circular_edges: "Cạnh đỏ cao, chưa khép vòng",
+        cycles_detected_but_no_rings_scored: "Có vòng nhưng chưa đạt ngưỡng",
+        partial_ring_output: "Kết quả vòng trả về một phần",
+    };
+    return labels[normalized] || normalized.replace(/_/g, " ");
 }
 
 
@@ -617,15 +860,46 @@ async function loadForensicIntel(taxCode, depth = 2) {
     const ownershipUrl = `${GRAPH_API_BASE}/graph/ownership${ownershipParams.toString() ? `?${ownershipParams.toString()}` : ""}`;
     const ringUrl = `${GRAPH_API_BASE}/graph/ring-scoring?${ringParams.toString()}`;
 
-    const [ownershipPayload, ringPayload] = await Promise.all([
+    const [ownershipResult, ringResult] = await Promise.all([
         safeGraphJson(ownershipUrl),
         safeGraphJson(ringUrl),
     ]);
 
+    const ownershipPayload = ownershipResult?.payload && typeof ownershipResult.payload === "object"
+        ? ownershipResult.payload
+        : null;
+    const ringPayload = ringResult?.payload && typeof ringResult.payload === "object"
+        ? ringResult.payload
+        : null;
+
+    const ownershipStatus = normalizeForensicDataStatus(
+        ownershipPayload?.data_status || ownershipResult?.dataStatus,
+        ownershipPayload ? "ok" : "unavailable",
+    );
+    const ringStatus = normalizeForensicDataStatus(
+        ringPayload?.data_status || ringResult?.dataStatus,
+        ringPayload ? "ok" : "unavailable",
+    );
+
     return {
-        ownership: ownershipPayload && typeof ownershipPayload === "object" ? ownershipPayload : null,
-        ring: ringPayload && typeof ringPayload === "object" ? ringPayload : null,
+        ownership: ownershipPayload,
+        ring: ringPayload,
         fetched_at: new Date().toISOString(),
+        diagnostics: {
+            ownership_status: ownershipStatus,
+            ring_status: ringStatus,
+            ownership_fetch: {
+                ok: Boolean(ownershipResult?.ok),
+                status_code: ownershipResult?.statusCode ?? null,
+                duration_ms: toFiniteNumber(ownershipResult?.durationMs, 0),
+            },
+            ring_fetch: {
+                ok: Boolean(ringResult?.ok),
+                status_code: ringResult?.statusCode ?? null,
+                duration_ms: toFiniteNumber(ringResult?.durationMs, 0),
+            },
+            both_available: Boolean(ownershipResult?.ok) && Boolean(ringResult?.ok),
+        },
     };
 }
 
@@ -957,6 +1231,8 @@ function setupGlobalWorkbenchShortcuts() {
             switchWorkbenchMode("forensic");
         } else if (event.key === "c" || event.key === "C") {
             switchWorkbenchMode("companies");
+        } else if (event.key === "o" || event.key === "O") {
+            switchWorkbenchMode("osint");
         } else if (event.key === "Escape") {
             clearGraphFocus();
         }
@@ -965,7 +1241,7 @@ function setupGlobalWorkbenchShortcuts() {
 
 
 function switchWorkbenchMode(mode, options = {}) {
-    const validModes = new Set(["graph", "forensic", "companies"]);
+    const validModes = new Set(["graph", "forensic", "companies", "osint"]);
     const nextMode = validModes.has(mode) ? mode : "companies";
     if (!options.force && activeWorkbenchMode === nextMode) return;
     activeWorkbenchMode = nextMode;
@@ -979,10 +1255,17 @@ function switchWorkbenchMode(mode, options = {}) {
 
     const investigationSection = document.getElementById("investigation-section");
     const companiesSection = document.getElementById("companies-section");
+    const osintSection = document.getElementById("osint-section");
     if (!investigationSection || !companiesSection) return;
 
     if (nextMode !== "graph") {
         stopTimelinePlayback();
+    }
+
+    if (osintSection) {
+        osintSection.classList.add("hidden");
+        osintSection.setAttribute("hidden", "");
+        osintSection.style.display = "none";
     }
 
     if (nextMode === "companies") {
@@ -994,6 +1277,24 @@ function switchWorkbenchMode(mode, options = {}) {
 
         if (!options.skipScroll) {
             companiesSection.scrollIntoView({ behavior: "smooth", block: "start" });
+        }
+        return;
+    }
+
+    if (nextMode === "osint") {
+        investigationSection.classList.add("hidden", "opacity-0");
+        investigationSection.classList.remove("workbench-forensic-mode");
+        investigationSection.setAttribute("hidden", "");
+        companiesSection.classList.add("hidden");
+        companiesSection.setAttribute("hidden", "");
+
+        if (osintSection) {
+            osintSection.classList.remove("hidden");
+            osintSection.removeAttribute("hidden");
+            osintSection.style.display = "flex";
+            if (!options.skipScroll) {
+                osintSection.scrollIntoView({ behavior: "smooth", block: "start" });
+            }
         }
         return;
     }
@@ -1163,10 +1464,10 @@ function renderGraph(data) {
     const edgeGroups = edgesLayer.selectAll("g.edge")
         .data(edges, d => d.invoice_number || `${d.from}-${d.to}-${d.linkIndex}`)
         .join("g")
-        .attr("class", "edge");
+        .attr("class", d => `edge ${d.is_circular ? "edge-circular" : "edge-normal"}`);
 
     const lines = edgeGroups.append("path")
-        .attr("class", d => d.is_circular ? "edge-path circular" : "edge-path normal")
+        .attr("class", d => d.is_circular ? "edge-path circular edge-circular-path" : "edge-path normal edge-normal-path")
         .attr("fill", "none")
         .attr("stroke", d => d.is_circular ? "#ba1a1a" : "#334155")
         .attr("stroke-width", d => d.is_circular ? 2 : 1)
@@ -1193,7 +1494,7 @@ function renderGraph(data) {
     const nodeGroups = nodesLayer.selectAll("g.node")
         .data(nodes, d => d.id)
         .join("g")
-        .attr("class", "node")
+        .attr("class", d => `node ${getNodeLegendCategory(d)}`)
         .style("cursor", "pointer")
         .call(d3.drag()
             .on("start", dragStarted)
@@ -1210,11 +1511,17 @@ function renderGraph(data) {
         .attr("rx", 6)
         .attr("ry", 6)
         .attr("fill", d => {
+            if (d.is_offshore) {
+                if (d.risk_score >= 80) return "#f43f5e"; // rose-500
+                if (d.risk_score >= 60) return "#f59e0b"; // amber-500
+                return "#10b981"; // emerald-500
+            }
             if (d.is_shell) return "#ba1a1a"; // Exact mock red
             if (d.group === "suspicious") return "#1e293b"; // slate-800
             return "#002147"; // primary-container
         })
         .attr("stroke", d => {
+            if (d.is_offshore) return "rgba(255,255,255,0.6)";
             if (d.is_shell) return "rgba(255,255,255,0.4)";
             if (d.group === "suspicious") return "rgba(255,255,255,0.15)";
             return "rgba(255,255,255,0.3)";
@@ -1237,7 +1544,10 @@ function renderGraph(data) {
         .attr("fill", d => d.group === "suspicious" ? "#cbd5e1" : "#ffffff")
         .attr("font-size", d => d.is_shell ? "18px" : "16px")
         .style("font-family", "Material Symbols Outlined")
-        .text(d => iconMap[d.group] || "factory");
+        .text(d => {
+            if (d.is_offshore) return "public";
+            return iconMap[d.group] || "factory";
+        });
 
     // Node labels inside the rect
     nodeGroups.append("text")
@@ -1267,7 +1577,12 @@ function renderGraph(data) {
         d3.select(this).select(".node-rect")
             .transition().duration(200)
             .attr("stroke-width", 1)
-            .attr("stroke", d.is_shell ? "rgba(255,255,255,0.4)" : d.group === "suspicious" ? "rgba(255,255,255,0.15)" : "rgba(255,255,255,0.3)");
+            .attr("stroke", d => {
+                if (d.is_offshore) return "rgba(255,255,255,0.6)";
+                if (d.is_shell) return "rgba(255,255,255,0.4)";
+                if (d.group === "suspicious") return "rgba(255,255,255,0.15)";
+                return "rgba(255,255,255,0.3)";
+            });
     }).on("click", function(event, d) {
         // Highlight connected edges
         highlightNode(d.id, edges);
@@ -1313,7 +1628,10 @@ function renderGraph(data) {
         edgeLabels,
     };
 
+    renderInteractiveLegend();
+    renderGraphRiskAnalytics(data);
     applyTimelineFilter(timelineMonth, { refreshBadge: true });
+    applyLegendVisibility();
 
     setTimeout(() => fitGraphToViewport({ animate: true }), 180);
 }
@@ -1343,36 +1661,376 @@ function formatForensicTimestamp(raw) {
 }
 
 
+function formatForensicTimestampOrUnknown(raw) {
+    if (!raw) return "Không rõ thời điểm";
+    const dt = new Date(raw);
+    if (Number.isNaN(dt.getTime())) return "Không rõ thời điểm";
+    return dt.toLocaleString("vi-VN", { hour12: false });
+}
+
+
+function getCircularEdgeSignals(data) {
+    const edges = Array.isArray(data?.edges) ? data.edges : [];
+    const dedupe = new Set();
+
+    const normalized = edges
+        .filter((edge) => edge && edge.is_circular)
+        .map((edge) => {
+            const from = String(edge.from || "").trim();
+            const to = String(edge.to || "").trim();
+            const amount = Math.max(0, toFiniteNumber(edge.amount, 0));
+            const circularProbability = Math.max(
+                0,
+                Math.min(1, toFiniteNumber(edge.circular_probability ?? edge.fraud_probability, 0)),
+            );
+            const dateRaw = String(edge.date || edge.timestamp || "").trim();
+            const invoiceNumber = String(edge.invoice_number || edge.invoiceNo || "").trim();
+
+            return {
+                from,
+                to,
+                amount,
+                circularProbability,
+                dateRaw,
+                invoiceNumber,
+            };
+        })
+        .filter((edge) => edge.from && edge.to)
+        .filter((edge) => {
+            const key = `${edge.invoiceNumber}|${edge.from}|${edge.to}|${edge.dateRaw}|${edge.amount}`;
+            if (dedupe.has(key)) return false;
+            dedupe.add(key);
+            return true;
+        })
+        .sort((a, b) => {
+            if (b.circularProbability !== a.circularProbability) {
+                return b.circularProbability - a.circularProbability;
+            }
+            return b.amount - a.amount;
+        });
+
+    return normalized;
+}
+
+
+function deriveRiskLevelFromProbability(probability) {
+    const p = Math.max(0, Math.min(1, toFiniteNumber(probability, 0)));
+    if (p >= 0.85) return "critical";
+    if (p >= 0.65) return "high";
+    if (p >= 0.45) return "medium";
+    return "low";
+}
+
+
+function canonicalCycleKey(nodes) {
+    if (!Array.isArray(nodes) || !nodes.length) return "";
+
+    let best = null;
+    for (let i = 0; i < nodes.length; i += 1) {
+        const rotated = nodes.slice(i).concat(nodes.slice(0, i));
+        const key = rotated.join(">>");
+        if (best === null || key < best) {
+            best = key;
+        }
+    }
+
+    return best || "";
+}
+
+
+function detectDirectedCyclesFromCircularEdges(
+    circularEdges,
+    maxCycleLength = FORENSIC_CYCLE_MAX_LEN,
+    maxCycles = FORENSIC_CYCLE_MAX_COUNT,
+) {
+    const directedAdjacency = new Map();
+    circularEdges.forEach((edge) => {
+        if (!directedAdjacency.has(edge.from)) directedAdjacency.set(edge.from, new Set());
+        directedAdjacency.get(edge.from).add(edge.to);
+    });
+
+    const maxLen = Math.max(3, Math.floor(toFiniteNumber(maxCycleLength, FORENSIC_CYCLE_MAX_LEN)));
+    const cycleLimit = Math.max(1, Math.floor(toFiniteNumber(maxCycles, FORENSIC_CYCLE_MAX_COUNT)));
+    const cycles = [];
+    const seen = new Set();
+    const starts = [...directedAdjacency.keys()].sort();
+
+    const dfs = (start, current, path, visited) => {
+        if (cycles.length >= cycleLimit) return;
+
+        const neighbors = directedAdjacency.get(current);
+        if (!neighbors || !neighbors.size) return;
+
+        for (const next of neighbors) {
+            if (next === start && path.length >= 3) {
+                const cycleNodes = path.slice();
+                const key = canonicalCycleKey(cycleNodes);
+                if (key && !seen.has(key)) {
+                    seen.add(key);
+                    cycles.push(cycleNodes);
+                    if (cycles.length >= cycleLimit) return;
+                }
+                continue;
+            }
+
+            if (visited.has(next)) continue;
+            if (path.length >= maxLen) continue;
+
+            visited.add(next);
+            path.push(next);
+            dfs(start, next, path, visited);
+            path.pop();
+            visited.delete(next);
+
+            if (cycles.length >= cycleLimit) return;
+        }
+    };
+
+    starts.forEach((start) => {
+        if (cycles.length >= cycleLimit) return;
+        const visited = new Set([start]);
+        dfs(start, start, [start], visited);
+    });
+
+    return cycles;
+}
+
+
+function buildCircularEdgePairIndex(circularEdges) {
+    const pairIndex = new Map();
+    circularEdges.forEach((edge) => {
+        const key = `${edge.from}|${edge.to}`;
+        const bucket = pairIndex.get(key) || [];
+        bucket.push(edge);
+        pairIndex.set(key, bucket);
+    });
+
+    pairIndex.forEach((bucket, key) => {
+        pairIndex.set(
+            key,
+            bucket
+                .slice()
+                .sort((a, b) => {
+                    if (b.circularProbability !== a.circularProbability) {
+                        return b.circularProbability - a.circularProbability;
+                    }
+                    return b.amount - a.amount;
+                }),
+        );
+    });
+
+    return pairIndex;
+}
+
+
+function buildFallbackForensicLogsFromCircularEdges(data) {
+    const circularEdges = getCircularEdgeSignals(data);
+    if (!circularEdges.length) return [];
+    const derivedCycles = detectDirectedCyclesFromCircularEdges(
+        circularEdges,
+        FORENSIC_CYCLE_MAX_LEN,
+        Math.min(60, FORENSIC_CYCLE_MAX_COUNT),
+    );
+
+    const totalAmount = circularEdges.reduce((sum, edge) => sum + edge.amount, 0);
+    const relatedCompanies = new Set();
+    const nodeDegree = new Map();
+
+    circularEdges.forEach((edge) => {
+        relatedCompanies.add(edge.from);
+        relatedCompanies.add(edge.to);
+        nodeDegree.set(edge.from, (nodeDegree.get(edge.from) || 0) + 1);
+        nodeDegree.set(edge.to, (nodeDegree.get(edge.to) || 0) + 1);
+    });
+
+    const topHub = [...nodeDegree.entries()].sort((a, b) => b[1] - a[1])[0] || null;
+    const highestProbabilityEdge = circularEdges[0] || null;
+    const largestEdge = [...circularEdges].sort((a, b) => b.amount - a.amount)[0] || null;
+
+    const fallbackTs = "Không rõ thời điểm";
+    const logs = [
+        {
+            timestamp: fallbackTs,
+            severity: circularEdges.length >= 3 ? "critical" : "high",
+            title: `Suy diễn từ dữ liệu cạnh đỏ (edges.is_circular): ${circularEdges.length} giao dịch`,
+            description: `Nguồn dữ liệu: trường edges.is_circular từ phản hồi đồ thị. Quan sát ${relatedCompanies.size} doanh nghiệp liên quan với tổng giá trị ${formatVndCompact(totalAmount)}.`,
+        },
+    ];
+
+    if (derivedCycles.length) {
+        logs.push({
+            timestamp: fallbackTs,
+            severity: derivedCycles.length >= 3 ? "high" : "medium",
+            title: `Phát hiện ${derivedCycles.length} chu trình có hướng từ tập cạnh đỏ`,
+            description: `Chu trình được suy ra trực tiếp từ quan hệ từ→đến trên các cạnh đã gắn cờ is_circular.`,
+        });
+    }
+
+    if (topHub && topHub[1] >= 2) {
+        logs.push({
+            timestamp: fallbackTs,
+            severity: topHub[1] >= 4 ? "high" : "medium",
+            title: `Đầu mối giao dịch tập trung tại ${topHub[0]}`,
+            description: `${topHub[0]} xuất hiện ${topHub[1]} lần trong tập cạnh đỏ quan sát được.`,
+        });
+    }
+
+    if (highestProbabilityEdge) {
+        logs.push({
+            timestamp: formatForensicTimestampOrUnknown(highestProbabilityEdge.dateRaw),
+            severity: deriveRiskLevelFromProbability(highestProbabilityEdge.circularProbability),
+            title: `Xác suất cao nhất ${Math.round(highestProbabilityEdge.circularProbability * 100)}% trên tuyến ${highestProbabilityEdge.from} → ${highestProbabilityEdge.to}`,
+            description: `Giá trị ghi nhận ${formatVndCompact(highestProbabilityEdge.amount)}${highestProbabilityEdge.invoiceNumber ? ` (HĐ ${highestProbabilityEdge.invoiceNumber})` : ""}.`,
+        });
+    }
+
+    if (largestEdge) {
+        logs.push({
+            timestamp: formatForensicTimestampOrUnknown(largestEdge.dateRaw),
+            severity: largestEdge.amount >= 1_000_000_000 ? "high" : "medium",
+            title: `Giá trị lớn nhất trong tập cạnh đỏ: ${formatVndCompact(largestEdge.amount)}`,
+            description: `Tuyến ${largestEdge.from} → ${largestEdge.to}${largestEdge.invoiceNumber ? ` (HĐ ${largestEdge.invoiceNumber})` : ""}; circular_probability ${Math.round(largestEdge.circularProbability * 100)}%.`,
+        });
+    }
+
+    return logs.slice(0, FORENSIC_FALLBACK_MAX_LOGS);
+}
+
+
+function buildFallbackEvidencePathsFromCircularEdges(data) {
+    const circularEdges = getCircularEdgeSignals(data);
+    if (!circularEdges.length) return [];
+
+    const cycles = detectDirectedCyclesFromCircularEdges(circularEdges);
+    const pairIndex = buildCircularEdgePairIndex(circularEdges);
+
+    const cyclePaths = cycles
+        .map((cycleNodes, index) => {
+            let totalAmount = 0;
+            let totalProbability = 0;
+            let hasMissingHop = false;
+
+            const hops = cycleNodes
+                .map((fromNode, hopIdx) => {
+                    const toNode = cycleNodes[(hopIdx + 1) % cycleNodes.length];
+                    const bestHop = (pairIndex.get(`${fromNode}|${toNode}`) || [])[0];
+                    if (!bestHop) {
+                        hasMissingHop = true;
+                        return null;
+                    }
+                    totalAmount += bestHop.amount;
+                    totalProbability += bestHop.circularProbability;
+
+                    return {
+                        from: bestHop.from,
+                        to: bestHop.to,
+                        amount_formatted: formatVndCompact(bestHop.amount),
+                        date: bestHop.dateRaw || "Không có",
+                        fraud_probability: bestHop.circularProbability,
+                    };
+                })
+                .filter(Boolean)
+                .slice(0, FORENSIC_FALLBACK_MAX_HOPS);
+
+            if (hasMissingHop || !hops.length) return null;
+
+            const avgProbability = hops.length ? totalProbability / hops.length : 0;
+            return {
+                path_id: `CIRC-CYCLE-${index + 1}`,
+                summary: `Chu trình suy diễn từ edges.is_circular gồm ${cycleNodes.length} mắt xích, tổng giá trị xấp xỉ ${formatVndCompact(totalAmount)}, xác suất trung bình ${(avgProbability * 100).toFixed(0)}%.`,
+                risk_level: deriveRiskLevelFromProbability(avgProbability),
+                companies: cycleNodes,
+                hops,
+            };
+        })
+        .filter(Boolean)
+        .sort((a, b) => {
+            const aProb = toFiniteNumber(a?.hops?.[0]?.fraud_probability, 0);
+            const bProb = toFiniteNumber(b?.hops?.[0]?.fraud_probability, 0);
+            return bProb - aProb;
+        });
+
+    if (cyclePaths.length) {
+        return cyclePaths.slice(0, FORENSIC_FALLBACK_MAX_PATHS);
+    }
+
+    return circularEdges.slice(0, FORENSIC_FALLBACK_MAX_PATHS).map((edge, index) => ({
+        path_id: `CIRC-EDGE-${index + 1}`,
+        summary: `Tuyến nghi vấn trực tiếp từ edges.is_circular: ${edge.from} → ${edge.to}, giá trị ${formatVndCompact(edge.amount)}, xác suất ${Math.round(edge.circularProbability * 100)}%.`,
+        risk_level: deriveRiskLevelFromProbability(edge.circularProbability),
+        companies: [edge.from, edge.to],
+        hops: [
+            {
+                from: edge.from,
+                to: edge.to,
+                amount_formatted: formatVndCompact(edge.amount),
+                date: edge.dateRaw || "Không có",
+                fraud_probability: edge.circularProbability,
+            },
+        ],
+    }));
+}
+
+
 function renderForensicIntelSummary(forensicIntel) {
     const strip = document.getElementById("forensic-intel-strip");
     if (!strip) return;
 
+    const diagnostics = forensicIntel && typeof forensicIntel.diagnostics === "object"
+        ? forensicIntel.diagnostics
+        : {};
     const ringPayload = forensicIntel && typeof forensicIntel.ring === "object" ? forensicIntel.ring : null;
     const ownershipPayload = forensicIntel && typeof forensicIntel.ownership === "object" ? forensicIntel.ownership : null;
     const ownershipSummary = ownershipPayload && typeof ownershipPayload.summary === "object" ? ownershipPayload.summary : {};
+    const ringStatus = normalizeForensicDataStatus(
+        diagnostics.ring_status || ringPayload?.data_status,
+        ringPayload ? "ok" : "unavailable",
+    );
+    const ownershipStatus = normalizeForensicDataStatus(
+        diagnostics.ownership_status || ownershipPayload?.data_status,
+        ownershipPayload ? "ok" : "unavailable",
+    );
+    const ringUnavailable = isForensicDataUnavailable(ringStatus);
+    const ownershipUnavailable = isForensicDataUnavailable(ownershipStatus);
 
     const ringTotal = toFiniteNumber(ringPayload?.total, 0);
     const ringCritical = toFiniteNumber(ringPayload?.critical_count, 0);
+    const ringCyclesDetected = toFiniteNumber(ringPayload?.cycles_detected, ringTotal);
+    const ringCoveragePct = Math.max(0, Math.min(100, toFiniteNumber(ringPayload?.circular_edge_cycle_coverage, 0) * 100));
     const ownershipClusters = toFiniteNumber(ownershipSummary.total_clusters, 0);
     const crossTrades = toFiniteNumber(ownershipSummary.total_cross_trades, 0);
     const commonControllers = toFiniteNumber(ownershipSummary.total_common_controllers, 0);
+    const ownershipCoverage = toFiniteNumber(ownershipPayload?.coverage?.ownership_invoice_node_coverage, -1);
 
-    const hasAnySignal = ringTotal > 0 || ringCritical > 0 || ownershipClusters > 0 || crossTrades > 0 || commonControllers > 0;
+    const hasDataIssue = ringStatus !== "ok" || ownershipStatus !== "ok";
+    const hasAnySignal = ringTotal > 0 || ringCritical > 0 || ringCyclesDetected > 0 || ownershipClusters > 0 || crossTrades > 0 || commonControllers > 0 || hasDataIssue;
     if (!hasAnySignal) {
         strip.classList.add("hidden");
         return;
     }
 
     strip.classList.remove("hidden");
-    setElementText("forensic-ring-total", String(ringTotal));
-    setElementText("forensic-ring-critical", String(ringCritical));
-    setElementText("forensic-ownership-clusters", String(ownershipClusters));
-    setElementText("forensic-cross-trades", String(crossTrades));
+    setElementText("forensic-ring-total", ringUnavailable ? "--" : String(ringTotal));
+    setElementText("forensic-ring-critical", ringUnavailable ? "--" : String(ringCritical));
+    setElementText("forensic-ownership-clusters", ownershipUnavailable ? "--" : String(ownershipClusters));
+    setElementText("forensic-cross-trades", ownershipUnavailable ? "--" : String(crossTrades));
 
     const updatedEl = document.getElementById("forensic-intel-updated");
     if (updatedEl) {
         const ts = formatShortTimestamp(forensicIntel?.fetched_at);
-        updatedEl.textContent = `Nguồn sở hữu/vòng đã đồng bộ${ts !== "--" ? ` lúc ${ts}` : ""} · Bộ điều phối: ${commonControllers}`;
+        const cycleScopeText = ringCyclesDetected > ringTotal
+            ? ` · Vòng phát hiện: ${ringCyclesDetected}, vòng chấm điểm: ${ringTotal}`
+            : "";
+        const coverageText = ringCoveragePct > 0
+            ? ` · Bao phủ cạnh-vòng: ${ringCoveragePct.toFixed(0)}%`
+            : "";
+        const ownershipCoverageText = ownershipCoverage >= 0
+            ? ` · Phủ sở hữu-hóa đơn: ${(ownershipCoverage * 100).toFixed(0)}%`
+            : "";
+        const statusText = hasDataIssue
+            ? ` · Trạng thái dữ liệu: vòng ${formatForensicDataStatus(ringStatus)}, sở hữu ${formatForensicDataStatus(ownershipStatus)}`
+            : "";
+        updatedEl.textContent = `Nguồn sở hữu/vòng đã đồng bộ${ts !== "--" ? ` lúc ${ts}` : ""} · Bộ điều phối: ${commonControllers}${cycleScopeText}${coverageText}${ownershipCoverageText}${statusText}`;
     }
 }
 
@@ -1382,7 +2040,7 @@ function buildIntegratedForensicLogs(data, forensicIntel) {
     const baseLogs = baseLogsRaw
         .filter((item) => item && typeof item === "object")
         .map((log) => ({
-            timestamp: String(log.timestamp || formatForensicTimestamp()),
+            timestamp: String(log.timestamp || "Không rõ thời điểm"),
             severity: String(log.severity || "low").toLowerCase(),
             title: String(log.title || "Cập nhật điều tra"),
             description: String(log.description || "Không có mô tả bổ sung."),
@@ -1391,18 +2049,57 @@ function buildIntegratedForensicLogs(data, forensicIntel) {
     const ringPayload = forensicIntel && typeof forensicIntel.ring === "object" ? forensicIntel.ring : null;
     const ownershipPayload = forensicIntel && typeof forensicIntel.ownership === "object" ? forensicIntel.ownership : null;
     const ownershipSummary = ownershipPayload && typeof ownershipPayload.summary === "object" ? ownershipPayload.summary : {};
+    const diagnostics = forensicIntel && typeof forensicIntel.diagnostics === "object"
+        ? forensicIntel.diagnostics
+        : {};
+    const ringStatus = normalizeForensicDataStatus(
+        diagnostics.ring_status || ringPayload?.data_status,
+        ringPayload ? "ok" : "unavailable",
+    );
+    const ownershipStatus = normalizeForensicDataStatus(
+        diagnostics.ownership_status || ownershipPayload?.data_status,
+        ownershipPayload ? "ok" : "unavailable",
+    );
 
     const integratedLogs = [];
-    const nowTs = formatForensicTimestamp(forensicIntel?.fetched_at);
+    const nowTs = formatForensicTimestampOrUnknown(forensicIntel?.fetched_at);
+
+    if (ringStatus !== "ok") {
+        integratedLogs.push({
+            timestamp: nowTs,
+            severity: isForensicDataUnavailable(ringStatus) ? "high" : "medium",
+            title: `Trạng thái dữ liệu vòng: ${formatForensicDataStatus(ringStatus)}`,
+            description: "Chỉ số vòng có thể chưa phản ánh đầy đủ toàn bộ cạnh nghi vấn trong phạm vi truy vấn hiện tại.",
+        });
+    }
+
+    if (ownershipStatus !== "ok") {
+        integratedLogs.push({
+            timestamp: nowTs,
+            severity: isForensicDataUnavailable(ownershipStatus) ? "high" : "medium",
+            title: `Trạng thái dữ liệu sở hữu: ${formatForensicDataStatus(ownershipStatus)}`,
+            description: "Kết quả sở hữu/cross-trade có thể bị ảnh hưởng bởi phạm vi node-hóa đơn hoặc dữ liệu nguồn chưa sẵn sàng.",
+        });
+    }
 
     const ringTotal = toFiniteNumber(ringPayload?.total, 0);
     const ringCritical = toFiniteNumber(ringPayload?.critical_count, 0);
+    const ringCyclesDetected = toFiniteNumber(ringPayload?.cycles_detected, ringTotal);
     if (ringTotal > 0) {
         integratedLogs.push({
             timestamp: nowTs,
             severity: ringCritical > 0 ? "high" : "medium",
             title: `Phát hiện ${ringTotal} vòng giao dịch nghi vấn`,
-            description: `Hệ thống Ring Scoring ghi nhận ${ringCritical} vòng mức critical; đề nghị ưu tiên đối chiếu các chuỗi có ring score cao.`,
+            description: `Hệ thống Ring Scoring ghi nhận ${ringCritical} vòng mức critical${ringCyclesDetected > ringTotal ? `; tổng số vòng phát hiện là ${ringCyclesDetected}` : ""}.`,
+        });
+    }
+
+    if (ringCyclesDetected > ringTotal) {
+        integratedLogs.push({
+            timestamp: nowTs,
+            severity: "medium",
+            title: `Vòng phát hiện nhiều hơn vòng đã chấm điểm (${ringTotal}/${ringCyclesDetected})`,
+            description: "Ngưỡng hiển thị hiện tại chỉ trả về một phần vòng để tránh quá tải giao diện.",
         });
     }
 
@@ -1418,6 +2115,11 @@ function buildIntegratedForensicLogs(data, forensicIntel) {
 
     const ownershipClusters = toFiniteNumber(ownershipSummary.total_clusters, 0);
     const commonControllers = toFiniteNumber(ownershipSummary.total_common_controllers, 0);
+    const ownershipCoverage = toFiniteNumber(ownershipPayload?.coverage?.ownership_invoice_node_coverage, -1);
+    const ownershipNodesInInvoiceScope = toFiniteNumber(
+        ownershipPayload?.coverage?.ownership_nodes_in_invoice_graph_count,
+        0,
+    );
     if (ownershipClusters > 0 || commonControllers > 0) {
         integratedLogs.push({
             timestamp: nowTs,
@@ -1427,11 +2129,46 @@ function buildIntegratedForensicLogs(data, forensicIntel) {
         });
     }
 
+    if (ownershipClusters > 0 && crossTrades === 0 && ownershipCoverage >= 0) {
+        integratedLogs.push({
+            timestamp: nowTs,
+            severity: ownershipCoverage < 0.4 ? "high" : "medium",
+            title: `Cụm sở hữu có tín hiệu nhưng chưa ghi nhận giao dịch liên đới`,
+            description: `Độ phủ node sở hữu trong phạm vi hóa đơn hiện tại là ${(ownershipCoverage * 100).toFixed(0)}% (${ownershipNodesInInvoiceScope} node trùng phạm vi).`,
+        });
+    }
+
     const mergedLogs = [...integratedLogs, ...baseLogs]
         .filter((log) => log.title && log.description)
-        .slice(0, 30);
+        .slice(0, FORENSIC_MERGED_LOG_LIMIT);
 
-    return mergedLogs;
+    if (mergedLogs.length) {
+        return mergedLogs;
+    }
+
+    return buildFallbackForensicLogsFromCircularEdges(data);
+}
+
+
+function dedupeEvidencePaths(paths) {
+    const seen = new Set();
+    const deduped = [];
+
+    paths.forEach((path) => {
+        if (!path || typeof path !== "object") return;
+        const companies = Array.isArray(path.companies)
+            ? path.companies.map((item) => String(item || "")).join("|")
+            : "";
+        const hops = Array.isArray(path.hops)
+            ? path.hops.map((hop) => `${hop?.from || ""}->${hop?.to || ""}`).join("|")
+            : "";
+        const key = `${companies}::${hops}`;
+        if (seen.has(key)) return;
+        seen.add(key);
+        deduped.push(path);
+    });
+
+    return deduped;
 }
 
 
@@ -1441,7 +2178,7 @@ function buildIntegratedEvidencePaths(data, forensicIntel) {
 
     const ringPayload = forensicIntel && typeof forensicIntel.ring === "object" ? forensicIntel.ring : null;
     const ringList = Array.isArray(ringPayload?.rings) ? ringPayload.rings : [];
-    ringList.slice(0, 6).forEach((ring, index) => {
+    ringList.slice(0, FORENSIC_RING_PATH_LIMIT).forEach((ring, index) => {
         const nodes = Array.isArray(ring?.nodes) ? ring.nodes.map((n) => String(n || "")).filter(Boolean) : [];
         if (nodes.length < 2) return;
 
@@ -1474,7 +2211,7 @@ function buildIntegratedEvidencePaths(data, forensicIntel) {
     const crossTrades = Array.isArray(ownershipPayload?.cross_ownership_trades)
         ? ownershipPayload.cross_ownership_trades
         : [];
-    crossTrades.slice(0, 6).forEach((trade, index) => {
+    crossTrades.slice(0, FORENSIC_OWNERSHIP_PATH_LIMIT).forEach((trade, index) => {
         const parent = String(trade?.parent || "").trim();
         const child = String(trade?.child || "").trim();
         if (!parent || !child) return;
@@ -1500,7 +2237,14 @@ function buildIntegratedEvidencePaths(data, forensicIntel) {
         });
     });
 
-    return [...integratedPaths, ...basePaths];
+    const mergedPaths = dedupeEvidencePaths([
+        ...integratedPaths,
+        ...basePaths,
+    ]).slice(0, FORENSIC_FALLBACK_MAX_PATHS);
+    if (mergedPaths.length) {
+        return mergedPaths;
+    }
+    return buildFallbackEvidencePathsFromCircularEdges(data);
 }
 
 
@@ -1589,7 +2333,8 @@ function renderForensicPanel(data, forensicIntel = null) {
                     <p class="text-xs text-slate-400 italic">Không phát hiện chuỗi quay vòng tuần hoàn.</p>
                 </div>`;
         } else {
-            pathBadge.textContent = String(evidencePaths.length);
+            const ringTruncated = Boolean(forensicIntel?.ring?.truncated);
+            pathBadge.textContent = ringTruncated ? `${evidencePaths.length}+` : String(evidencePaths.length);
             pathBadge.classList.remove("hidden");
             const pathHTML = evidencePaths.map((p, pIdx) => {
                 const riskColors = {
@@ -1702,7 +2447,10 @@ function highlightNode(nodeId, edges) {
     setTimeout(() => {
         svg.selectAll(".node").transition().duration(500).attr("opacity", 1);
         svg.selectAll(".edge").transition().duration(500).attr("opacity", 1);
-        setTimeout(() => applyTimelineFilter(timelineMonth, { refreshBadge: true }), 520);
+        setTimeout(() => {
+            applyTimelineFilter(timelineMonth, { refreshBadge: true });
+            applyLegendVisibility();
+        }, 520);
     }, 3000);
 }
 
@@ -1851,6 +2599,9 @@ function applyTimelineFilter(month, options = {}) {
 
     let visibleEdgeCount = 0;
     lines.style("opacity", (d) => {
+        if (!isLegendVisible(getEdgeLegendCategory(d))) {
+            return 0.02;
+        }
         const edgeMonth = Number(d.timeline_month);
         const isVisible = !Number.isFinite(edgeMonth) || edgeMonth <= m;
         if (isVisible) {
@@ -1862,6 +2613,9 @@ function applyTimelineFilter(month, options = {}) {
 
     if (edgeLabels) {
         edgeLabels.style("opacity", (d) => {
+            if (!isLegendVisible(getEdgeLegendCategory(d))) {
+                return 0.03;
+            }
             const edgeMonth = Number(d.timeline_month);
             const isVisible = !Number.isFinite(edgeMonth) || edgeMonth <= m;
             return isVisible ? 1 : 0.05;

@@ -88,7 +88,7 @@ def test_build_whatif_heatmap_values_generates_matrix_ordered_by_expense_then_re
 
 def test_what_if_grid_returns_backend_matrix(monkeypatch):
     class _CachedAssessment:
-        tax_code = "01010001"
+        tax_code = "0101000001"
         company_name = "Cong ty A"
         industry = "Thuong mai"
         year = 2024
@@ -115,7 +115,7 @@ def test_what_if_grid_returns_backend_matrix(monkeypatch):
         "expense_steps": [10, 0, -10],
     }
 
-    result = ai_analysis.what_if_grid("01010001", payload=payload, db=object())
+    result = ai_analysis.what_if_grid("0101000001", payload=payload, db=object())
 
     assert result["source"] == "what_if_backend"
     assert result["grid_size"]["rows"] == 3

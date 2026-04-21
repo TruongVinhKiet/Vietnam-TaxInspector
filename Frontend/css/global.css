@@ -69,7 +69,7 @@ html {
 
 body.page-transition,
 .page-transition {
-    animation: fadeSlideUp var(--motion-duration-page) var(--motion-ease-emphasis) forwards;
+    animation: fadeSlideUp var(--motion-duration-page) var(--motion-ease-emphasis) both;
 }
 
 @keyframes fadeSlideUp {

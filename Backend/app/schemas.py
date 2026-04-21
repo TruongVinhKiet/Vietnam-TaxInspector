@@ -1,10 +1,17 @@
 from pydantic import BaseModel as PydanticBaseModel, ConfigDict, Field
-from typing import Optional, List, Literal, Dict, Any
+from typing import Annotated, Optional, List, Literal, Dict, Any
 from datetime import date, datetime
 
 
 class BaseModel(PydanticBaseModel):
     model_config = ConfigDict(protected_namespaces=())
+
+
+TAX_CODE_10_PATTERN = r"^[0-9]{10}$"
+NumericTaxCode = Annotated[
+    str,
+    Field(min_length=10, max_length=10, pattern=TAX_CODE_10_PATTERN),
+]
 
 
 # --- Auth/Token Schemas ---
@@ -103,7 +110,7 @@ class UpdateAvatarRequest(BaseModel):
 
 # --- Company Schemas ---
 class CompanyBase(BaseModel):
-    tax_code: str
+    tax_code: NumericTaxCode
     name: str
     industry: Optional[str] = None
     registration_date: Optional[date] = None
@@ -122,7 +129,7 @@ class CompanyResponse(CompanyBase):
 
 # --- ML Prediction Schemas ---
 class FraudRiskPrediction(BaseModel):
-    tax_code: str
+    tax_code: NumericTaxCode
     risk_score: float
     red_flags: List[str]
 
@@ -146,7 +153,7 @@ class GraphResponse(BaseModel):
 
 
 class DelinquencyPrediction(BaseModel):
-    tax_code: str
+    tax_code: NumericTaxCode
     company_name: str
     probability: float
     cluster: str
@@ -345,7 +352,7 @@ class AuditValuePayload(BaseModel):
 
 
 class RiskAssessmentDetail(BaseModel):
-    tax_code: str
+    tax_code: NumericTaxCode
     company_name: Optional[str] = None
     industry: Optional[str] = None
     year: Optional[int] = None
@@ -381,7 +388,7 @@ class RiskAssessmentDetail(BaseModel):
 
 
 class RiskCompanyListItem(BaseModel):
-    tax_code: str
+    tax_code: NumericTaxCode
     name: str
     industry: Optional[str] = None
     is_active: bool = True
@@ -554,7 +561,7 @@ class DelinquencyInterventionUplift(BaseModel):
 
 class DelinquencyPredictionItem(BaseModel):
     """Single company delinquency prediction – replaces old mock DelinquencyPrediction."""
-    tax_code: str
+    tax_code: NumericTaxCode
     company_name: str = ""
     probability: float = 0.0        # Overall delinquency probability (backward-compat)
     prob_30d: float = 0.0           # P(overdue within 30 days)
@@ -583,13 +590,13 @@ class DelinquencyListResponse(BaseModel):
 
 
 class DelinquencyBatchPredictRequest(BaseModel):
-    tax_codes: Optional[List[str]] = None
+    tax_codes: Optional[List[NumericTaxCode]] = None
     limit: int = Field(default=200, ge=1, le=2000)
     refresh_existing: bool = False
 
 
 class DelinquencyBatchPredictItem(BaseModel):
-    tax_code: str
+    tax_code: NumericTaxCode
     status: Literal["created", "updated", "skipped", "failed"]
     score_source: Literal["ml_model", "statistical_baseline", "no_data", "inference_error"]
     prob_90d: Optional[float] = None
@@ -610,7 +617,7 @@ class DelinquencyBatchPredictResponse(BaseModel):
 # --- Enhanced Fraud Risk Scoring (replaces mock) ---
 class FraudRiskPredictionEnhanced(BaseModel):
     """Enhanced single-company scoring – backward compatible with old FraudRiskPrediction."""
-    tax_code: str
+    tax_code: NumericTaxCode
     company_name: str = ""
     risk_score: float = 0.0
     risk_level: str = "low"
@@ -627,7 +634,7 @@ class FraudRiskPredictionEnhanced(BaseModel):
 
 # --- Inspector Labels (ground-truth feedback) ---
 class InspectorLabelCreate(BaseModel):
-    tax_code: str
+    tax_code: NumericTaxCode
     label_type: str = Field(..., description="fraud_confirmed, fraud_rejected, delinquency_confirmed, etc.")
     confidence: Literal["low", "medium", "high"] = "medium"
     label_origin: Optional[Literal[
@@ -672,7 +679,7 @@ class InspectorLabelCreate(BaseModel):
 class InspectorLabelResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True, protected_namespaces=())
     id: int
-    tax_code: str
+    tax_code: NumericTaxCode
     inspector_id: Optional[int] = None
     assessment_id: Optional[int] = None
     label_type: str
@@ -730,7 +737,7 @@ class MultiScenarioRequest(BaseModel):
     scenarios: List[ScenarioDefinition] = Field(..., min_length=1, max_length=10)
 
 class MultiScenarioResponse(BaseModel):
-    tax_code: str
+    tax_code: NumericTaxCode
     company_name: str = ""
     baseline_risk_score: float = 0.0
     baseline_risk_level: str = "low"
@@ -743,8 +750,8 @@ class MultiScenarioResponse(BaseModel):
 class OwnershipLinkItem(BaseModel):
     model_config = ConfigDict(from_attributes=True, protected_namespaces=())
     id: int
-    parent_tax_code: str
-    child_tax_code: str
+    parent_tax_code: NumericTaxCode
+    child_tax_code: NumericTaxCode
     ownership_percent: float = 0.0
     relationship_type: str = "shareholder"
     person_name: Optional[str] = None

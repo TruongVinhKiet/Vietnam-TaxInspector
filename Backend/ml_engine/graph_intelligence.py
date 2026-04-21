@@ -12,6 +12,7 @@ integrates with existing GATv2-based GNN for scoring.
 """
 
 import math
+import os
 import numpy as np
 import networkx as nx
 from datetime import date, timedelta
@@ -448,6 +449,8 @@ class RingScorer:
         if not cycles:
             return []
 
+        max_rings_output = max(1, min(500, int(os.getenv("RING_SCORING_MAX_OUTPUT", "150"))))
+
         # Build edge lookup
         edge_amounts = {}
         edge_dates = {}
@@ -461,7 +464,7 @@ class RingScorer:
                 edge_dates.setdefault(key, []).append(str(d))
 
         scored_rings = []
-        for cycle in cycles[:30]:
+        for cycle in cycles[:max_rings_output]:
             ring_amount = 0
             time_span_days = None
             edge_count = len(cycle)

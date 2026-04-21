@@ -273,3 +273,147 @@ def test_graph_link_prediction_returns_non_empty_for_open_chain(client, monkeypa
     assert top["prediction_score"] > 0
     assert "jaccard" in top
     assert "adamic_adar" in top
+
+
+class _OwnershipResult:
+    def __init__(self, rows, keys):
+        self._rows = rows
+        self._keys = keys
+
+    def keys(self):
+        return self._keys
+
+    def fetchall(self):
+        return self._rows
+
+
+def test_ring_scoring_reports_cycle_gap_data_status(client, monkeypatch):
+    companies = [
+        {"tax_code": "0101000001", "name": "Cong ty A"},
+        {"tax_code": "0202000002", "name": "Cong ty B"},
+    ]
+    invoices = [
+        {
+            "seller_tax_code": "0101000001",
+            "buyer_tax_code": "0202000002",
+            "amount": 1500000,
+            "vat_rate": 10.0,
+            "date": "2026-02-01",
+            "invoice_number": "INV-100",
+        }
+    ]
+
+    class _FakeEngine:
+        def predict(self, _companies, _invoices):
+            return {
+                "cycles": [],
+                "forensic_metrics": {
+                    "circular_edge_count": 4,
+                    "cycle_backed_circular_edge_count": 0,
+                    "circular_edge_cycle_coverage": 0.0,
+                },
+            }
+
+    monkeypatch.setattr(
+        graph,
+        "_extract_full_graph",
+        lambda db, limit=graph.FULL_GRAPH_COMPANY_LIMIT: (companies, invoices),
+    )
+    monkeypatch.setattr(graph, "_get_gnn_engine", lambda: _FakeEngine())
+
+    response = client.get("/api/graph/ring-scoring")
+    assert response.status_code == 200
+
+    payload = response.json()
+    assert payload["data_status"] == "no_cycles_with_circular_edges"
+    assert payload["diagnostics"]["cycle_detection_gap"] is True
+    assert payload["cycles_detected"] == 0
+    assert payload["circular_edge_count"] == 4
+    assert payload["query_scope"]["source"] == "graph_ring_scoring"
+    assert payload["snapshot_id"].startswith("snap-")
+
+
+def test_ownership_reports_scope_gap_status(client, monkeypatch):
+    ownership_rows = [
+        (
+            1,
+            "1111111111",
+            "2222222222",
+            75.0,
+            "shareholder",
+            None,
+            None,
+            None,
+            None,
+            True,
+        )
+    ]
+    ownership_keys = [
+        "id",
+        "parent_tax_code",
+        "child_tax_code",
+        "ownership_percent",
+        "relationship_type",
+        "person_name",
+        "person_id",
+        "effective_date",
+        "end_date",
+        "verified",
+    ]
+
+    companies = [
+        {"tax_code": "1111111111", "name": "Cong ty A"},
+        {"tax_code": "9999999999", "name": "Cong ty B"},
+    ]
+    invoices = [
+        {
+            "seller_tax_code": "1111111111",
+            "buyer_tax_code": "9999999999",
+            "amount": 2200000,
+            "vat_rate": 10.0,
+            "date": "2026-03-01",
+            "invoice_number": "INV-200",
+        }
+    ]
+
+    class _FakeOwnershipAnalyzer:
+        def analyze(self, _ownership_links, _invoices):
+            return {
+                "summary": {
+                    "total_clusters": 2,
+                    "total_cross_trades": 0,
+                    "total_common_controllers": 1,
+                },
+                "clusters": [{"cluster_id": "cluster-1"}],
+                "cross_ownership_trades": [],
+            }
+
+    monkeypatch.setattr(
+        _DummyDB,
+        "execute",
+        lambda self, statement, params=None: _OwnershipResult(ownership_rows, ownership_keys),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        graph,
+        "_extract_subgraph",
+        lambda db, center_tax_code, depth: (companies, invoices),
+    )
+
+    import ml_engine.graph_intelligence as graph_intelligence
+
+    monkeypatch.setattr(
+        graph_intelligence,
+        "OwnershipGraphAnalyzer",
+        _FakeOwnershipAnalyzer,
+    )
+
+    response = client.get("/api/graph/ownership?tax_code=1234567890")
+    assert response.status_code == 200
+
+    payload = response.json()
+    assert payload["data_status"] == "no_parent_child_pairs_in_invoice_scope"
+    assert payload["coverage"]["ownership_nodes_in_invoice_graph_count"] == 1
+    assert payload["coverage"]["ownership_pairs_in_invoice_scope"] == 0
+    assert payload["query_scope"]["source"] == "graph_ownership"
+    assert payload["snapshot_id"].startswith("snap-")

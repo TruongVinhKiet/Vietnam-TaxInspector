@@ -11,6 +11,9 @@ from sqlalchemy.orm import Session
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 from typing import Optional, Any
+import hashlib
+import json
+import re
 
 from ..database import get_db
 from ..observability import get_structured_logger, log_event
@@ -18,9 +21,128 @@ from . import monitoring as monitoring_router
 
 router = APIRouter(prefix="/api", tags=["VAT Invoice Graph (GNN)"])
 logger = get_structured_logger("taxinspector.graph")
+TAX_CODE_PATTERN = re.compile(r"^\d{10}$")
 
 # Lazy-loaded GNN inference engine
 _gnn_engine = None
+
+SUBGRAPH_MAX_NODES = 150
+SUBGRAPH_INVOICE_LIMIT = 500
+FULL_GRAPH_COMPANY_LIMIT = 200
+OWNERSHIP_LINK_QUERY_LIMIT = 500
+
+
+def _ensure_numeric_tax_code(tax_code: Optional[str]) -> Optional[str]:
+    if tax_code is None:
+        return None
+    normalized = str(tax_code).strip()
+    if not TAX_CODE_PATTERN.fullmatch(normalized):
+        raise HTTPException(
+            status_code=422,
+            detail="tax_code phải gồm đúng 10 chữ số (ví dụ: 0101234567).",
+        )
+    return normalized
+
+
+def _table_exists(db: Session, table_name: str) -> bool:
+    try:
+        exists = db.execute(
+            text(
+                """
+                SELECT EXISTS (
+                    SELECT 1
+                    FROM information_schema.tables
+                    WHERE table_schema = 'public' AND table_name = :table_name
+                )
+                """
+            ),
+            {"table_name": table_name},
+        ).scalar()
+        return bool(exists)
+    except Exception:
+        db.rollback()
+        return False
+
+
+def _collect_seed_tax_codes_from_ownership(db: Session, tax_code: str, limit: int = 40) -> list[str]:
+    """
+    Return VAT-graph seed tax codes connected via ownership relations.
+
+    This bridges offshore centers to domestic entities so graph analysis does not
+    collapse to a single isolated offshore proxy node.
+    """
+    if limit <= 0:
+        return []
+
+    identifiers: list[str] = [tax_code]
+    if _table_exists(db, "offshore_entities"):
+        try:
+            rows = db.execute(
+                text(
+                    """
+                    SELECT entity_code, proxy_tax_code
+                    FROM offshore_entities
+                    WHERE proxy_tax_code = :tax_code OR entity_code = :tax_code
+                    LIMIT 20
+                    """
+                ),
+                {"tax_code": tax_code},
+            ).fetchall()
+            for row in rows:
+                for raw in row:
+                    value = str(raw or "").strip()
+                    if value and value not in identifiers:
+                        identifiers.append(value)
+        except Exception:
+            db.rollback()
+
+    results: list[str] = []
+    seen: set[str] = set()
+    per_identifier_limit = max(1, min(20, int(limit)))
+
+    for identifier in identifiers:
+        try:
+            outward_rows = db.execute(
+                text(
+                    """
+                    SELECT DISTINCT child_tax_code
+                    FROM ownership_links
+                    WHERE parent_tax_code = :identifier
+                      AND child_tax_code ~ '^\\d{10}$'
+                    LIMIT :limit
+                    """
+                ),
+                {"identifier": identifier, "limit": per_identifier_limit},
+            ).fetchall()
+            inward_rows = db.execute(
+                text(
+                    """
+                    SELECT DISTINCT parent_tax_code
+                    FROM ownership_links
+                    WHERE child_tax_code = :identifier
+                      AND parent_tax_code ~ '^\\d{10}$'
+                    LIMIT :limit
+                    """
+                ),
+                {"identifier": identifier, "limit": per_identifier_limit},
+            ).fetchall()
+        except Exception:
+            db.rollback()
+            continue
+
+        for row in [*outward_rows, *inward_rows]:
+            code = str(row[0] or "").strip() if row else ""
+            if not TAX_CODE_PATTERN.fullmatch(code):
+                continue
+            if code == tax_code or code in seen:
+                continue
+
+            seen.add(code)
+            results.append(code)
+            if len(results) >= limit:
+                return results
+
+    return results
 
 
 def _get_gnn_engine():
@@ -92,6 +214,75 @@ def _sanitize_policy(policy: Any) -> dict:
         "cold_start_degree_threshold": int(_to_float(policy.get("cold_start_degree_threshold", 0), 0)),
         "cold_start_threshold_delta": round(_to_float(policy.get("cold_start_threshold_delta", 0.0), 0.0), 4),
         "node_blend_alpha_gnn": round(_to_float(policy.get("node_blend_alpha_gnn", 0.0), 0.0), 4),
+    }
+
+
+def _build_snapshot_id(
+    tax_code: Optional[str],
+    depth: Optional[int],
+    companies: list[dict],
+    invoices: list[dict],
+    source: str,
+) -> str:
+    company_codes = sorted(
+        {
+            str(company.get("tax_code", "")).strip()
+            for company in companies
+            if isinstance(company, dict) and str(company.get("tax_code", "")).strip()
+        }
+    )
+    edge_keys = sorted(
+        {
+            (
+                f"{str(inv.get('seller_tax_code', inv.get('from', ''))).strip()}"
+                f"->{str(inv.get('buyer_tax_code', inv.get('to', ''))).strip()}"
+                f"|{str(inv.get('invoice_number', '')).strip()}"
+            )
+            for inv in invoices
+            if isinstance(inv, dict)
+        }
+    )
+
+    seed_payload = {
+        "source": str(source),
+        "tax_code": str(tax_code) if tax_code else "__all__",
+        "depth": int(depth) if depth is not None else None,
+        "company_count": len(companies),
+        "invoice_count": len(invoices),
+        "company_sample": company_codes[:40],
+        "edge_sample": edge_keys[:80],
+    }
+    digest = hashlib.sha1(
+        json.dumps(seed_payload, ensure_ascii=True, sort_keys=True).encode("utf-8")
+    ).hexdigest()[:12]
+    return f"snap-{digest}"
+
+
+def _build_query_scope(
+    tax_code: Optional[str],
+    depth: Optional[int],
+    companies: list[dict],
+    invoices: list[dict],
+    source: str,
+    ownership_links_limit: Optional[int] = None,
+) -> dict[str, Any]:
+    focused_mode = tax_code is not None
+    company_limit = SUBGRAPH_MAX_NODES if focused_mode else FULL_GRAPH_COMPANY_LIMIT
+    invoice_limit = SUBGRAPH_INVOICE_LIMIT if focused_mode else None
+    invoice_rows = len(invoices)
+
+    return {
+        "source": source,
+        "tax_code": tax_code,
+        "depth": int(depth) if depth is not None else None,
+        "graph_mode": "focused_subgraph" if focused_mode else "full_graph",
+        "company_row_limit": int(company_limit),
+        "company_rows_returned": len(companies),
+        "company_row_limit_hit": bool(len(companies) >= company_limit),
+        "invoice_row_limit": int(invoice_limit) if invoice_limit is not None else None,
+        "invoice_rows_returned": invoice_rows,
+        "invoice_row_limit_hit": bool(invoice_limit is not None and invoice_rows >= invoice_limit),
+        "ownership_links_limit": int(ownership_links_limit) if ownership_links_limit is not None else None,
     }
 
 
@@ -216,11 +407,13 @@ def get_vat_invoice_graph(
     - Nếu tax_code được cung cấp: trích xuất subgraph xung quanh công ty đó
     - Nếu không: trả về toàn bộ mạng lưới (giới hạn 200 nodes)
     """
+    tax_code = _ensure_numeric_tax_code(tax_code)
+
     try:
         if tax_code:
             companies, invoices = _extract_subgraph(db, tax_code, depth)
         else:
-            companies, invoices = _extract_full_graph(db, limit=200)
+            companies, invoices = _extract_full_graph(db, limit=FULL_GRAPH_COMPANY_LIMIT)
     except SQLAlchemyError as e:
         log_event(
             logger,
@@ -244,6 +437,21 @@ def get_vat_invoice_graph(
 
     if not companies:
         raise HTTPException(status_code=404, detail="Không tìm thấy dữ liệu cho mã số thuế này.")
+
+    query_scope = _build_query_scope(
+        tax_code=tax_code,
+        depth=depth,
+        companies=companies,
+        invoices=invoices,
+        source="graph_main",
+    )
+    snapshot_id = _build_snapshot_id(
+        tax_code=tax_code,
+        depth=depth,
+        companies=companies,
+        invoices=invoices,
+        source="graph_main",
+    )
 
     # Run GNN inference
     try:
@@ -295,6 +503,9 @@ def get_vat_invoice_graph(
             )
 
         result = _enrich_graph_result(result, engine=engine, tax_code=tax_code, depth=depth)
+        result["snapshot_id"] = snapshot_id
+        result["query_scope"] = query_scope
+        result["data_status"] = "ok" if invoices else "no_invoice_context"
         result["split_trigger_status"] = _build_split_trigger_status_context(
             snapshot_source="graph_main",
         )
@@ -391,7 +602,7 @@ def get_all_companies(db: Session = Depends(get_db)):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-def _extract_subgraph(db: Session, center_tax_code: str, depth: int, max_nodes: int = 150) -> tuple:
+def _extract_subgraph(db: Session, center_tax_code: str, depth: int, max_nodes: int = SUBGRAPH_MAX_NODES) -> tuple:
     """
     Extract a subgraph centered on a company, expanding outward by `depth` hops.
     Returns (companies, invoices) lists.
@@ -399,6 +610,20 @@ def _extract_subgraph(db: Session, center_tax_code: str, depth: int, max_nodes: 
     # BFS-expand from center
     visited_codes = {center_tax_code}
     frontier = {center_tax_code}
+
+    # Seed traversal with ownership-linked domestic entities for offshore centers.
+    ownership_seed_codes = _collect_seed_tax_codes_from_ownership(
+        db,
+        center_tax_code,
+        limit=max(0, max_nodes - 1),
+    )
+    for code in ownership_seed_codes:
+        if len(visited_codes) >= max_nodes:
+            break
+        if code in visited_codes:
+            continue
+        visited_codes.add(code)
+        frontier.add(code)
 
     for current_depth in range(depth):
         if not frontier or len(visited_codes) >= max_nodes:
@@ -445,7 +670,7 @@ def _extract_subgraph(db: Session, center_tax_code: str, depth: int, max_nodes: 
     if has_geom:
         comp_result = db.execute(text(f"""
             SELECT tax_code, name, industry, registration_date, risk_score, is_active,
-                   ST_Y(geom) as lat, ST_X(geom) as lng
+                   COALESCE(ST_Y(geom), 0) as lat, COALESCE(ST_X(geom), 0) as lng
             FROM companies
             WHERE tax_code IN ({placeholders})
         """), params)
@@ -469,7 +694,7 @@ def _extract_subgraph(db: Session, center_tax_code: str, depth: int, max_nodes: 
         WHERE seller_tax_code IN ({placeholders})
           AND buyer_tax_code IN ({placeholders})
         ORDER BY amount DESC
-        LIMIT 500
+        LIMIT {SUBGRAPH_INVOICE_LIMIT}
     """), params)
 
     inv_columns = [col for col in inv_result.keys()]
@@ -478,7 +703,7 @@ def _extract_subgraph(db: Session, center_tax_code: str, depth: int, max_nodes: 
     return companies, invoices
 
 
-def _extract_full_graph(db: Session, limit: int = 200) -> tuple:
+def _extract_full_graph(db: Session, limit: int = FULL_GRAPH_COMPANY_LIMIT) -> tuple:
     """Extract the full graph (limited to top N companies by risk & activity)."""
     has_geom = True
     try:
@@ -490,7 +715,7 @@ def _extract_full_graph(db: Session, limit: int = 200) -> tuple:
     if has_geom:
         comp_result = db.execute(text("""
             SELECT tax_code, name, industry, registration_date, risk_score, is_active,
-                   ST_Y(geom) as lat, ST_X(geom) as lng
+                   COALESCE(ST_Y(geom), 0) as lat, COALESCE(ST_X(geom), 0) as lng
             FROM companies
             ORDER BY risk_score DESC
             LIMIT :limit
@@ -543,6 +768,8 @@ def detect_graph_motifs(
     Detects: triangles (carousel fraud), stars (shell hubs), chains (layering),
     fan-out/fan-in patterns.
     """
+    tax_code = _ensure_numeric_tax_code(tax_code)
+
     try:
         if tax_code:
             companies, invoices = _extract_subgraph(db, tax_code, depth)
@@ -589,6 +816,8 @@ def predict_graph_links(
     Link Prediction: Predict likely future fraudulent connections between companies.
     Uses Jaccard coefficient + Adamic-Adar index + topology risk.
     """
+    tax_code = _ensure_numeric_tax_code(tax_code)
+
     try:
         if tax_code:
             companies, invoices = _extract_subgraph(db, tax_code, depth)
@@ -630,6 +859,9 @@ def analyze_ownership_network(
     Ownership Graph Analysis: Detect shell company networks through ownership relationships.
     Identifies common controllers, ownership chains, and cross-ownership trades.
     """
+    tax_code = _ensure_numeric_tax_code(tax_code)
+    ownership_depth = 2 if tax_code else None
+
     try:
         # Load ownership links
         if tax_code:
@@ -645,8 +877,8 @@ def analyze_ownership_network(
                    OR ol.child_tax_code IN (
                        SELECT parent_tax_code FROM ownership_links WHERE child_tax_code = :tc
                    )
-                LIMIT 500
-            """), {"tc": tax_code})
+                LIMIT :limit
+            """), {"tc": tax_code, "limit": OWNERSHIP_LINK_QUERY_LIMIT})
         else:
             ownership_result = db.execute(text("""
                 SELECT id, parent_tax_code, child_tax_code, ownership_percent,
@@ -654,31 +886,111 @@ def analyze_ownership_network(
                        effective_date, end_date, verified
                 FROM ownership_links
                 ORDER BY ownership_percent DESC
-                LIMIT 500
-            """))
+                LIMIT :limit
+            """), {"limit": OWNERSHIP_LINK_QUERY_LIMIT})
 
         ownership_cols = [col for col in ownership_result.keys()]
         ownership_links = [dict(zip(ownership_cols, row)) for row in ownership_result.fetchall()]
 
         # Load relevant invoices for cross-ownership trade detection
         if tax_code:
-            _, invoices = _extract_subgraph(db, tax_code, depth=2)
+            companies_for_scope, invoices = _extract_subgraph(db, tax_code, depth=2)
         else:
-            _, invoices = _extract_full_graph(db, limit=200)
+            companies_for_scope, invoices = _extract_full_graph(db, limit=FULL_GRAPH_COMPANY_LIMIT)
 
     except Exception as e:
         log_event(logger, "error", "graph_ownership_data_error", error=str(e))
         raise HTTPException(status_code=500, detail=f"Lỗi truy vấn dữ liệu sở hữu: {str(e)}")
+
+    ownership_nodes = set()
+    ownership_edges: list[tuple[str, str]] = []
+    for link in ownership_links:
+        if not isinstance(link, dict):
+            continue
+        parent = str(link.get("parent_tax_code", "")).strip()
+        child = str(link.get("child_tax_code", "")).strip()
+        if parent:
+            ownership_nodes.add(parent)
+        if child:
+            ownership_nodes.add(child)
+        if parent and child:
+            ownership_edges.append((parent, child))
+
+    invoice_nodes = set()
+    for inv in invoices:
+        if not isinstance(inv, dict):
+            continue
+        seller = str(inv.get("seller_tax_code", inv.get("from", ""))).strip()
+        buyer = str(inv.get("buyer_tax_code", inv.get("to", ""))).strip()
+        if seller:
+            invoice_nodes.add(seller)
+        if buyer:
+            invoice_nodes.add(buyer)
+
+    ownership_nodes_in_invoice_graph_count = len(ownership_nodes.intersection(invoice_nodes))
+    ownership_invoice_node_coverage = round(
+        float(ownership_nodes_in_invoice_graph_count) / float(max(1, len(ownership_nodes))),
+        4,
+    )
+    ownership_pairs_in_invoice_scope = sum(
+        1 for parent, child in ownership_edges if parent in invoice_nodes and child in invoice_nodes
+    )
+    query_scope = _build_query_scope(
+        tax_code=tax_code,
+        depth=ownership_depth,
+        companies=companies_for_scope,
+        invoices=invoices,
+        source="graph_ownership",
+        ownership_links_limit=OWNERSHIP_LINK_QUERY_LIMIT,
+    )
+    snapshot_id = _build_snapshot_id(
+        tax_code=tax_code,
+        depth=ownership_depth,
+        companies=companies_for_scope,
+        invoices=invoices,
+        source="graph_ownership",
+    )
 
     try:
         from ml_engine.graph_intelligence import OwnershipGraphAnalyzer
         analyzer = OwnershipGraphAnalyzer()
         result = analyzer.analyze(ownership_links, invoices)
 
+        summary = result.get("summary", {}) if isinstance(result, dict) else {}
+        total_clusters = int(summary.get("total_clusters", 0) or 0)
+        total_cross_trades = int(summary.get("total_cross_trades", 0) or 0)
+
+        if not ownership_links:
+            data_status = "no_ownership_links"
+        elif not invoice_nodes:
+            data_status = "no_invoice_context"
+        elif ownership_nodes_in_invoice_graph_count == 0:
+            data_status = "ownership_outside_invoice_scope"
+        elif total_clusters > 0 and total_cross_trades == 0 and ownership_pairs_in_invoice_scope == 0:
+            data_status = "no_parent_child_pairs_in_invoice_scope"
+        elif total_clusters > 0 and total_cross_trades == 0:
+            data_status = "no_related_party_trades_found"
+        else:
+            data_status = "ok"
+
+        result["data_status"] = data_status
+        result["snapshot_id"] = snapshot_id
+        result["query_scope"] = query_scope
+        result["coverage"] = {
+            "ownership_nodes": len(ownership_nodes),
+            "invoice_nodes": len(invoice_nodes),
+            "ownership_nodes_in_invoice_graph_count": ownership_nodes_in_invoice_graph_count,
+            "ownership_invoice_node_coverage": ownership_invoice_node_coverage,
+            "ownership_pairs": len(ownership_edges),
+            "ownership_pairs_in_invoice_scope": ownership_pairs_in_invoice_scope,
+        }
+
         log_event(
             logger, "info", "graph_ownership_analysis_complete",
-            clusters=result.get("summary", {}).get("total_clusters", 0),
-            cross_trades=result.get("summary", {}).get("total_cross_trades", 0),
+            clusters=total_clusters,
+            cross_trades=total_cross_trades,
+            data_status=data_status,
+            coverage=ownership_invoice_node_coverage,
         )
         return result
 
@@ -697,22 +1009,60 @@ def score_transaction_rings(
     Ring Scoring: Score circular transaction rings by severity.
     Multi-factor analysis: amount, speed, and complexity.
     """
+    tax_code = _ensure_numeric_tax_code(tax_code)
+
     try:
         if tax_code:
             companies, invoices = _extract_subgraph(db, tax_code, depth)
         else:
-            companies, invoices = _extract_full_graph(db, limit=200)
+            companies, invoices = _extract_full_graph(db, limit=FULL_GRAPH_COMPANY_LIMIT)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Lỗi truy vấn dữ liệu: {str(e)}")
 
+    query_scope = _build_query_scope(
+        tax_code=tax_code,
+        depth=depth,
+        companies=companies,
+        invoices=invoices,
+        source="graph_ring_scoring",
+    )
+    snapshot_id = _build_snapshot_id(
+        tax_code=tax_code,
+        depth=depth,
+        companies=companies,
+        invoices=invoices,
+        source="graph_ring_scoring",
+    )
+
     if not invoices:
-        return {"rings": [], "total": 0}
+        return {
+            "rings": [],
+            "total": 0,
+            "critical_count": 0,
+            "cycles_detected": 0,
+            "rings_returned": 0,
+            "truncated": False,
+            "circular_edge_count": 0,
+            "cycle_backed_circular_edge_count": 0,
+            "circular_edge_cycle_coverage": 0.0,
+            "snapshot_id": snapshot_id,
+            "query_scope": query_scope,
+            "data_status": "no_invoice_context",
+            "diagnostics": {
+                "cycle_detection_gap": False,
+                "cycle_to_ring_ratio": 0.0,
+            },
+            "query_context": {"tax_code": tax_code, "depth": depth},
+        }
 
     # Use existing GNN engine to get cycles
+    forensic_metrics = {}
     try:
         engine = _get_gnn_engine()
         result = engine.predict(companies, invoices)
         cycles = result.get("cycles", [])
+        if isinstance(result, dict) and isinstance(result.get("forensic_metrics"), dict):
+            forensic_metrics = result.get("forensic_metrics", {})
     except Exception:
         cycles = []
 
@@ -720,15 +1070,56 @@ def score_transaction_rings(
         from ml_engine.graph_intelligence import RingScorer
         scorer = RingScorer()
         scored_rings = scorer.score_rings(cycles, invoices)
+        total_cycles_detected = len(cycles)
+        total_rings_returned = len(scored_rings)
+        critical_count = sum(1 for r in scored_rings if r.get("risk_level") == "critical")
+        circular_edge_count = int(forensic_metrics.get("circular_edge_count", 0) or 0)
+        cycle_backed_circular_edge_count = int(
+            forensic_metrics.get("cycle_backed_circular_edge_count", 0) or 0
+        )
+        circular_edge_cycle_coverage = float(
+            forensic_metrics.get("circular_edge_cycle_coverage", 0.0) or 0.0
+        )
+
+        if total_cycles_detected == 0 and circular_edge_count > 0:
+            data_status = "no_cycles_with_circular_edges"
+        elif total_cycles_detected == 0:
+            data_status = "no_cycles_detected"
+        elif total_rings_returned == 0:
+            data_status = "cycles_detected_but_no_rings_scored"
+        elif total_cycles_detected > total_rings_returned:
+            data_status = "partial_ring_output"
+        else:
+            data_status = "ok"
+
+        cycle_to_ring_ratio = round(
+            float(total_rings_returned) / float(max(1, total_cycles_detected)),
+            4,
+        )
 
         log_event(
             logger, "info", "graph_ring_scoring_complete",
-            rings_scored=len(scored_rings),
+            rings_scored=total_rings_returned,
+            cycles_detected=total_cycles_detected,
+            data_status=data_status,
         )
         return {
             "rings": scored_rings,
-            "total": len(scored_rings),
-            "critical_count": sum(1 for r in scored_rings if r["risk_level"] == "critical"),
+            "total": total_rings_returned,
+            "critical_count": critical_count,
+            "cycles_detected": total_cycles_detected,
+            "rings_returned": total_rings_returned,
+            "truncated": total_cycles_detected > total_rings_returned,
+            "circular_edge_count": circular_edge_count,
+            "cycle_backed_circular_edge_count": cycle_backed_circular_edge_count,
+            "circular_edge_cycle_coverage": circular_edge_cycle_coverage,
+            "snapshot_id": snapshot_id,
+            "query_scope": query_scope,
+            "data_status": data_status,
+            "diagnostics": {
+                "cycle_detection_gap": bool(circular_edge_count > 0 and total_cycles_detected == 0),
+                "cycle_to_ring_ratio": cycle_to_ring_ratio,
+            },
             "query_context": {"tax_code": tax_code, "depth": depth},
         }
 

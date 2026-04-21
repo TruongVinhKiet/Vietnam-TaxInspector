@@ -290,6 +290,13 @@
 <div class="mt-2 text-xs font-medium text-slate-400">Chương trình A – Trí tuệ tuân thủ theo thời gian</div>
 </div>
 </div>
+
+<div id="delinq-workbench-tabs" role="tablist" class="max-w-6xl mx-auto bg-surface-container-low rounded-xl border border-outline-variant/20 px-2 py-2 flex items-center gap-1.5 mb-6">
+    <button id="tab-delinq-list" class="workbench-tab px-4 py-2 bg-primary-container text-white rounded-lg text-xs font-bold transition-all" role="tab" aria-selected="true">Danh sách Dự báo</button>
+    <button id="tab-sim" class="workbench-tab px-4 py-2 bg-transparent text-slate-500 rounded-lg text-xs font-bold hover:bg-slate-200 transition-all" role="tab" aria-selected="false">Mô phỏng Kịch bản Vĩ mô</button>
+</div>
+
+<div id="delinq-list-section">
 <!-- Enterprise Data Grid -->
 <div class="max-w-6xl mx-auto bg-surface-container-lowest rounded-xl overflow-hidden shadow-[0_20px_40px_rgba(0,33,71,0.06)]">
 <div class="px-8 py-6 bg-white border-b border-slate-100 space-y-4">
@@ -378,6 +385,133 @@
 <!-- Dynamic pagination by delinquency.js -->
 </div>
 </div>
+</div>
+
+</div>
+
+<div id="simulation-section" class="hidden max-w-6xl mx-auto mb-10">
+    <!-- Control Panel + Chart -->
+<div class="grid grid-cols-1 lg:grid-cols-3 gap-8 mb-10">
+<!-- Slider Panel -->
+<div class="lg:col-span-1 bg-white rounded-xl shadow-[0_20px_40px_rgba(0,33,71,0.06)] p-6 fade-in" style="animation-delay:0.2s">
+<h3 class="text-sm font-black text-primary-container tracking-tight mb-6 flex items-center gap-2">
+<span class="material-symbols-outlined text-[18px]">tune</span> Bảng điều khiển Vĩ mô
+</h3>
+<div class="space-y-5">
+<div>
+<div class="flex justify-between text-[10px] font-bold text-slate-500 mb-2">
+<span>Thuế GTGT (VAT)</span><span id="sim-vat-rate-value" class="text-primary-container">10%</span>
+</div>
+<input type="range" style="accent-color: #002147;" id="sim-vat-rate" class="sim-slider w-full mt-2" min="0" max="25" step="0.5" value="10" data-unit="%">
+</div>
+<div>
+<div class="flex justify-between text-[10px] font-bold text-slate-500 mb-2">
+<span>Thuế TNDN (CIT)</span><span id="sim-cit-rate-value" class="text-primary-container">20%</span>
+</div>
+<input type="range" style="accent-color: #002147;" id="sim-cit-rate" class="sim-slider w-full mt-2" min="0" max="40" step="1" value="20" data-unit="%">
+</div>
+<div>
+<div class="flex justify-between text-[10px] font-bold text-slate-500 mb-2">
+<span>Diện thanh tra</span><span id="sim-audit-coverage-value" class="text-primary-container">5%</span>
+</div>
+<input type="range" style="accent-color: #002147;" id="sim-audit-coverage" class="sim-slider w-full mt-2" min="1" max="50" step="1" value="5" data-unit="%">
+</div>
+<div>
+<div class="flex justify-between text-[10px] font-bold text-slate-500 mb-2">
+<span>Hệ số phạt</span><span id="sim-penalty-multiplier-value" class="text-primary-container">1x</span>
+</div>
+<input type="range" style="accent-color: #002147;" id="sim-penalty-multiplier" class="sim-slider w-full mt-2" min="0.5" max="5" step="0.5" value="1" data-unit="x">
+</div>
+<div>
+<div class="flex justify-between text-[10px] font-bold text-slate-500 mb-2">
+<span>Lãi suất</span><span id="sim-interest-rate-value" class="text-primary-container">6%</span>
+</div>
+<input type="range" style="accent-color: #002147;" id="sim-interest-rate" class="sim-slider w-full mt-2" min="1" max="25" step="0.5" value="6" data-unit="%">
+</div>
+<div>
+<div class="flex justify-between text-[10px] font-bold text-slate-500 mb-2">
+<span>Tăng trưởng GDP</span><span id="sim-gdp-growth-value" class="text-primary-container">6.5%</span>
+</div>
+<input type="range" style="accent-color: #002147;" id="sim-gdp-growth" class="sim-slider w-full mt-2" min="-5" max="15" step="0.5" value="6.5" data-unit="%">
+</div>
+</div>
+<div class="flex gap-3 mt-6">
+<button id="sim-run-btn" class="flex-1 bg-primary-container text-white px-4 py-2.5 rounded-xl text-xs font-black uppercase tracking-wide flex items-center justify-center gap-2 hover:opacity-90 transition-opacity shadow-lg">
+<span class="material-symbols-outlined text-[16px]">play_arrow</span> Chạy Mô phỏng
+</button>
+<button id="sim-reset-btn" class="px-4 py-2.5 rounded-xl border border-slate-200 text-xs font-bold text-slate-600 hover:bg-slate-50 transition-colors">
+Reset
+</button>
+</div>
+</div>
+
+<!-- Chart -->
+<div class="lg:col-span-2 bg-white rounded-xl shadow-[0_20px_40px_rgba(0,33,71,0.06)] p-6 fade-in" style="animation-delay:0.3s">
+<h3 class="text-sm font-black text-primary-container tracking-tight mb-4 flex items-center gap-2">
+<span class="material-symbols-outlined text-[18px]">monitoring</span> Dự phóng Doanh thu Quý (Tỷ VNĐ)
+</h3>
+<div class="w-full">
+<canvas id="sim-chart" class="w-full" style="height: 300px;"></canvas>
+</div>
+<div class="flex items-center gap-4 mt-4 border-t border-slate-100 pt-4">
+<div class="flex items-center gap-2 text-[10px] text-slate-500"><div class="w-6 h-0.5 bg-slate-400" style="border-top:2px dashed #94a3b8"></div> Baseline</div>
+<div class="flex items-center gap-2 text-[10px] text-sky-600 font-bold"><div class="w-6 h-0.5 bg-gradient-to-r from-sky-500 to-violet-500 rounded"></div> Mô phỏng</div>
+</div>
+</div>
+</div>
+
+<!-- Preset Scenarios -->
+<div class="mb-10 fade-in" style="animation-delay:0.4s">
+<h3 class="text-sm font-black text-primary-container tracking-tight mb-4 flex items-center gap-2">
+<span class="material-symbols-outlined text-[18px]">bookmark</span> Kịch bản Có sẵn
+</h3>
+<div id="sim-presets" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+<div class="text-xs text-slate-400 py-4">Đang tải...</div>
+</div>
+</div>
+
+<!-- Risk Distribution -->
+<div class="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-10">
+<div class="bg-white rounded-xl shadow-[0_20px_40px_rgba(0,33,71,0.06)] p-6 fade-in" style="animation-delay:0.5s">
+<h3 class="text-sm font-black text-primary-container tracking-tight mb-4 flex items-center gap-2">
+<span class="material-symbols-outlined text-[18px]">donut_large</span> Phân bổ Rủi ro Mô phỏng
+</h3>
+<div class="flex items-center justify-center h-full min-h-[180px]">
+<canvas id="sim-risk-chart" class="w-full" style="height: 180px;"></canvas>
+</div>
+<div id="sim-risk-dist" class="mt-4 grid grid-cols-2 gap-2 max-h-[160px] overflow-y-auto">
+<p class="text-xs text-slate-400 col-span-2">Kéo thanh trượt để xem phân bổ.</p>
+</div>
+</div>
+
+<!-- Industry Table -->
+<div class="bg-white rounded-xl shadow-[0_20px_40px_rgba(0,33,71,0.06)] overflow-hidden fade-in" style="animation-delay:0.6s">
+<div class="px-6 py-4 border-b border-slate-100">
+<h3 class="text-sm font-black text-primary-container tracking-tight flex items-center gap-2">
+<span class="material-symbols-outlined text-[18px]">factory</span> Tác động theo Ngành
+</h3>
+</div>
+<div class="overflow-x-auto max-h-[400px] overflow-y-auto">
+<table class="w-full">
+<thead class="sticky top-0 bg-slate-50">
+<tr class="text-[10px] font-bold text-slate-500 uppercase tracking-wider">
+<th class="px-4 py-3 text-left">Ngành</th>
+<th class="px-4 py-3 text-left">Số DN</th>
+<th class="px-4 py-3 text-left">Baseline</th>
+<th class="px-4 py-3 text-left">Mô phỏng</th>
+<th class="px-4 py-3 text-left">Delta</th>
+<th class="px-4 py-3 text-left">Δ Doanh thu</th>
+</tr>
+</thead>
+<tbody id="sim-industry-tbody">
+<tr><td colspan="6" class="text-center text-xs text-slate-400 py-8">Chưa có dữ liệu mô phỏng. Điều chỉnh tham số và bấm "Chạy Mô phỏng".</td></tr>
+</tbody>
+</table>
+</div>
+</div>
+</div>
+
+
 </div>
 
 <div id="delinq-filter-modal" class="fixed inset-0 z-[90] hidden" aria-hidden="true">
@@ -516,4 +650,6 @@ window.addEventListener('pageshow', function() {
     }
 });
 </script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script src="../js/simulation.js?v=4.0"></script>
 </body></html>
