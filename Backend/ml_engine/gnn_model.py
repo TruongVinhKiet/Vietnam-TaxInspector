@@ -196,17 +196,30 @@ class GraphConstructor:
             return (z + clip) / (2.0 * clip)
         return math.log1p(amount) / 25.0
 
-    def build_graph(self, companies: list[dict], invoices: list[dict]) -> "Data":
+    def build_graph(self, companies: list[dict], invoices: list[dict], ownership_links: list[dict] = None) -> "Data":
         """
-        Build a PyG Data object from raw company + invoice records.
-
-        Args:
-            companies: List of {tax_code, name, industry, registration_date, risk_score, lat, lng}
-            invoices: List of {seller_tax_code, buyer_tax_code, amount, vat_rate, date, invoice_number}
-
-        Returns:
-            torch_geometric.data.Data with x, edge_index, edge_attr, and labels
+        Build a PyG Data object from raw company + invoice + ownership records.
         """
+        ownership_links = ownership_links or []
+        
+        # ── Inject Ghost Nodes ──
+        existing_tcs = {c["tax_code"] for c in companies}
+        all_referenced_tcs = set()
+        for inv in invoices:
+            all_referenced_tcs.add(inv["seller_tax_code"])
+            all_referenced_tcs.add(inv["buyer_tax_code"])
+        for own in ownership_links:
+            all_referenced_tcs.add(own["parent_tax_code"])
+            all_referenced_tcs.add(own["child_tax_code"])
+            
+        missing_tcs = all_referenced_tcs - existing_tcs
+        for tc in missing_tcs:
+            companies.append({
+                "tax_code": tc, "name": f"Ghost {tc}", "industry": "Unknown", 
+                "registration_date": str(date.today()), "risk_score": 100, 
+                "is_active": False, "lat": 0.0, "lng": 0.0, "is_ghost": True
+            })
+
         # ── Map tax_code → index ──
         self.tax_code_to_idx = {c["tax_code"]: i for i, c in enumerate(companies)}
         n_nodes = len(companies)
@@ -250,15 +263,24 @@ class GraphConstructor:
             ind_onehot = [0.0] * self.NUM_INDUSTRIES
             ind_onehot[ind_idx] = 1.0
 
+            # New feature: is_ghost_or_inactive
+            is_ghost = float(c.get("is_ghost", False) or not c.get("is_active", True))
+            
+            # New feature: Revenue Acceleration (dummy derivative: out / in+1)
+            revenue_accel = out_amt / max(1.0, in_amt)
+            revenue_accel_norm = min(1.0, revenue_accel / 10.0)
+
             feat = [
                 age_days / 3650.0,                              # normalized age
                 0.0,                                            # BLANKED out risk_score to prevent data leakage
                 float(c.get("lat") or 0) / 90.0,                # normalized lat
                 float(c.get("lng") or 0) / 180.0,               # normalized lng
-                deg / max(1, max(degree.values())),             # normalized degree
+                deg / max(1, max(degree.values()) or 1),        # normalized degree
                 math.log1p(in_amt) / 25.0,                     # normalized in_amount
                 math.log1p(out_amt) / 25.0,                    # normalized out_amount
                 in_amt / max(1, in_amt + out_amt),              # in_out_ratio
+                is_ghost,                                       # IS GHOST OR INACTIVE
+                revenue_accel_norm,                             # HIT AND RUN REVENUE DERIVATIVE
             ] + ind_onehot
 
             node_features.append(feat)
@@ -396,8 +418,20 @@ class GraphConstructor:
             right = bisect.bisect_right(s_dates, d)
             seller_vel = (right - left) / max(1, len(s_dates))  # normalized
 
+            amount_val = float(inv.get("amount", 0.0))
+            is_smurfing = 1.0 if 19_000_000 <= amount_val <= 20_000_000 else 0.0
+
+            # Geo-Speed approx
+            s_lat = float(next((c["lat"] for c in companies if c["tax_code"] == s), 0))
+            s_lng = float(next((c["lng"] for c in companies if c["tax_code"] == s), 0))
+            b_lat = float(next((c["lat"] for c in companies if c["tax_code"] == b), 0))
+            b_lng = float(next((c["lng"] for c in companies if c["tax_code"] == b), 0))
+            dist_km = math.sqrt((s_lat - b_lat)**2 + (s_lng - b_lng)**2) * 111.0
+            geo_speed = dist_km / max(1.0, days_since) # km per day since epoch
+            geo_speed_norm = min(1.0, geo_speed / 1000.0) # normalize
+
             edge_features.append([
-                self._normalize_amount_feature(float(inv["amount"])),  # [0] normalized amount
+                self._normalize_amount_feature(amount_val),  # [0] normalized amount
                 float(inv.get("vat_rate", 10.0)) / 100.0,  # [1] normalized vat
                 days_since / max(1, date_span_days),        # [2] normalized time position
                 is_recip,                                    # [3] reciprocal flag
@@ -407,13 +441,31 @@ class GraphConstructor:
                 sin_month,                                   # [7] NEW: cyclical month (sin)
                 cos_month,                                   # [8] NEW: cyclical month (cos)
                 seller_vel,                                  # [9] NEW: seller velocity (7-day)
+                0.0,                                         # [10] is_ownership_edge (0 for invoice)
+                is_smurfing,                                 # [11] is_near_limit_smurfing
+                geo_speed_norm,                              # [12] geo_speed (teleportation)
             ])
+
+        # ── MULTIPLEX: Append Ownership Links as Edges ──
+        for own in ownership_links:
+            s, b = own.get("parent_tax_code"), own.get("child_tax_code")
+            if s in self.tax_code_to_idx and b in self.tax_code_to_idx:
+                src_list.append(self.tax_code_to_idx[s])
+                dst_list.append(self.tax_code_to_idx[b])
+                
+                # Ownership edges have blank financial parameters
+                edge_features.append([
+                    0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+                    1.0, # is_ownership_edge
+                    0.0, # smurfing
+                    0.0, # geo_speed
+                ])
 
         # Convert to tensors securely if PyGeom is available
         if PYGEOM_AVAILABLE:
             x = torch.tensor(node_features, dtype=torch.float32)
             edge_index = torch.tensor([src_list, dst_list], dtype=torch.long) if src_list else torch.zeros((2, 0), dtype=torch.long)
-            edge_attr = torch.tensor(edge_features, dtype=torch.float32) if edge_features else torch.zeros((0, 10), dtype=torch.float32)
+            edge_attr = torch.tensor(edge_features, dtype=torch.float32) if edge_features else torch.zeros((0, 13), dtype=torch.float32)
     
             data = Data(x=x, edge_index=edge_index, edge_attr=edge_attr)
             data.num_nodes = n_nodes
@@ -453,7 +505,7 @@ class GraphConstructor:
 class GNNTrainer:
     """Train and save the GAT model."""
 
-    def __init__(self, node_feat_dim: int = 18, edge_feat_dim: int = 4, amount_feature_mode: str = "legacy"):
+    def __init__(self, node_feat_dim: int = 22, edge_feat_dim: int = 13, amount_feature_mode: str = "legacy"):
         self.node_feat_dim = node_feat_dim
         self.edge_feat_dim = edge_feat_dim
         self.amount_feature_mode = str(amount_feature_mode or "legacy").strip().lower()
@@ -625,7 +677,7 @@ class GNNInference:
             self.rule_scorer = None
             self.path_extractor = None
 
-    def predict(self, companies: list[dict], invoices: list[dict]) -> dict:
+    def predict(self, companies: list[dict], invoices: list[dict], ownership_links: list[dict] = None) -> dict:
         """
         Run inference on a subgraph.
 
@@ -640,7 +692,7 @@ class GNNInference:
             }
         """
         # Build graph
-        data = self.graph_constructor.build_graph(companies, invoices)
+        data = self.graph_constructor.build_graph(companies, invoices, ownership_links)
         tc_to_idx = self.graph_constructor.tax_code_to_idx
         idx_to_tc = {v: k for k, v in tc_to_idx.items()}
         company_map = {c["tax_code"]: c for c in companies}
@@ -893,6 +945,9 @@ class GNNInference:
                 "circular_edge_count": circular_edge_count,
                 "cycle_backed_circular_edge_count": cycle_backed_circular_edges,
                 "circular_edge_cycle_coverage": round(circular_edge_cycle_coverage, 4),
+                "ghost_node_count": sum(1 for c in companies if c.get("is_ghost")),
+                "smurfing_count": sum(1 for e in invoices if 19_000_000 <= float(e.get("amount", 0)) <= 20_000_000),
+                "teleportation_count": int(torch.sum(data.edge_attr[:, 12] > 0.5).item()) if data is not None and data.edge_attr is not None and data.edge_attr.shape[1] > 12 else 0,
             },
             "model_loaded": self._loaded,
             "ensemble_active": self.ensemble_model is not None,

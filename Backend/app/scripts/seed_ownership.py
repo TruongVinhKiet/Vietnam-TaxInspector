@@ -65,14 +65,32 @@ def seed_ownership_networks():
         for child in cluster[1:]:
             add_link(parent, child)
 
-    # Pattern B: Cross-Trades! Companies that invoice each other also own each other
+    # Pattern C: "Bà con" (Relatives) Shadow Edge Generation
+    # We create clusters of "Relatives" where Person A owns Comp A, Person B owns Comp B, but they share Family Registry.
+    family_registry = {}
+    family_count = 0
+    
     for seller, buyer in invoice_pairs:
         if random.random() < 0.2: # 20% of high value trades are related parties
-            # randomly assign one as parent
-            if random.random() < 0.5:
-                add_link(seller, buyer)
+            # randomly assign one as parent or relative
+            rel_type = random.choice(["Owner", "Subsidiary", "Relative"])
+            if rel_type == "Relative":
+                family_id = f"FAM_{family_count}"
+                family_count += 1
+                person_id_a = f"UBO_FAM_{family_count}_A"
+                person_id_b = f"UBO_FAM_{family_count}_B"
+                # Since ownership is parent -> child, we define "seller" and "buyer" as owned by Family Registry nodes.
+                # However, ownership format is tax_code -> tax_code. A "Relative" edge between Company A and Company B
+                # signifies that Owner of A is a relative of Owner of B.
+                key = (seller, buyer)
+                if key not in seen_links:
+                    seen_links.add(key)
+                    ownerships.append((seller, buyer, 0.0, "Relative", person_id_b, "Brother/Sister of " + person_id_a))
             else:
-                add_link(buyer, seller)
+                if random.random() < 0.5:
+                    add_link(seller, buyer)
+                else:
+                    add_link(buyer, seller)
 
     # Note: Ownership chains length ~2-3
     

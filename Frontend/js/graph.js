@@ -20,10 +20,12 @@ const FORENSIC_TAB_INACTIVE_CLASS = "py-2 text-[10px] font-black uppercase text-
 const GRAPH_LEGEND_ITEMS = [
     { id: "normal_flow", label: "Luồng bình thường", type: "edge", color: "#334155", dash: false },
     { id: "circular_flow", label: "Luồng xoay vòng", type: "edge", color: "#ba1a1a", dash: true },
+    { id: "ownership_flow", label: "Liên kết sở hữu", type: "edge", color: "#fbbf24", dash: true },
     { id: "normal_node", label: "Doanh nghiệp thường", type: "node", color: "#002147" },
     { id: "suspicious_node", label: "Nút nghi vấn", type: "node", color: "#1e293b" },
     { id: "shell_node", label: "Chủ thể vỏ bọc", type: "node", color: "#ba1a1a" },
     { id: "offshore_node", label: "Offshore/UBO", type: "node", color: "#f43f5e" },
+    { id: "ghost_node", label: "Ghost Node (Mất tích)", type: "node", color: "#94a3b8" },
 ];
 
 // ════════════════════════════════════════════════════════════════
@@ -107,6 +109,7 @@ function formatThreshold(value) {
 
 
 function getNodeLegendCategory(node) {
+    if (node && node.is_ghost) return "ghost_node";
     if (node && node.is_offshore) return "offshore_node";
     if (node && node.is_shell) return "shell_node";
     if (node && node.group === "suspicious") return "suspicious_node";
@@ -115,6 +118,7 @@ function getNodeLegendCategory(node) {
 
 
 function getEdgeLegendCategory(edge) {
+    if (edge && edge.is_ownership) return "ownership_flow";
     return edge && edge.is_circular ? "circular_flow" : "normal_flow";
 }
 
@@ -1481,18 +1485,18 @@ function renderGraph(data) {
 
     // ── Edges ──
     const edgeGroups = edgesLayer.selectAll("g.edge")
-        .data(edges, d => d.invoice_number || `${d.from}-${d.to}-${d.linkIndex}`)
+        .data(edges, d => d.invoice_number || d.relationship_type || `${d.from}-${d.to}-${d.linkIndex}`)
         .join("g")
-        .attr("class", d => `edge ${d.is_circular ? "edge-circular" : "edge-normal"}`);
+        .attr("class", d => `edge ${getEdgeLegendCategory(d)}`);
 
     const lines = edgeGroups.append("path")
-        .attr("class", d => d.is_circular ? "edge-path circular edge-circular-path" : "edge-path normal edge-normal-path")
+        .attr("class", d => `edge-path ${getEdgeLegendCategory(d)}-path`)
         .attr("fill", "none")
-        .attr("stroke", d => d.is_circular ? "#ba1a1a" : "#334155")
-        .attr("stroke-width", d => d.is_circular ? 2 : 1)
-        .attr("stroke-dasharray", d => d.is_circular ? "8 4" : "none")
-        .attr("marker-end", d => d.is_circular ? "url(#arrow-fraud)" : "url(#arrow-normal)")
-        .attr("opacity", d => d.is_circular ? 1 : 0.15);
+        .attr("stroke", d => d.is_ownership ? "#fbbf24" : (d.is_circular ? "#ba1a1a" : "#334155"))
+        .attr("stroke-width", d => d.is_ownership ? 2 : (d.is_circular ? 2 : 1))
+        .attr("stroke-dasharray", d => d.is_ownership ? "4 4" : (d.is_circular ? "8 4" : "none"))
+        .attr("marker-end", d => d.is_ownership ? "none" : (d.is_circular ? "url(#arrow-fraud)" : "url(#arrow-normal)"))
+        .attr("opacity", d => d.is_ownership ? 0.6 : (d.is_circular ? 1 : 0.15));
 
     // Edge labels (amount) - ONLY for suspicious ones to declutter
     const edgeLabels = edgeGroups.filter(d => d.is_circular || d.amount >= 1e9).append("text")
@@ -1530,6 +1534,7 @@ function renderGraph(data) {
         .attr("rx", 6)
         .attr("ry", 6)
         .attr("fill", d => {
+            if (d.is_ghost) return "transparent"; // Ghost/Inactive is transparent
             if (d.is_offshore) {
                 if (d.risk_score >= 80) return "#f43f5e"; // rose-500
                 if (d.risk_score >= 60) return "#f59e0b"; // amber-500
@@ -1540,14 +1545,19 @@ function renderGraph(data) {
             return "#002147"; // primary-container
         })
         .attr("stroke", d => {
+            if (d.is_ghost) return "#94a3b8"; // Ghost outline
             if (d.is_offshore) return "rgba(255,255,255,0.6)";
             if (d.is_shell) return "rgba(255,255,255,0.4)";
             if (d.group === "suspicious") return "rgba(255,255,255,0.15)";
             return "rgba(255,255,255,0.3)";
         })
         .attr("stroke-width", 1)
+        .attr("stroke-dasharray", d => d.is_ghost ? "4 4" : "none") // Dash border for ghost
         .attr("class", "node-rect")
-        .style("filter", d => d.is_shell ? "drop-shadow(0 10px 15px rgb(186 26 26 / 0.5))" : "drop-shadow(0 4px 6px rgb(0 0 0 / 0.3))");
+        .style("filter", d => {
+            if (d.is_ghost) return "none";
+            return d.is_shell ? "drop-shadow(0 10px 15px rgb(186 26 26 / 0.5))" : "drop-shadow(0 4px 6px rgb(0 0 0 / 0.3))";
+        });
         
     // Node icons using Material Symbols Outlined
     const iconMap = {
@@ -1560,10 +1570,11 @@ function renderGraph(data) {
         .attr("text-anchor", "middle")
         .attr("x", -34)
         .attr("y", 5)
-        .attr("fill", d => d.group === "suspicious" ? "#cbd5e1" : "#ffffff")
+        .attr("fill", d => d.is_ghost ? "#94a3b8" : (d.group === "suspicious" ? "#cbd5e1" : "#ffffff"))
         .attr("font-size", d => d.is_shell ? "18px" : "16px")
         .style("font-family", "Material Symbols Outlined")
         .text(d => {
+            if (d.is_ghost) return "help";
             if (d.is_offshore) return "public";
             return iconMap[d.group] || "factory";
         });
@@ -1574,7 +1585,7 @@ function renderGraph(data) {
         .attr("text-anchor", "start")
         .attr("x", -18)
         .attr("y", 4)
-        .attr("fill", "#ffffff")
+        .attr("fill", d => d.is_ghost ? "#94a3b8" : "#ffffff")
         .attr("font-size", "9px")
         .attr("font-weight", d => d.is_shell ? "800" : "600")
         .attr("font-family", "Inter, sans-serif")
@@ -2463,6 +2474,19 @@ function renderForensicPanel(data, forensicIntel = null) {
     if (countEl) {
         const totalInv = toFiniteNumber(payload.total_suspicious_invoices, 0);
         countEl.textContent = `Bao gồm ${totalInv} hóa đơn không phát sinh hàng hóa thật được luân chuyển.`;
+    }
+
+    // Advanced Fraud Patterns
+    const advFraudStrip = document.getElementById("advanced-fraud-strip");
+    if (advFraudStrip && payload.forensic_metrics) {
+        advFraudStrip.classList.remove("hidden");
+        const smurfEl = document.getElementById("fraud-smurfing");
+        const ghostEl = document.getElementById("fraud-ghost");
+        const teleEl = document.getElementById("fraud-teleportation");
+
+        if (smurfEl) animateCounter(smurfEl, 0, payload.forensic_metrics.smurfing_count || 0, 1000);
+        if (ghostEl) animateCounter(ghostEl, 0, payload.forensic_metrics.ghost_node_count || 0, 1000);
+        if (teleEl) animateCounter(teleEl, 0, payload.forensic_metrics.teleportation_count || 0, 1000);
     }
 
     // Severity badge

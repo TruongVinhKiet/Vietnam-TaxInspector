@@ -713,10 +713,10 @@ def _resolve_graph_context(
 ) -> dict[str, Any]:
     if tax_code:
         resolved_depth = int(depth) if depth is not None else 2
-        companies, invoices = _extract_subgraph(db, tax_code, resolved_depth)
+        companies, invoices, ownership_links = _extract_subgraph(db, tax_code, resolved_depth)
     else:
         resolved_depth = None
-        companies, invoices = _extract_full_graph(db, limit=FULL_GRAPH_COMPANY_LIMIT)
+        companies, invoices, ownership_links = _extract_full_graph(db, limit=FULL_GRAPH_COMPANY_LIMIT)
 
     snapshot_id = _build_snapshot_id(
         tax_code=tax_code,
@@ -741,6 +741,7 @@ def _resolve_graph_context(
         "depth": resolved_depth,
         "companies": companies,
         "invoices": invoices,
+        "ownership_links": ownership_links,
         "snapshot_id": snapshot_id,
         "query_scope": query_scope,
     }
@@ -997,7 +998,7 @@ def get_vat_invoice_graph(
         raise HTTPException(status_code=500, detail="Không thể khởi tạo GNN engine do lỗi phụ thuộc.")
 
     try:
-        result = engine.predict(companies, invoices)
+        result = engine.predict(companies, invoices, ctx.get("ownership_links", []))
     except RuntimeError as e:
         log_event(
             logger,
@@ -1283,7 +1284,18 @@ def _extract_subgraph(db: Session, center_tax_code: str, depth: int, max_nodes: 
     inv_columns = [col for col in inv_result.keys()]
     invoices = [dict(zip(inv_columns, row)) for row in inv_result.fetchall()]
 
-    return companies, invoices
+    # Extract ownership_links within the subgraph boundary
+    ownership_result = db.execute(text(f"""
+        SELECT parent_tax_code, child_tax_code, ownership_percent, relationship_type, person_id
+        FROM ownership_links
+        WHERE parent_tax_code IN ({placeholders})
+           OR child_tax_code IN ({placeholders})
+    """), params)
+    
+    own_columns = [col for col in ownership_result.keys()]
+    ownership_links = [dict(zip(own_columns, row)) for row in ownership_result.fetchall()]
+
+    return companies, invoices, ownership_links
 
 
 def _extract_full_graph(db: Session, limit: int = FULL_GRAPH_COMPANY_LIMIT) -> tuple:
@@ -1335,7 +1347,18 @@ def _extract_full_graph(db: Session, limit: int = FULL_GRAPH_COMPANY_LIMIT) -> t
     inv_columns = [col for col in inv_result.keys()]
     invoices = [dict(zip(inv_columns, row)) for row in inv_result.fetchall()]
 
-    return companies, invoices
+    # Extract ownership_links within the subgraph boundary
+    ownership_result = db.execute(text(f"""
+        SELECT parent_tax_code, child_tax_code, ownership_percent, relationship_type, person_id
+        FROM ownership_links
+        WHERE parent_tax_code IN ({placeholders})
+           OR child_tax_code IN ({placeholders})
+    """), params)
+    
+    own_columns = [col for col in ownership_result.keys()]
+    ownership_links = [dict(zip(own_columns, row)) for row in ownership_result.fetchall()]
+
+    return companies, invoices, ownership_links
 
 
 # ════════════════════════════════════════════════════════════════
@@ -1357,9 +1380,9 @@ def detect_graph_motifs(
 
     try:
         if tax_code:
-            companies, invoices = _extract_subgraph(db, tax_code, depth)
+            companies, invoices, ownership_links = _extract_subgraph(db, tax_code, depth)
         else:
-            companies, invoices = _extract_full_graph(db, limit=200)
+            companies, invoices, ownership_links = _extract_full_graph(db, limit=200)
     except Exception as e:
         log_event(logger, "error", "graph_motif_data_error", error=str(e))
         raise HTTPException(status_code=500, detail=f"Lỗi truy vấn dữ liệu: {str(e)}")
@@ -1405,9 +1428,9 @@ def predict_graph_links(
 
     try:
         if tax_code:
-            companies, invoices = _extract_subgraph(db, tax_code, depth)
+            companies, invoices, ownership_links = _extract_subgraph(db, tax_code, depth)
         else:
-            companies, invoices = _extract_full_graph(db, limit=200)
+            companies, invoices, ownership_links = _extract_full_graph(db, limit=200)
     except Exception as e:
         log_event(logger, "error", "graph_link_pred_data_error", error=str(e))
         raise HTTPException(status_code=500, detail=f"Lỗi truy vấn dữ liệu: {str(e)}")
@@ -1654,7 +1677,7 @@ def score_transaction_rings(
     forensic_metrics = {}
     try:
         engine = _get_gnn_engine()
-        result = engine.predict(companies, invoices)
+        result = engine.predict(companies, invoices, ctx.get("ownership_links", []))
         cycles = result.get("cycles", [])
         if isinstance(result, dict) and isinstance(result.get("forensic_metrics"), dict):
             forensic_metrics = result.get("forensic_metrics", {})

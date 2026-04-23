@@ -280,6 +280,15 @@ def main() -> int:
     invoices = [dict(zip(columns, row)) for row in cur.fetchall()]
     print(f"[OK] Loaded {len(invoices)} invoices")
 
+    # ── 2a. Load ownership_links ──
+    cur.execute("""
+        SELECT parent_tax_code, child_tax_code, ownership_percent, relationship_type, person_id
+        FROM ownership_links
+    """)
+    columns = [desc[0] for desc in cur.description]
+    ownership_links = [dict(zip(columns, row)) for row in cur.fetchall()]
+    print(f"[OK] Loaded {len(ownership_links)} ownership links")
+
     conn.close()
 
     if not invoices:
@@ -295,7 +304,7 @@ def main() -> int:
     # ── 3. Build graph ──
     amount_feature_mode = os.getenv("GNN_AMOUNT_FEATURE_MODE", "robust").strip().lower()
     constructor = GraphConstructor(amount_feature_mode=amount_feature_mode)
-    data = constructor.build_graph(companies, invoices)
+    data = constructor.build_graph(companies, invoices, ownership_links)
     sorted_invoices = constructor._sorted_invoices  # stable ordering used by graph
     print(f"[OK] Graph built: {data.num_nodes} nodes, {data.edge_index.shape[1]} edges")
     print(f"     Node features: {data.x.shape[1]} dims")
