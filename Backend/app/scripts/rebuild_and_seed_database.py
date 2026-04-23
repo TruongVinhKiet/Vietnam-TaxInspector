@@ -131,6 +131,81 @@ def rebuild_and_seed():
     """)
     offshore_count = cur.rowcount
 
+    print("[5] Normalizing offshore attributes for downstream OSINT queries...")
+    cur.execute("""
+        UPDATE companies
+        SET
+            industry = 'Offshore Entity',
+            province = COALESCE(NULLIF(country_inferred, ''), province, 'Unknown Offshore')
+        WHERE is_within_vietnam = FALSE;
+    """)
+    offshore_industry_tagged = cur.rowcount
+
+    cur.execute("""
+        UPDATE companies
+        SET
+            country_inferred = COALESCE(NULLIF(country_inferred, ''), province, 'Unknown Offshore'),
+            province = COALESCE(NULLIF(country_inferred, ''), province, 'Unknown Offshore')
+        WHERE is_within_vietnam = FALSE;
+    """)
+
+    cur.execute("""
+        UPDATE companies
+        SET
+            country_inferred = 'Vietnam',
+            province = COALESCE(NULLIF(province, ''), 'Vietnam')
+        WHERE is_within_vietnam = TRUE;
+    """)
+
+    # Keep offshore_entities in sync so /api/osint/high-risk-ubo primary path never stays empty.
+    cur.execute("TRUNCATE TABLE offshore_entities RESTART IDENTITY CASCADE;")
+    cur.execute("""
+        INSERT INTO offshore_entities (
+            entity_code,
+            proxy_tax_code,
+            name,
+            country,
+            jurisdiction_risk_weight,
+            risk_score,
+            entity_type,
+            registration_date,
+            status,
+            data_source
+        )
+        SELECT
+            CONCAT('OSF-', c.tax_code) AS entity_code,
+            c.tax_code AS proxy_tax_code,
+            c.name,
+            COALESCE(NULLIF(c.country_inferred, ''), NULLIF(c.province, ''), 'Unknown Offshore') AS country,
+            CASE
+                WHEN LOWER(COALESCE(c.country_inferred, c.province, '')) IN ('cayman islands', 'british virgin islands', 'panama', 'seychelles')
+                    THEN 0.9
+                WHEN LOWER(COALESCE(c.country_inferred, c.province, '')) IN ('singapore', 'hong kong')
+                    THEN 0.7
+                ELSE 0.6
+            END AS jurisdiction_risk_weight,
+            GREATEST(COALESCE(c.risk_score, 50.0), 60.0) AS risk_score,
+            'shell_company' AS entity_type,
+            c.registration_date,
+            CASE WHEN c.is_active IS FALSE THEN 'inactive' ELSE 'active' END AS status,
+            'rebuild_and_seed_database' AS data_source
+        FROM companies c
+        WHERE c.is_within_vietnam = FALSE
+          AND c.tax_code ~ '^[0-9]{10}$'
+        ON CONFLICT (entity_code) DO UPDATE
+        SET
+            proxy_tax_code = EXCLUDED.proxy_tax_code,
+            name = EXCLUDED.name,
+            country = EXCLUDED.country,
+            jurisdiction_risk_weight = EXCLUDED.jurisdiction_risk_weight,
+            risk_score = EXCLUDED.risk_score,
+            entity_type = EXCLUDED.entity_type,
+            registration_date = EXCLUDED.registration_date,
+            status = EXCLUDED.status,
+            data_source = EXCLUDED.data_source;
+    """)
+    offshore_entities_seeded = cur.rowcount
+
     # Cleanup temporary table
     cur.execute("DROP TABLE _vietnam_boundary;")
 
@@ -145,6 +220,8 @@ def rebuild_and_seed():
     print(f"Total Invoices: {total_invoices}")
     print(f"Geo-MAPPED to Vietnam: {vn_count}")
     print(f"Geo-MAPPED OFFSHORE: {offshore_count}")
+    print(f"Offshore industry normalized: {offshore_industry_tagged}")
+    print(f"offshore_entities seeded: {offshore_entities_seeded}")
     print("=" * 60)
 
 if __name__ == "__main__":

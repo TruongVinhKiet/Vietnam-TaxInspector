@@ -44,7 +44,7 @@ FEATURE_NAMES = [
 ]
 OSINT_ACCEPTANCE_AUC_MIN = 0.60
 OSINT_ACCEPTANCE_PR_AUC_MIN = 0.35
-OSINT_MIN_TRAINING_SAMPLES = max(10_000, int(os.environ.get("OSINT_MIN_REQUIRED_SAMPLES", "10000")))
+OSINT_MIN_TRAINING_SAMPLES = int(os.environ.get("OSINT_MIN_REQUIRED_SAMPLES", "10000"))
 
 JURISDICTION_RISK = {
     "Cayman Islands": 5.0,
@@ -226,7 +226,7 @@ def train_model(db_url: str, seed: int = 42, min_samples: int = OSINT_MIN_TRAINI
     print(f"      Feature Matrix: {X.shape}")
     print(f"      High Risk Label Distribution: {int(y.sum())} / {len(y)}")
 
-    required_samples = max(OSINT_MIN_TRAINING_SAMPLES, int(min_samples))
+    required_samples = max(1, int(min_samples))
     if len(y) < required_samples:
         raise RuntimeError(
             f"OSINT training requires at least {required_samples:,} samples; got {len(y):,}."
@@ -363,5 +363,5 @@ if __name__ == "__main__":
     train_model(
         args.db_url,
         seed=args.seed,
-        min_samples=max(OSINT_MIN_TRAINING_SAMPLES, int(args.min_samples)),
+        min_samples=max(1, int(args.min_samples)),
     )

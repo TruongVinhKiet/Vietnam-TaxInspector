@@ -25,7 +25,7 @@ const GRAPH_LEGEND_ITEMS = [
     { id: "suspicious_node", label: "Nút nghi vấn", type: "node", color: "#1e293b" },
     { id: "shell_node", label: "Chủ thể vỏ bọc", type: "node", color: "#ba1a1a" },
     { id: "offshore_node", label: "Offshore/UBO", type: "node", color: "#f43f5e" },
-    { id: "ghost_node", label: "Ghost Node (Mất tích)", type: "node", color: "#94a3b8" },
+    { id: "ghost_node", label: "Nút chưa định danh", type: "node", color: "#94a3b8" },
 ];
 
 // ════════════════════════════════════════════════════════════════
@@ -54,6 +54,7 @@ let graphLegendState = {
     offshore_node: true,
 };
 let graphSplitTriggerGate = null;
+let activeNodeFocusId = null;
 
 let allCompanies = [];
 let filteredCompanies = [];
@@ -1390,6 +1391,7 @@ function fitGraphToViewport(options = {}) {
 
 function clearGraphFocus() {
     if (!svg) return;
+    activeNodeFocusId = null;
 
     svg.selectAll(".node")
         .transition().duration(260)
@@ -1463,9 +1465,9 @@ function renderGraph(data) {
     const countriesArray = [...new Set(nodes.map(d => d.country_inferred || "Việt Nam"))];
     
     simulation = d3.forceSimulation(nodes)
-        .force("link", d3.forceLink(edges).id(d => d.id).distance(180).strength(0.6))
-        .force("charge", d3.forceManyBody().strength(-800))
-        .force("collision", d3.forceCollide().radius(60).iterations(4))
+        .force("link", d3.forceLink(edges).id(d => d.id).distance(110).strength(0.65))
+        .force("charge", d3.forceManyBody().strength(-450))
+        .force("collision", d3.forceCollide().radius(56).iterations(4))
         .alphaDecay(0.05);
 
     if (countriesArray.length <= 1) {
@@ -1473,13 +1475,23 @@ function renderGraph(data) {
     } else {
         countriesArray.forEach((c, i) => {
             const isVN = c.toLowerCase().includes("vietnam") || c.toLowerCase().includes("việt nam");
-            const offsetR = isVN ? 0 : 700; 
+            const offsetR = isVN ? 0 : 450; 
             const theta = (i * 2 * Math.PI) / (countriesArray.length - 1 || 1);
             const tx = width / 2 + offsetR * Math.cos(theta);
             const ty = height / 2 + offsetR * Math.sin(theta);
             
-            simulation.force(`x-${i}`, d3.forceX(tx).strength(d => (d.country_inferred || "Việt Nam") === c ? 0.15 : 0));
-            simulation.force(`y-${i}`, d3.forceY(ty).strength(d => (d.country_inferred || "Việt Nam") === c ? 0.15 : 0));
+            simulation.force(`x-${i}`, d3.forceX(tx).strength(d => {
+                if ((d.country_inferred || "Việt Nam") !== c) return 0;
+                const dIsVn = String(d.country_inferred || "Việt Nam").toLowerCase().includes("vietnam")
+                    || String(d.country_inferred || "Việt Nam").toLowerCase().includes("việt nam");
+                return dIsVn ? 0.15 : 0.4;
+            }));
+            simulation.force(`y-${i}`, d3.forceY(ty).strength(d => {
+                if ((d.country_inferred || "Việt Nam") !== c) return 0;
+                const dIsVn = String(d.country_inferred || "Việt Nam").toLowerCase().includes("vietnam")
+                    || String(d.country_inferred || "Việt Nam").toLowerCase().includes("việt nam");
+                return dIsVn ? 0.15 : 0.4;
+            }));
         });
     }
 
@@ -1608,13 +1620,23 @@ function renderGraph(data) {
             .transition().duration(200)
             .attr("stroke-width", 1)
             .attr("stroke", d => {
+                if (d.is_ghost) return "#94a3b8";
                 if (d.is_offshore) return "rgba(255,255,255,0.6)";
                 if (d.is_shell) return "rgba(255,255,255,0.4)";
                 if (d.group === "suspicious") return "rgba(255,255,255,0.15)";
                 return "rgba(255,255,255,0.3)";
             });
-    // Highlight connected edges
+    }).on("click", function(event, d) {
+        event.preventDefault();
+        event.stopPropagation();
         highlightNode(d.id, edges);
+    });
+
+    svg.on("click", (event) => {
+        const clickedNode = event?.target?.closest?.(".node");
+        if (!clickedNode) {
+            clearGraphFocus();
+        }
     });
 
     // ── Boundaries ──
@@ -2685,28 +2707,40 @@ function highlightCycleNodes(companiesStr) {
 }
 
 function highlightNode(nodeId, edges) {
+    if (!svg) return;
+    if (activeNodeFocusId === nodeId) {
+        clearGraphFocus();
+        return;
+    }
+    activeNodeFocusId = nodeId;
+
     const connected = new Set();
     edges.forEach(e => {
-        if (e.from === nodeId || e.to === nodeId) {
-            connected.add(e.from);
-            connected.add(e.to);
+        const sourceId = e?.source?.id || e?.source || e?.from;
+        const targetId = e?.target?.id || e?.target || e?.to;
+        if (sourceId === nodeId || targetId === nodeId) {
+            connected.add(sourceId);
+            connected.add(targetId);
         }
     });
+    connected.add(nodeId);
 
     svg.selectAll(".node").transition().duration(300)
-        .attr("opacity", d => connected.has(d.id) || d.id === nodeId ? 1 : 0.15);
+        .attr("opacity", d => connected.has(d.id) ? 1 : 0.12);
     svg.selectAll(".edge").transition().duration(300)
-        .attr("opacity", d => d.from === nodeId || d.to === nodeId ? 1 : 0.05);
-
-    // Reset after 3s
-    setTimeout(() => {
-        svg.selectAll(".node").transition().duration(500).attr("opacity", 1);
-        svg.selectAll(".edge").transition().duration(500).attr("opacity", 1);
-        setTimeout(() => {
-            applyTimelineFilter(timelineMonth, { refreshBadge: true });
-            applyLegendVisibility();
-        }, 520);
-    }, 3000);
+        .attr("opacity", d => {
+            const sourceId = d?.source?.id || d?.source || d?.from;
+            const targetId = d?.target?.id || d?.target || d?.to;
+            return sourceId === nodeId || targetId === nodeId ? 1 : 0.04;
+        });
+    svg.selectAll(".edge-path").transition().duration(300)
+        .style("opacity", d => {
+            const sourceId = d?.source?.id || d?.source || d?.from;
+            const targetId = d?.target?.id || d?.target || d?.to;
+            return sourceId === nodeId || targetId === nodeId ? 1 : 0.04;
+        });
+    svg.selectAll(".node-label").transition().duration(300)
+        .style("opacity", d => connected.has(d.id) ? 1 : 0.1);
 }
 
 function showTooltip(event, d) {

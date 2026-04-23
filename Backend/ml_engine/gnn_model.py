@@ -215,7 +215,9 @@ class GraphConstructor:
         missing_tcs = all_referenced_tcs - existing_tcs
         for tc in missing_tcs:
             companies.append({
-                "tax_code": tc, "name": f"Ghost {tc}", "industry": "Unknown", 
+                "tax_code": tc,
+                "name": f"Doanh nghiệp chưa định danh {tc}",
+                "industry": "Chưa định danh",
                 "registration_date": str(date.today()), "risk_score": 100, 
                 "is_active": False, "lat": 0.0, "lng": 0.0, "is_ghost": True
             })
@@ -785,6 +787,14 @@ class GNNInference:
         for c in companies:
             tc = c["tax_code"]
             gnn_score = node_probs.get(tc, 0.0)
+            inferred_country_raw = str(c.get("country_inferred") or "").strip()
+            inferred_country = inferred_country_raw or "Vietnam"
+            is_within_vietnam = c.get("is_within_vietnam")
+            is_offshore = (
+                is_within_vietnam is False
+                or (inferred_country_raw and inferred_country_raw.lower() not in {"vietnam", "việt nam"})
+                or str(c.get("industry") or "").strip().lower() == "offshore entity"
+            )
             
             # Rule score
             rule_score = 0.0
@@ -842,6 +852,9 @@ class GNNInference:
                 "registration_date": str(c.get("registration_date", "")),
                 "lat": c.get("lat", 0),
                 "lng": c.get("lng", 0),
+                "country_inferred": inferred_country,
+                "is_within_vietnam": is_within_vietnam,
+                "is_offshore": is_offshore,
                 "risk_score": node_risk,
                 "is_shell": is_shell,
                 "shell_probability": round(combined_shell, 4),

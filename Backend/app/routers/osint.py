@@ -120,6 +120,14 @@ def _is_numeric_tax_code(value: Optional[str]) -> bool:
     return bool(TAX_CODE_PATTERN.fullmatch(str(value).strip()))
 
 
+def _offshore_condition(alias: str = "c") -> str:
+    return (
+        f"(({alias}.is_within_vietnam IS FALSE) "
+        f"OR ({alias}.industry = 'Offshore Entity') "
+        f"OR (COALESCE({alias}.country_inferred, '') <> '' AND LOWER({alias}.country_inferred) <> 'vietnam'))"
+    )
+
+
 def _resolve_graph_tax_code(input_code: str, db: Session) -> str:
     normalized = str(input_code).strip()
     if _is_numeric_tax_code(normalized):
@@ -161,16 +169,22 @@ def get_stats(db: Session = Depends(get_db)):
         )).fetchall()
     else:
         offshore_count = db.execute(text(
-            "SELECT COUNT(*) FROM companies WHERE industry = 'Offshore Entity'"
+            f"SELECT COUNT(*) FROM companies WHERE {_offshore_condition('companies')}"
         )).scalar() or 0
         avg_risk = db.execute(text(
-            "SELECT COALESCE(AVG(risk_score), 0) FROM companies WHERE industry = 'Offshore Entity'"
+            f"SELECT COALESCE(AVG(risk_score), 0) FROM companies WHERE {_offshore_condition('companies')}"
         )).scalar() or 0
         high_risk = db.execute(text(
-            "SELECT COUNT(*) FROM companies WHERE industry = 'Offshore Entity' AND risk_score >= 70"
+            f"SELECT COUNT(*) FROM companies WHERE {_offshore_condition('companies')} AND risk_score >= 70"
         )).scalar() or 0
         jur_rows = db.execute(text(
-            "SELECT province, COUNT(*) as cnt FROM companies WHERE industry = 'Offshore Entity' GROUP BY province ORDER BY cnt DESC"
+            f"""
+            SELECT COALESCE(NULLIF(country_inferred, ''), province, 'Unknown') AS country, COUNT(*) as cnt
+            FROM companies
+            WHERE {_offshore_condition('companies')}
+            GROUP BY COALESCE(NULLIF(country_inferred, ''), province, 'Unknown')
+            ORDER BY cnt DESC
+            """
         )).fetchall()
 
     domestic_count = total_companies - offshore_count
@@ -211,14 +225,16 @@ def list_jurisdictions(db: Session = Depends(get_db)):
     else:
         rows = db.execute(text("""
             SELECT
-                c.province as country,
+                COALESCE(NULLIF(c.country_inferred, ''), c.province, 'Unknown') as country,
                 COUNT(DISTINCT c.tax_code) as entity_count,
                 COALESCE(AVG(c.risk_score), 0) as avg_risk,
                 COUNT(ol.id) as total_conns
             FROM companies c
             LEFT JOIN ownership_links ol ON ol.parent_tax_code = c.tax_code
-            WHERE c.industry = 'Offshore Entity'
-            GROUP BY c.province
+            WHERE (c.is_within_vietnam IS FALSE)
+               OR (c.industry = 'Offshore Entity')
+               OR (COALESCE(c.country_inferred, '') <> '' AND LOWER(c.country_inferred) <> 'vietnam')
+            GROUP BY COALESCE(NULLIF(c.country_inferred, ''), c.province, 'Unknown')
             ORDER BY entity_count DESC
         """)).fetchall()
 
@@ -298,13 +314,17 @@ def get_graph_for_tax_code(tax_code: str, depth: int = Query(default=2, ge=1, le
         """), params).fetchall()
 
         for r in company_rows:
-            is_offshore = r[2] == "Offshore Entity"
+            inferred_country = str(r[3] or "").strip()
+            is_offshore = (
+                r[2] == "Offshore Entity"
+                or (inferred_country != "" and inferred_country.lower() != "vietnam")
+            )
             offshore_display = r[5] if len(r) > 5 else None
             node = OsintNode(
                 id=r[0],
                 label=offshore_display or r[1] or r[0],
                 type="offshore_entity" if is_offshore else "domestic_entity",
-                country=r[3] if is_offshore else "Việt Nam",
+                country=(inferred_country or "Unknown") if is_offshore else "Việt Nam",
                 risk_score=float(r[4]) if r[4] else None,
                 tax_code=r[0],
             )
@@ -400,9 +420,12 @@ def list_high_risk_ubo(
         """), {**params, "limit": page_size, "offset": offset}).fetchall()
     else:
         params = {"min_risk": min_risk}
-        where_clauses = ["c.industry = 'Offshore Entity'", "COALESCE(c.risk_score, 0) >= :min_risk"]
+        where_clauses = [
+            "(c.is_within_vietnam IS FALSE OR c.industry = 'Offshore Entity' OR (COALESCE(c.country_inferred, '') <> '' AND LOWER(c.country_inferred) <> 'vietnam'))",
+            "COALESCE(c.risk_score, 0) >= :min_risk",
+        ]
         if country:
-            where_clauses.append("c.province = :country")
+            where_clauses.append("COALESCE(NULLIF(c.country_inferred, ''), c.province, 'Unknown') = :country")
             params["country"] = country
 
         where_sql = " AND ".join(where_clauses)
@@ -413,7 +436,7 @@ def list_high_risk_ubo(
                 c.tax_code,
                 c.tax_code,
                 c.name,
-                c.province,
+                COALESCE(NULLIF(c.country_inferred, ''), c.province, 'Unknown') as country,
                 c.risk_score,
                 COUNT(DISTINCT CASE WHEN ol.child_tax_code ~ '^\\d{{10}}$' THEN ol.child_tax_code END) as domestic_count,
                 ARRAY_AGG(DISTINCT ol.relationship_type) as rel_types,
@@ -421,7 +444,7 @@ def list_high_risk_ubo(
             FROM companies c
             LEFT JOIN ownership_links ol ON ol.parent_tax_code = c.tax_code
             WHERE {where_sql}
-            GROUP BY c.tax_code, c.name, c.province, c.risk_score
+            GROUP BY c.tax_code, c.name, COALESCE(NULLIF(c.country_inferred, ''), c.province, 'Unknown'), c.risk_score
             ORDER BY c.risk_score DESC
             LIMIT :limit OFFSET :offset
         """), {**params, "limit": page_size, "offset": offset}).fetchall()
@@ -493,13 +516,14 @@ def search_osint(
 
     results = []
     for r in rows:
-        is_offshore = r[3] == "Offshore Entity"
+        country = str(r[4] or "").strip()
+        is_offshore = bool(country and country.lower() != "việt nam" and country.lower() != "vietnam") or r[3] == "Offshore Entity"
         match_type = "tax_code" if q.lower() in (r[1] or "").lower() else "label"
         results.append(SearchResult(
             node=OsintNode(
                 id=r[1], label=r[2] or r[1],
                 type="offshore_entity" if is_offshore else "domestic_entity",
-                country=r[4] if is_offshore else "Việt Nam",
+                country=country if is_offshore else "Việt Nam",
                 risk_score=float(r[5]) if r[5] else None,
                 tax_code=r[0],
             ),
