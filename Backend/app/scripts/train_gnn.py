@@ -49,6 +49,7 @@ DB_PORT = os.getenv("DB_PORT", "5432")
 DB_USER = os.getenv("DB_USER", "postgres")
 DB_PASSWORD = os.getenv("DB_PASSWORD", "")
 DB_NAME = os.getenv("DB_NAME", "TaxInspector")
+GNN_MIN_TRAINING_EDGES = max(10_000, int(os.getenv("GNN_MIN_TRAINING_EDGES", "10000")))
 
 
 def _safe_binary_metrics(labels: np.ndarray, probs: np.ndarray, threshold: float = 0.5) -> dict:
@@ -230,7 +231,7 @@ def _build_feature_stats(values: list[float]) -> dict:
     }
 
 
-def main():
+def main() -> int:
     print("=" * 70)
     print("  TaxInspector – Enterprise GNN (GAT) Training Pipeline")
     print("=" * 70)
@@ -267,7 +268,7 @@ def main():
 
     if not companies:
         print("[ERROR] No companies found. Seed companies before training GNN.")
-        return
+        return 1
 
     # ── 2. Load invoices (sorted by invoice_number for deterministic ordering) ──
     cur.execute("""
@@ -283,7 +284,13 @@ def main():
 
     if not invoices:
         print("[ERROR] No invoices found. Run generate_graph_mock_data.py first!")
-        return
+        return 2
+    if len(invoices) < GNN_MIN_TRAINING_EDGES:
+        print(
+            f"[ERROR] GNN training requires at least {GNN_MIN_TRAINING_EDGES:,} invoices; "
+            f"got {len(invoices):,}."
+        )
+        return 3
 
     # ── 3. Build graph ──
     amount_feature_mode = os.getenv("GNN_AMOUNT_FEATURE_MODE", "robust").strip().lower()
@@ -305,7 +312,7 @@ def main():
         if idx is None:
             continue
         try:
-            if int(c["tax_code"][2:7]) >= 900:
+            if c["tax_code"].startswith("99"):
                 node_labels[idx] = 1.0
         except (ValueError, IndexError):
             pass
@@ -404,8 +411,11 @@ def main():
     )
 
     # Print reports
-    print(format_evaluation_report(val_result))
-    print(format_evaluation_report(test_result))
+    try:
+        print(format_evaluation_report(val_result))
+        print(format_evaluation_report(test_result))
+    except UnicodeEncodeError:
+        print("[WARN] Could not print reports due to Unicode encoding. Saved reports inside JSON instead.")
 
     # Strict temporal node evaluation for production-time realism.
     strict_temporal_result = evaluator.evaluate(
@@ -414,7 +424,10 @@ def main():
         split_name="strict_temporal_test",
         top_k=20,
     )
-    print(format_evaluation_report(strict_temporal_result))
+    try:
+        print(format_evaluation_report(strict_temporal_result))
+    except UnicodeEncodeError:
+        pass
 
     # ── 9. Train Ensemble Components ──
     print("\n[ENSEMBLE] Training anomaly detector + meta-model...")
@@ -652,6 +665,11 @@ def main():
         effective_node_pr_auc_drop_threshold = max(max_node_pr_auc_drop, relaxed_node_pr_auc_drop)
 
     acceptance_gates = {
+        "training_edges_min": {
+            "pass": len(invoices) >= GNN_MIN_TRAINING_EDGES,
+            "actual": int(len(invoices)),
+            "threshold": GNN_MIN_TRAINING_EDGES,
+        },
         "node_f1_parity": {
             "pass": node_f1_ratio >= min_node_f1_ratio,
             "actual": round(node_f1_ratio, 6),
@@ -686,6 +704,13 @@ def main():
     overall_pass = all(item["pass"] for item in acceptance_gates.values())
 
     serving_report = {
+        "dataset": {
+            "companies_total": int(len(companies)),
+            "invoices_total": int(len(invoices)),
+            "graph_nodes": int(data.num_nodes),
+            "graph_edges": int(data.edge_index.shape[1]),
+            "required_min_invoices": int(GNN_MIN_TRAINING_EDGES),
+        },
         "node_split_strategy": split_info["node_split_strategy"],
         "raw_test": {
             "node_f1": float(test_result.get("node_f1", 0.0)),
@@ -810,7 +835,8 @@ def main():
     print("  Anomaly:     data/models/anomaly_detector.pkl")
     print("  Ensemble:    data/models/ensemble_meta.pkl")
     print("  Stress:      data/models/stress_evaluation_report.json")
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

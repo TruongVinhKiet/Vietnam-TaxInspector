@@ -5,7 +5,7 @@ Trains a LightGBM classifier to predict tax delinquency risk from payment histor
 Designed for i7 + 12GB RAM: streaming feature extraction, temporal train/test split.
 
 Usage:
-    python -m ml_engine.train_delinquency [--db-url postgresql://...] [--sample-size 5000]
+    python -m ml_engine.train_delinquency [--db-url postgresql://...] [--sample-size 10000]
 
 Outputs:
     - data/models/delinquency_lgbm.joblib           – Trained model
@@ -32,9 +32,10 @@ from ml_engine.delinquency_model import DelinquencyFeatureEngineer, DELINQUENCY_
 
 MODEL_DIR = Path(__file__).resolve().parent.parent / "data" / "models"
 MODEL_DIR.mkdir(parents=True, exist_ok=True)
+DELINQUENCY_MIN_TRAINING_SAMPLES = max(10_000, int(os.environ.get("DELINQUENCY_MIN_TRAINING_SAMPLES", "10000")))
 
 
-def load_training_data(db_url: str, sample_size: int = 5000) -> tuple:
+def load_training_data(db_url: str, sample_size: int = 10000) -> tuple:
     """
     Load payment and tax return data from database for training.
     Returns (payments_by_company, returns_by_company, company_info_map)
@@ -288,8 +289,9 @@ def _resolve_default_db_url() -> str:
 
 def train_model(
     db_url: str = "postgresql://postgres:postgres@localhost/tax_inspector",
-    sample_size: int = 5000,
-):
+    sample_size: int = 10000,
+    min_samples: int = DELINQUENCY_MIN_TRAINING_SAMPLES,
+) -> int:
     """Main training function."""
     print("=" * 60)
     print("  DELINQUENCY MODEL TRAINING (Program A)")
@@ -301,7 +303,16 @@ def train_model(
 
     if not payments_by_company:
         print("[ABORT] No training data available.")
-        return
+        return 1
+
+    total_companies = len(payments_by_company)
+    required_samples = max(DELINQUENCY_MIN_TRAINING_SAMPLES, int(min_samples))
+    if total_companies < required_samples:
+        print(
+            f"[ABORT] Insufficient training samples: need >= {required_samples:,} companies, "
+            f"got {total_companies:,}."
+        )
+        return 2
 
     # Feature engineering
     print("[2/5] Extracting features...")
@@ -334,9 +345,9 @@ def train_model(
     print(f"    Label distribution: {sum(y)} delinquent ({sum(y)/len(y)*100:.1f}%), "
           f"{len(y)-sum(y)} compliant ({(len(y)-sum(y))/len(y)*100:.1f}%)")
 
-    if sum(y) == 0:
-        print("[WARN] No positive labels found. Model will be trained but may not be useful.")
-        print("       Consider importing more payment data with actual late payments.")
+    if len(np.unique(y)) < 2:
+        print("[ABORT] Training labels do not contain both classes; cannot train a reliable classifier.")
+        return 3
 
     # Temporal train/test split (80/20, ordered by first appearance)
     print("[3/5] Training model...")
@@ -498,6 +509,21 @@ def train_model(
         "model_version": DELINQUENCY_MODEL_VERSION,
         "model_type": model_type,
         "metrics": metrics,
+        "acceptance_gates": {
+            "overall_pass": True,
+            "criteria": {
+                "training_samples_min": {
+                    "threshold": int(required_samples),
+                    "actual": int(len(X)),
+                    "pass": int(len(X)) >= int(required_samples),
+                },
+                "label_class_diversity": {
+                    "threshold": 2,
+                    "actual": int(len(np.unique(y))),
+                    "pass": int(len(np.unique(y))) >= 2,
+                },
+            },
+        },
         "evaluation_protocol": {
             "target": "binary_delinquency_within_recent_window",
             "split": split_summary,
@@ -509,6 +535,7 @@ def train_model(
             "train": len(X_train),
             "test": len(X_test),
             "positive_rate": round(sum(y) / len(y), 4) if len(y) > 0 else 0,
+            "required_min_samples": int(required_samples),
             "train_positive_rate": split_summary["train_positive_rate"],
             "test_positive_rate": split_summary["test_positive_rate"],
             "train_positive_count": split_summary["train_positive_count"],
@@ -518,6 +545,8 @@ def train_model(
         "generated_at": datetime.utcnow().isoformat(),
     }
     quality_path = MODEL_DIR / "delinquency_quality_report.json"
+    gate_criteria = (quality_report.get("acceptance_gates") or {}).get("criteria") or {}
+    quality_report["acceptance_gates"]["overall_pass"] = bool(all(item.get("pass") for item in gate_criteria.values()))
     with open(quality_path, "w", encoding="utf-8") as f:
         json.dump(quality_report, f, indent=2, ensure_ascii=False)
     print(f"    [OK] Quality report saved to {quality_path}")
@@ -528,11 +557,20 @@ def train_model(
     if metrics.get("auc_roc"):
         print(f"  AUC-ROC: {metrics['auc_roc']:.4f} | F1: {metrics.get('f1', 0):.4f}")
     print("=" * 60)
+    return 0
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Train Delinquency Model (Program A)")
     parser.add_argument("--db-url", default=_resolve_default_db_url())
-    parser.add_argument("--sample-size", type=int, default=5000)
+    parser.add_argument("--sample-size", type=int, default=10000)
+    parser.add_argument("--min-samples", type=int, default=DELINQUENCY_MIN_TRAINING_SAMPLES)
     args = parser.parse_args()
-    train_model(db_url=args.db_url, sample_size=args.sample_size)
+
+    min_samples = max(DELINQUENCY_MIN_TRAINING_SAMPLES, int(args.min_samples))
+    sample_size = int(args.sample_size)
+    if sample_size < min_samples:
+        print(f"[ERROR] --sample-size must be >= --min-samples ({min_samples:,}).")
+        raise SystemExit(1)
+
+    raise SystemExit(train_model(db_url=args.db_url, sample_size=sample_size, min_samples=min_samples))

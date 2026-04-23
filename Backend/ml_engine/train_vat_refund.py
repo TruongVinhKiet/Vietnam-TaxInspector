@@ -40,6 +40,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 VAT_MODEL_VERSION = os.getenv("VAT_REFUND_MODEL_VERSION", "vat-refund-v1")
 VAT_FEATURE_SET_VERSION = "vat_refund_features_v1"
+MIN_REQUIRED_TRAINING_SAMPLES = max(10_000, int(os.getenv("VAT_REFUND_MIN_REQUIRED_SAMPLES", "10000")))
 
 MODEL_DIR = Path(__file__).resolve().parent.parent / "data" / "models"
 MODEL_DIR.mkdir(parents=True, exist_ok=True)
@@ -397,8 +398,9 @@ def main(db_url: str, lookback_days: int, min_samples: int, label_origin_policy:
         origin_summary = ", ".join(f"{k}:{int(v)}" for k, v in sorted(origin_counts.items()))
         print(f"       Label origins: {origin_summary}")
 
-    if len(frame) < max(30, min_samples):
-        print(f"[ABORT] Not enough labels for training (need >= {max(30, min_samples)}).")
+    required_samples = max(MIN_REQUIRED_TRAINING_SAMPLES, int(min_samples))
+    if len(frame) < required_samples:
+        print(f"[ABORT] Not enough labels for training (need >= {required_samples:,}, got {len(frame):,}).")
         return 2
 
     print("\n[2/6] Building feature matrix...")
@@ -478,6 +480,11 @@ def main(db_url: str, lookback_days: int, min_samples: int, label_origin_policy:
     calibrated_metrics = _metrics_snapshot(y_test, calibrated_test_prob)
 
     criteria = {
+        "training_samples_min": {
+            "threshold": int(required_samples),
+            "actual": int(len(y)),
+            "pass": int(len(y)) >= int(required_samples),
+        },
         "auc_roc_min": {
             "threshold": 0.60,
             "actual": calibrated_metrics.get("auc_roc"),
@@ -500,7 +507,7 @@ def main(db_url: str, lookback_days: int, min_samples: int, label_origin_policy:
             "soft_gate": True,
         },
     }
-    hard_gate_keys = ["auc_roc_min", "pr_auc_min", "brier_max"]
+    hard_gate_keys = ["training_samples_min", "auc_roc_min", "pr_auc_min", "brier_max"]
     overall_pass = bool(all(criteria[key]["pass"] for key in hard_gate_keys))
 
     quality_report = {
@@ -514,6 +521,7 @@ def main(db_url: str, lookback_days: int, min_samples: int, label_origin_policy:
         },
         "dataset": {
             "total_size": int(len(y)),
+            "required_min_samples": int(required_samples),
             "train_size": int(len(y_train)),
             "calibration_size": int(len(y_calib)),
             "test_size": int(len(y_test)),
@@ -592,7 +600,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Train VAT Refund model artifacts")
     parser.add_argument("--db-url", type=str, default=_resolve_default_db_url())
     parser.add_argument("--lookback-days", type=int, default=int(os.getenv("VAT_REFUND_LOOKBACK_DAYS", "365")))
-    parser.add_argument("--min-samples", type=int, default=int(os.getenv("VAT_REFUND_MIN_SAMPLES", "80")))
+    parser.add_argument("--min-samples", type=int, default=int(os.getenv("VAT_REFUND_MIN_SAMPLES", "10000")))
     parser.add_argument(
         "--label-origin-policy",
         type=str,
@@ -604,7 +612,7 @@ if __name__ == "__main__":
     exit_code = main(
         db_url=args.db_url,
         lookback_days=max(30, int(args.lookback_days)),
-        min_samples=max(20, int(args.min_samples)),
+        min_samples=max(MIN_REQUIRED_TRAINING_SAMPLES, int(args.min_samples)),
         label_origin_policy=args.label_origin_policy,
     )
     sys.exit(exit_code)

@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -40,6 +41,7 @@ DEFAULT_VAT_QUALITY_FILE = MODELS_DIR / "vat_refund_quality_report.json"
 DEFAULT_PILOT_FILE = MODELS_DIR / "specialized_pilot_report.json"
 DEFAULT_OUTPUT_FILE = MODELS_DIR / "specialized_go_no_go_report.json"
 DEFAULT_HISTORY_FILE = MODELS_DIR / "specialized_go_no_go_history.jsonl"
+MIN_REQUIRED_TRAINING_SAMPLES = max(10_000, int(os.environ.get("TRAINING_MIN_REQUIRED_SAMPLES", "10000")))
 
 
 def _load_json(path: Path) -> dict[str, Any] | None:
@@ -95,7 +97,7 @@ def _to_int(value: Any, default: int = 0) -> int:
         return int(default)
 
 
-def _quality_gate_result(payload: dict[str, Any] | None, track_name: str) -> dict[str, Any]:
+def _quality_gate_result(payload: dict[str, Any] | None, track_name: str, min_training_samples: int) -> dict[str, Any]:
     if not payload:
         return {
             "name": f"quality_{track_name}",
@@ -106,15 +108,31 @@ def _quality_gate_result(payload: dict[str, Any] | None, track_name: str) -> dic
         }
 
     gates = payload.get("acceptance_gates") or {}
-    overall_pass = bool(gates.get("overall_pass", False))
+    quality_pass = bool(gates.get("overall_pass", False))
+    dataset = payload.get("dataset") or {}
+    total_size = _to_int(dataset.get("total_size"), 0)
+    sample_pass = total_size >= max(1, int(min_training_samples))
+    overall_pass = bool(quality_pass and sample_pass)
+
+    failed_items: list[str] = []
+    if not quality_pass:
+        failed_items.append("quality_gate_failed")
+    if not sample_pass:
+        failed_items.append(f"samples<{min_training_samples}")
+
     return {
         "name": f"quality_{track_name}",
         "pass": overall_pass,
         "status": "pass" if overall_pass else "fail",
-        "message": "Quality acceptance gates passed." if overall_pass else "Quality acceptance gates failed.",
+        "message": "Quality acceptance gates passed." if overall_pass else (", ".join(failed_items) or "Quality acceptance gates failed."),
         "actual": {
             "overall_pass": overall_pass,
+            "quality_gate_pass": quality_pass,
+            "dataset_total_size": total_size,
             "criteria": gates.get("criteria"),
+        },
+        "thresholds": {
+            "min_training_samples": int(min_training_samples),
         },
     }
 
@@ -321,10 +339,11 @@ def build_go_no_go_report(
     audit_min_f1_delta: float,
     vat_min_f1_delta: float,
     max_accuracy_drop: float,
+    min_training_samples: int,
     min_consecutive_hard_pass_runs: int,
 ) -> dict[str, Any]:
-    quality_audit_gate = _quality_gate_result(audit_quality_payload, "audit_value")
-    quality_vat_gate = _quality_gate_result(vat_quality_payload, "vat_refund")
+    quality_audit_gate = _quality_gate_result(audit_quality_payload, "audit_value", min_training_samples)
+    quality_vat_gate = _quality_gate_result(vat_quality_payload, "vat_refund", min_training_samples)
 
     pilot_audit_gate = _pilot_gate_result(
         pilot_payload,
@@ -362,6 +381,7 @@ def build_go_no_go_report(
         "generated_at": datetime.utcnow().isoformat() + "Z",
         "thresholds": {
             "min_pilot_samples": int(min_pilot_samples),
+            "min_training_samples": int(min_training_samples),
             "audit_min_f1_delta": float(audit_min_f1_delta),
             "vat_min_f1_delta": float(vat_min_f1_delta),
             "max_accuracy_drop": float(max_accuracy_drop),
@@ -437,6 +457,7 @@ def main() -> int:
     parser.add_argument("--output", type=str, default=str(DEFAULT_OUTPUT_FILE))
     parser.add_argument("--history-file", type=str, default=str(DEFAULT_HISTORY_FILE))
     parser.add_argument("--min-pilot-samples", type=int, default=200)
+    parser.add_argument("--min-training-samples", type=int, default=MIN_REQUIRED_TRAINING_SAMPLES)
     parser.add_argument("--audit-min-f1-delta", type=float, default=0.05)
     parser.add_argument("--vat-min-f1-delta", type=float, default=-0.05)
     parser.add_argument("--max-accuracy-drop", type=float, default=0.05)
@@ -445,6 +466,9 @@ def main() -> int:
 
     if args.min_pilot_samples < 1:
         print("[ERROR] --min-pilot-samples must be >= 1")
+        return 1
+    if args.min_training_samples < MIN_REQUIRED_TRAINING_SAMPLES:
+        print(f"[ERROR] --min-training-samples must be >= {MIN_REQUIRED_TRAINING_SAMPLES}")
         return 1
     if args.max_accuracy_drop < 0:
         print("[ERROR] --max-accuracy-drop must be >= 0")
@@ -466,6 +490,7 @@ def main() -> int:
         split_payload=split_payload,
         history_rows=history_rows,
         min_pilot_samples=int(args.min_pilot_samples),
+        min_training_samples=int(args.min_training_samples),
         audit_min_f1_delta=float(args.audit_min_f1_delta),
         vat_min_f1_delta=float(args.vat_min_f1_delta),
         max_accuracy_drop=float(args.max_accuracy_drop),

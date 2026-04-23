@@ -47,6 +47,11 @@ class Company(Base):
     registration_date = Column(Date)
     risk_score = Column(Float, default=0.0)
     is_active = Column(Boolean, default=True)
+    country_inferred = Column(String(100), nullable=True)
+    confidence_country = Column(Float, default=0.0)
+    is_within_vietnam = Column(Boolean, nullable=True)
+    geocoding_method = Column(String(50), nullable=True)
+    geocoded_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 

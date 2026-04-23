@@ -45,6 +45,7 @@ from ml_engine.feature_engineering import TaxFeatureEngineer
 
 FRAUD_MODEL_VERSION = os.getenv("FRAUD_MODEL_VERSION", "fraud-hybrid-v2")
 FRAUD_FEATURE_SET_VERSION = "fraud_inference_features_v1"
+FRAUD_MIN_TRAINING_SAMPLES = max(10_000, int(os.getenv("FRAUD_MIN_REQUIRED_SAMPLES", "10000")))
 
 TEMPORAL_AUC_DROP_MAX = 0.08
 TEMPORAL_PR_AUC_DROP_MAX = 0.10
@@ -291,6 +292,12 @@ def main():
     # Keep full temporal rows for evaluation while preserving latest-year snapshot for drift baselines.
     model_df = df.sort_values(["year", "tax_code"]).reset_index(drop=True)
     latest_df = df.sort_values("year").groupby("tax_code").last().reset_index()
+    if len(model_df) < FRAUD_MIN_TRAINING_SAMPLES:
+        print(
+            f"[ERROR] Fraud training requires at least {FRAUD_MIN_TRAINING_SAMPLES:,} rows; "
+            f"got {len(model_df):,}."
+        )
+        sys.exit(2)
     print(f"       Companies (latest year): {len(latest_df):,}")
 
     X = fe.get_feature_matrix(model_df)
@@ -534,6 +541,11 @@ def main():
     )
 
     core_criteria = {
+        "training_samples_min": {
+            "threshold": FRAUD_MIN_TRAINING_SAMPLES,
+            "actual": int(len(model_df)),
+            "pass": bool(int(len(model_df)) >= FRAUD_MIN_TRAINING_SAMPLES),
+        },
         "auc_roc_min": {
             "threshold": 0.70,
             "actual": round(float(xgb_auc), 6),
@@ -642,6 +654,8 @@ def main():
             "calibration_method": calibration_method,
         },
         "dataset": {
+            "total_size": int(len(model_df)),
+            "required_min_samples": int(FRAUD_MIN_TRAINING_SAMPLES),
             "companies": int(len(latest_df)),
             "fraud_ratio": float(np.mean(y)),
             "train_size": int(len(y_train)),

@@ -31,29 +31,34 @@ DB_PASSWORD = os.getenv("DB_PASSWORD", "")
 DB_NAME = os.getenv("DB_NAME", "TaxInspector")
 
 # ── Configuration ──
-NUM_LEGIT_COMPANIES = 80
-NUM_SHELL_COMPANIES = 20
-NUM_NORMAL_INVOICES = 1200
-NUM_HARD_NEGATIVE_PAIRS = 10    # High-volume legit reciprocal trade pairs
-INVOICES_PER_HARD_PAIR = 15     # Invoices per direction in hard negative pair
-NUM_CIRCULAR_RINGS = 8          # Each ring: 3-5 companies forming a loop
-INVOICES_PER_RING_LEG = 5       # Invoices per direction in each ring
+NUM_LEGIT_COMPANIES = 8500
+NUM_SHELL_COMPANIES = 1500
+NUM_NORMAL_INVOICES = 50000
+NUM_HARD_NEGATIVE_PAIRS = 500    # High-volume legit reciprocal trade pairs
+INVOICES_PER_HARD_PAIR = 10      # Invoices per direction
+NUM_CIRCULAR_RINGS = 300         # Each ring: 3-5 companies forming a loop
+INVOICES_PER_RING_LEG = 5        # Invoices per direction in each ring
 
 # Timeline: Jan 2024 – Dec 2024 (12 months for temporal train/val/test split)
-# Train: T1-T8 (Jan-Aug), Val: T9 (Sep), Test: T10-T12 (Oct-Dec)
 DATA_YEAR = 2024
 DATA_START = date(DATA_YEAR, 1, 1)
 DATA_END = date(DATA_YEAR, 12, 31)
 
 random.seed(42)
 
-# ── Vietnam geographic clusters ──
+# ── Geographic clusters (Vietnam + Offshore for Forensic Simulation) ──
 GEO_CLUSTERS = {
-    "Hà Nội":   {"lat": 21.0285, "lng": 105.8542, "radius_km": 15},
-    "TP.HCM":   {"lat": 10.8231, "lng": 106.6297, "radius_km": 20},
-    "Đà Nẵng":  {"lat": 16.0544, "lng": 108.2022, "radius_km": 10},
-    "Hải Phòng": {"lat": 20.8449, "lng": 106.6881, "radius_km": 8},
-    "Cần Thơ":  {"lat": 10.0452, "lng": 105.7469, "radius_km": 7},
+    # Vietnam Domestic (90%)
+    "Hà Nội":   {"lat": 21.0285, "lng": 105.8542, "radius_km": 15, "country": "Vietnam"},
+    "TP.HCM":   {"lat": 10.8231, "lng": 106.6297, "radius_km": 20, "country": "Vietnam"},
+    "Đà Nẵng":  {"lat": 16.0544, "lng": 108.2022, "radius_km": 10, "country": "Vietnam"},
+    "Hải Phòng": {"lat": 20.8449, "lng": 106.6881, "radius_km": 8, "country": "Vietnam"},
+    "Cần Thơ":  {"lat": 10.0452, "lng": 105.7469, "radius_km": 7, "country": "Vietnam"},
+    
+    # Offshore Tax-Havens / Holding Jurisdictions (10%)
+    "Singapore": {"lat": 1.3521, "lng": 103.8198, "radius_km": 5, "country": "Singapore"},
+    "Cayman Islands": {"lat": 19.3133, "lng": -81.2546, "radius_km": 5, "country": "Cayman Islands"},
+    "British Virgin Islands": {"lat": 18.4207, "lng": -64.6400, "radius_km": 5, "country": "British Virgin Islands"},
 }
 
 INDUSTRIES = [
@@ -110,9 +115,11 @@ def random_point_near(lat: float, lng: float, radius_km: float):
 
 
 def generate_tax_code(index: int, is_shell: bool = False) -> str:
-    """Generate a realistic Vietnamese tax code (10 digits)."""
-    prefix = random.choice(["01", "03", "04", "06", "08", "31", "79", "48"])
-    mid = f"{index:05d}"
+    if is_shell:
+        prefix = "99"
+    else:
+        prefix = random.choice(["01", "03", "04", "06", "08", "31", "79", "48"])
+    mid = f"{index + 100000:06d}"
     suffix = str(random.randint(10, 99))
     return f"{prefix}{mid}{suffix}"
 

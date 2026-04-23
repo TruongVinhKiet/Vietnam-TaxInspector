@@ -427,6 +427,128 @@
                 border-radius: 999px;
             }
         }
+        /* ── Geo-Forensic Compatibility v2 Styles ── */
+        /* Compatibility badges */
+        .compat-badge-pass {
+            color: #166534;
+            border-color: rgba(22, 163, 74, 0.5);
+            background: #f0fdf4;
+        }
+        .compat-badge-partial {
+            color: #b45309;
+            border-color: rgba(245, 158, 11, 0.5);
+            background: #fffbeb;
+        }
+        .compat-badge-fail {
+            color: #b91c1c;
+            border-color: rgba(220, 38, 38, 0.5);
+            background: #fef2f2;
+        }
+        .compat-badge-unknown {
+            color: #475569;
+            border-color: rgba(148, 163, 184, 0.35);
+            background: #f8fafc;
+        }
+
+        /* Cross-border risk badge */
+        .cross-border-badge-low {
+            color: #166534;
+            border-color: rgba(22, 163, 74, 0.4);
+            background: #f0fdf4;
+        }
+        .cross-border-badge-medium {
+            color: #b45309;
+            border-color: rgba(245, 158, 11, 0.45);
+            background: #fffbeb;
+        }
+        .cross-border-badge-high {
+            color: #b91c1c;
+            border-color: rgba(220, 38, 38, 0.45);
+            background: #fef2f2;
+        }
+
+        /* Country chips */
+        .country-chip {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.25rem;
+            padding: 0.2rem 0.45rem;
+            border-radius: 0.45rem;
+            border: 1px solid rgba(148, 163, 184, 0.3);
+            font-size: 9px;
+            font-weight: 800;
+            letter-spacing: 0.04em;
+            color: #475569;
+            background: #f8fafc;
+            transition: all 0.2s ease;
+        }
+        .country-chip:hover {
+            border-color: rgba(70, 95, 136, 0.35);
+            background: rgba(214, 227, 255, 0.4);
+        }
+        .country-chip.high-risk {
+            color: #b91c1c;
+            border-color: rgba(220, 38, 38, 0.35);
+            background: #fef2f2;
+        }
+        .country-chip .chip-flag {
+            font-size: 11px;
+            line-height: 1;
+        }
+        .country-chip .chip-count {
+            font-size: 8px;
+            color: #94a3b8;
+            font-weight: 700;
+        }
+
+        /* Evidence chain score indicator */
+        .evidence-chain-score {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.3rem;
+            padding: 0.15rem 0.4rem;
+            border-radius: 0.3rem;
+            font-size: 9px;
+            font-weight: 900;
+            letter-spacing: 0.06em;
+        }
+        .evidence-chain-score[data-level="critical"] {
+            color: #b91c1c;
+            background: rgba(220, 38, 38, 0.08);
+        }
+        .evidence-chain-score[data-level="high"] {
+            color: #b45309;
+            background: rgba(245, 158, 11, 0.08);
+        }
+        .evidence-chain-score[data-level="medium"] {
+            color: #1d4ed8;
+            background: rgba(59, 130, 246, 0.08);
+        }
+        .evidence-chain-score[data-level="low"] {
+            color: #166534;
+            background: rgba(22, 163, 74, 0.08);
+        }
+
+        /* Evidence chain country tag inside hop */
+        .hop-country-tag {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.2rem;
+            padding: 0.1rem 0.35rem;
+            border-radius: 0.25rem;
+            font-size: 8px;
+            font-weight: 700;
+            color: #64748b;
+            background: rgba(148, 163, 184, 0.12);
+        }
+        .hop-country-tag.foreign {
+            color: #b45309;
+            background: rgba(245, 158, 11, 0.1);
+        }
+        .hop-country-tag.high-risk {
+            color: #b91c1c;
+            background: rgba(220, 38, 38, 0.1);
+        }
     </style>
     <link rel="stylesheet" href="../css/global.css?v=3.2">
     <link rel="icon" type="image/png" href="../assets/logo.png">
@@ -578,7 +700,7 @@
             </div>
 
             <div id="graph-intelligence-strip"
-                class="mt-4 w-full max-w-5xl rounded-xl border border-outline-variant/20 bg-slate-50/70 px-3 py-2 flex flex-wrap items-center gap-2">
+                class="mt-4 w-full rounded-xl border border-outline-variant/20 bg-slate-50/70 px-3 py-2 flex flex-wrap items-center gap-2">
                 <div class="model-metric-chip">Chế độ <span id="model-mode-label" class="value">--</span></div>
                 <div class="model-metric-chip">Ngưỡng nút <span id="node-threshold-value" class="value">--</span></div>
                 <div class="model-metric-chip">Ngưỡng cạnh <span id="edge-threshold-value" class="value">--</span></div>
@@ -587,7 +709,7 @@
                 <div class="model-metric-chip">Độ sâu <span id="query-depth-value" class="value">--</span></div>
             </div>
 
-            <div id="graph-workbench-tabs" role="tablist" aria-label="Không gian làm việc đồ thị VAT" class="mt-4 max-w-5xl bg-surface-container-low rounded-xl border border-outline-variant/20 px-2 py-2 flex items-center gap-1.5">
+            <div id="graph-workbench-tabs" role="tablist" aria-label="Không gian làm việc đồ thị VAT" class="mt-4 w-full bg-surface-container-low rounded-xl border border-outline-variant/20 px-2 py-2 flex items-center gap-1.5">
                 <button id="workbench-tab-graph" class="workbench-tab" role="tab" aria-selected="false" aria-controls="investigation-section" tabindex="-1" data-mode="graph" aria-label="Chuyển sang không gian bản đồ đồ thị">
                     <span class="material-symbols-outlined text-[14px]">hub</span>
                     Bản đồ
@@ -613,7 +735,7 @@
                 <span class="font-black text-primary-container">Esc</span> xóa tiêu điểm.
             </p>
 
-            <div id="investigation-summary" aria-live="polite" class="mt-4 w-full max-w-5xl hidden">
+            <div id="investigation-summary" aria-live="polite" class="mt-4 w-full hidden">
                 <div class="grid grid-cols-2 lg:grid-cols-4 gap-2">
                     <div class="investigation-summary-card">
                         <p class="label">Doanh nghiệp trong cụm</p>
@@ -638,7 +760,7 @@
                 </div>
             </div>
 
-            <div id="graph-risk-analytics" class="mt-4 w-full max-w-5xl hidden">
+            <div id="graph-risk-analytics" class="mt-4 w-full hidden">
                 <div class="grid grid-cols-1 lg:grid-cols-2 gap-3">
                     <div class="bg-white rounded-xl border border-outline-variant/20 px-4 py-3">
                         <p class="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-2">Phân bổ Rủi ro trong Cụm</p>
@@ -861,6 +983,45 @@
                         </div>
                     </div>
                     <p id="forensic-intel-updated" class="mt-2 text-[10px] text-slate-400 font-medium">Đang đồng bộ dữ liệu sở hữu/vòng...</p>
+                </div>
+                <!-- ── Geo-Forensic Compatibility v2 ── -->
+                <div id="geo-compat-banner" class="hidden px-6 py-3 border-b border-surface-container bg-surface-container-low/30">
+                    <div class="flex items-center justify-between gap-2 mb-2">
+                        <p class="text-[10px] font-black uppercase tracking-widest text-slate-500">Tương thích Mô hình</p>
+                        <span id="compat-status-badge" class="text-[9px] font-black uppercase px-2 py-0.5 rounded border compat-badge-unknown">ĐANG TẢI</span>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <div class="flex-1 bg-slate-100 rounded-full h-1.5 overflow-hidden">
+                            <div id="compat-progress-bar" class="h-full bg-emerald-500 rounded-full transition-all duration-500" style="width: 0%"></div>
+                        </div>
+                        <span id="compat-ratio-label" class="text-[10px] font-black text-slate-500">0%</span>
+                    </div>
+                    <p id="compat-detail-text" class="mt-1.5 text-[10px] text-slate-400 font-medium">Đang kiểm tra tương thích...</p>
+                </div>
+                <div id="cross-border-strip" class="hidden px-6 py-3 border-b border-surface-container bg-surface-container-low/30">
+                    <div class="flex items-center justify-between gap-2 mb-2">
+                        <p class="text-[10px] font-black uppercase tracking-widest text-slate-500 flex items-center gap-1.5">
+                            <span class="material-symbols-outlined text-[14px]">public</span>
+                            Tín hiệu Xuyên biên giới
+                        </p>
+                        <span id="cross-border-risk-badge" class="text-[9px] font-black uppercase px-2 py-0.5 rounded border cross-border-badge-low">THẤP</span>
+                    </div>
+                    <div id="cross-border-country-chips" class="flex flex-wrap gap-1.5 mt-2"></div>
+                    <div class="mt-2 grid grid-cols-3 gap-2">
+                        <div class="bg-white border border-outline-variant/20 rounded-lg px-2 py-1.5 text-center">
+                            <p class="text-[8px] font-bold uppercase tracking-wider text-slate-400">Ngoài VN</p>
+                            <p id="cross-border-foreign-count" class="text-xs font-black text-primary-container">0</p>
+                        </div>
+                        <div class="bg-white border border-outline-variant/20 rounded-lg px-2 py-1.5 text-center">
+                            <p class="text-[8px] font-bold uppercase tracking-wider text-slate-400">Rủi ro cao</p>
+                            <p id="cross-border-highrisk-count" class="text-xs font-black text-error">0</p>
+                        </div>
+                        <div class="bg-white border border-outline-variant/20 rounded-lg px-2 py-1.5 text-center">
+                            <p class="text-[8px] font-bold uppercase tracking-wider text-slate-400">Điểm rủi ro</p>
+                            <p id="cross-border-score" class="text-xs font-black text-amber-700">0.0</p>
+                        </div>
+                    </div>
+                    <p id="cross-border-summary-text" class="mt-1.5 text-[10px] text-slate-400 font-medium"></p>
                 </div>
                 <div class="px-6 border-b border-surface-container flex gap-6 bg-white pt-2" role="tablist" aria-label="Chế độ bảng điều tra số">
                     <button id="tab-logs" role="tab" aria-selected="true" aria-controls="investigation-logs" tabindex="0" class="py-2 text-[10px] font-black uppercase text-primary-container border-b-2 border-primary-container tracking-widest transition-colors">NHẬT KÝ TRUY VẾT</button>

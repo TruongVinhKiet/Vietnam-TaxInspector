@@ -44,6 +44,7 @@ FEATURE_NAMES = [
 ]
 SIM_ACCEPTANCE_R2_MIN = 0.90
 SIM_ACCEPTANCE_RMSE_MAX = 0.08
+SIM_MIN_TRAINING_SAMPLES = max(10_000, int(os.environ.get("SIMULATION_MIN_REQUIRED_SAMPLES", "10000")))
 
 # Baseline Params
 BASELINE_VAT = 10.0
@@ -220,12 +221,22 @@ def generate_synthetic_data(baselines: list[dict], n_samples: int = 10000):
         
     return np.array(X), np.array(y)
 
-def train_model(db_url: str, sample_size: int = 10000, seed: int = 42):
+def train_model(
+    db_url: str,
+    sample_size: int = 10000,
+    seed: int = 42,
+    min_samples: int = SIM_MIN_TRAINING_SAMPLES,
+):
     print("=" * 60)
     print("  SIMULATION MODEL TRAINING (Macro Elasticity)")
     print("=" * 60)
 
     np.random.seed(int(seed))
+    required_samples = max(SIM_MIN_TRAINING_SAMPLES, int(min_samples))
+    if int(sample_size) < required_samples:
+        raise RuntimeError(
+            f"Simulation training requires sample_size >= {required_samples:,}; got {int(sample_size):,}."
+        )
     
     print("[1/4] Extracting industry baselines from DB...")
     env_url = os.environ.get("DATABASE_URL")
@@ -242,8 +253,7 @@ def train_model(db_url: str, sample_size: int = 10000, seed: int = 42):
         
     baselines = fetch_industry_baselines(db_url)
     if not baselines:
-        print("[ABORT] No industry baselines found.")
-        return
+        raise RuntimeError("No industry baselines found.")
         
     print(f"      Matched {len(baselines)} industries.")
     
@@ -315,6 +325,11 @@ def train_model(db_url: str, sample_size: int = 10000, seed: int = 42):
         json.dump(config, f, indent=2)
 
     acceptance_criteria = {
+        "training_samples_min": {
+            "pass": bool(int(sample_size) >= int(required_samples)),
+            "actual": int(sample_size),
+            "threshold": int(required_samples),
+        },
         "r2_min": {
             "pass": bool(r2 >= SIM_ACCEPTANCE_R2_MIN),
             "actual": round(r2, 4),
@@ -341,6 +356,7 @@ def train_model(db_url: str, sample_size: int = 10000, seed: int = 42):
         },
         "dataset": {
             "total_samples": sample_size,
+            "required_min_samples": int(required_samples),
             "train_size": len(X_train),
             "test_size": len(X_test),
         }
@@ -367,6 +383,11 @@ if __name__ == "__main__":
     parser.add_argument("--db-url", default="default")
     parser.add_argument("--sample-size", type=int, default=20000)
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--min-samples", type=int, default=SIM_MIN_TRAINING_SAMPLES)
     args = parser.parse_args()
+
+    min_samples = max(SIM_MIN_TRAINING_SAMPLES, int(args.min_samples))
+    if int(args.sample_size) < min_samples:
+        raise SystemExit(f"--sample-size must be >= --min-samples ({min_samples:,})")
     
-    train_model(args.db_url, args.sample_size, seed=args.seed)
+    train_model(args.db_url, args.sample_size, seed=args.seed, min_samples=min_samples)

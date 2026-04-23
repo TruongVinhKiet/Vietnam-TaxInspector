@@ -678,6 +678,7 @@ function initGraph() {
     svg.call(zoomBehavior);
 
     // Layers
+    zoomGroup.append("g").attr("class", "boundary-layer");
     zoomGroup.append("g").attr("class", "edges-layer");
     zoomGroup.append("g").attr("class", "nodes-layer");
     zoomGroup.append("g").attr("class", "labels-layer");
@@ -1417,11 +1418,13 @@ function renderGraph(data) {
     svg.attr("viewBox", `0 0 ${width} ${height}`);
 
     const zoomGroup = svg.select(".zoom-group");
+    const boundaryLayer = zoomGroup.select(".boundary-layer");
     const edgesLayer = zoomGroup.select(".edges-layer");
     const nodesLayer = zoomGroup.select(".nodes-layer");
     const labelsLayer = zoomGroup.select(".labels-layer");
 
     // Clear previous
+    boundaryLayer.selectAll("*").remove();
     edgesLayer.selectAll("*").remove();
     nodesLayer.selectAll("*").remove();
     labelsLayer.selectAll("*").remove();
@@ -1453,12 +1456,28 @@ function renderGraph(data) {
     // ── Simulation ──
     if (simulation) simulation.stop();
 
+    const countriesArray = [...new Set(nodes.map(d => d.country_inferred || "Việt Nam"))];
+    
     simulation = d3.forceSimulation(nodes)
         .force("link", d3.forceLink(edges).id(d => d.id).distance(180).strength(0.6))
         .force("charge", d3.forceManyBody().strength(-800))
-        .force("center", d3.forceCenter(width / 2, height / 2))
         .force("collision", d3.forceCollide().radius(60).iterations(4))
         .alphaDecay(0.05);
+
+    if (countriesArray.length <= 1) {
+        simulation.force("center", d3.forceCenter(width / 2, height / 2));
+    } else {
+        countriesArray.forEach((c, i) => {
+            const isVN = c.toLowerCase().includes("vietnam") || c.toLowerCase().includes("việt nam");
+            const offsetR = isVN ? 0 : 700; 
+            const theta = (i * 2 * Math.PI) / (countriesArray.length - 1 || 1);
+            const tx = width / 2 + offsetR * Math.cos(theta);
+            const ty = height / 2 + offsetR * Math.sin(theta);
+            
+            simulation.force(`x-${i}`, d3.forceX(tx).strength(d => (d.country_inferred || "Việt Nam") === c ? 0.15 : 0));
+            simulation.force(`y-${i}`, d3.forceY(ty).strength(d => (d.country_inferred || "Việt Nam") === c ? 0.15 : 0));
+        });
+    }
 
     // ── Edges ──
     const edgeGroups = edgesLayer.selectAll("g.edge")
@@ -1583,13 +1602,84 @@ function renderGraph(data) {
                 if (d.group === "suspicious") return "rgba(255,255,255,0.15)";
                 return "rgba(255,255,255,0.3)";
             });
-    }).on("click", function(event, d) {
-        // Highlight connected edges
+    // Highlight connected edges
         highlightNode(d.id, edges);
     });
 
+    // ── Boundaries ──
+    const countries = [...new Set(nodes.map(d => d.country_inferred || "Việt Nam"))];
+    
+    const getCountryColor = (c) => {
+        const name = c.toLowerCase();
+        if (name.includes("vietnam") || name.includes("việt nam")) return "rgba(16, 185, 129, 0.05)";
+        if (name.includes("cayman")) return "rgba(244, 63, 94, 0.05)";
+        if (name.includes("singapore")) return "rgba(56, 189, 248, 0.05)";
+        if (name.includes("virgin")) return "rgba(245, 158, 11, 0.05)";
+        return "rgba(148, 163, 184, 0.05)";
+    };
+    
+    const getCountryStroke = (c) => {
+        const name = c.toLowerCase();
+        if (name.includes("vietnam") || name.includes("việt nam")) return "#10b981"; 
+        if (name.includes("cayman")) return "#f43f5e"; 
+        if (name.includes("singapore")) return "#38bdf8"; 
+        if (name.includes("virgin")) return "#f59e0b"; 
+        return "#94a3b8"; 
+    };
+
+    const getCountryFlag = (c) => {
+        const name = c.toLowerCase();
+        if (name.includes("vietnam") || name.includes("việt nam")) return "🇻🇳";
+        if (name.includes("cayman")) return "🇰🇾";
+        if (name.includes("singapore")) return "🇸🇬";
+        if (name.includes("virgin")) return "🇻🇬";
+        return "🏳️";
+    };
+
+    const boundaryGroups = boundaryLayer.selectAll("g.country-boundary")
+        .data(countries)
+        .join("g")
+        .attr("class", "country-boundary");
+
+    boundaryGroups.append("circle")
+        .attr("fill", d => getCountryColor(d))
+        .attr("stroke", d => getCountryStroke(d))
+        .attr("stroke-width", 2)
+        .attr("stroke-dasharray", "8 8");
+
+    const boundaryLabels = boundaryGroups.append("text")
+        .attr("class", "country-label")
+        .attr("text-anchor", "middle")
+        .attr("fill", "#94a3b8")
+        .attr("font-size", "14px")
+        .attr("font-weight", "800")
+        .attr("font-family", "Inter, sans-serif")
+        .attr("letter-spacing", "0.05em")
+        .style("opacity", 0.8)
+        .text(d => `${getCountryFlag(d)} ${d.toUpperCase()}`);
+
     // ── Tick ──
     simulation.on("tick", () => {
+        // Update boundaries
+        const clusterCenters = {};
+        countries.forEach(c => {
+            const groupNodes = nodes.filter(n => (n.country_inferred || "Việt Nam") === c);
+            if (!groupNodes.length) return;
+            const cx = d3.mean(groupNodes, d => d.x);
+            const cy = d3.mean(groupNodes, d => d.y);
+            const r = d3.max(groupNodes, d => Math.sqrt(Math.pow(d.x - cx, 2) + Math.pow(d.y - cy, 2))) || 0;
+            clusterCenters[c] = { cx, cy, r: Math.max(r + 80, 150) }; // min radius
+        });
+
+        boundaryGroups.select("circle")
+            .attr("cx", d => clusterCenters[d]?.cx || 0)
+            .attr("cy", d => clusterCenters[d]?.cy || 0)
+            .attr("r", d => clusterCenters[d]?.r || 0);
+
+        boundaryLabels
+            .attr("x", d => clusterCenters[d]?.cx || 0)
+            .attr("y", d => (clusterCenters[d]?.cy || 0) - (clusterCenters[d]?.r || 0) + 24);
+
         // Update edge paths (curved for bidirectional or multi-edges)
         lines.attr("d", d => {
             const dx = d.target.x - d.source.x;
@@ -2172,8 +2262,115 @@ function dedupeEvidencePaths(paths) {
 }
 
 
+function renderGeoForensicSignals(compatDiagnostics, crossBorderSignals) {
+    const banner = document.getElementById("geo-compat-banner");
+    const strip = document.getElementById("cross-border-strip");
+
+    if (!compatDiagnostics && !crossBorderSignals) {
+        if (banner) banner.classList.add("hidden");
+        if (strip) strip.classList.add("hidden");
+        return;
+    }
+
+    if (banner && compatDiagnostics) {
+        banner.classList.remove("hidden");
+        const status = compatDiagnostics.status || "unknown";
+        const ratio = toFiniteNumber(compatDiagnostics.completion_ratio, 0);
+
+        const badge = document.getElementById("compat-status-badge");
+        if (badge) {
+            badge.className = "text-[9px] font-black uppercase px-2 py-0.5 rounded border transition-colors";
+            if (status === "pass") {
+                badge.textContent = "ĐẠT";
+                badge.classList.add("compat-badge-pass");
+            } else if (status === "partial") {
+                badge.textContent = "CHƯA FULL";
+                badge.classList.add("compat-badge-partial");
+            } else if (status === "fail") {
+                badge.textContent = "LỖI TƯƠNG THÍCH";
+                badge.classList.add("compat-badge-fail");
+            } else {
+                badge.textContent = "ĐANG TẢI";
+                badge.classList.add("compat-badge-unknown");
+            }
+        }
+
+        const bar = document.getElementById("compat-progress-bar");
+        if (bar) {
+            bar.style.width = ratio + "%";
+            bar.className = "h-full rounded-full transition-all duration-500 " +
+                (status === "pass" ? "bg-emerald-500" :
+                    status === "partial" ? "bg-amber-500" :
+                        status === "fail" ? "bg-error" : "bg-slate-300");
+        }
+
+        const ratioLabel = document.getElementById("compat-ratio-label");
+        if (ratioLabel) {
+            ratioLabel.textContent = ratio.toFixed(0) + "%";
+            ratioLabel.style.color = (status === "pass" ? "#10b981" : status === "partial" ? "#f59e0b" : "#ef4444");
+        }
+
+        const detail = document.getElementById("compat-detail-text");
+        if (detail) {
+            detail.textContent = "Tương thích Data Contract: " + (compatDiagnostics.schema_version || "v2");
+        }
+    } else if (banner) {
+        banner.classList.add("hidden");
+    }
+
+    if (strip && crossBorderSignals) {
+        if (crossBorderSignals.available) {
+            strip.classList.remove("hidden");
+
+            const riskLevel = String(crossBorderSignals.risk_level || "low").toLowerCase();
+            const badge = document.getElementById("cross-border-risk-badge");
+            if (badge) {
+                badge.className = "text-[9px] font-black uppercase px-2 py-0.5 rounded border transition-colors " +
+                    (riskLevel === "critical" || riskLevel === "high" ? "cross-border-badge-high" :
+                        riskLevel === "medium" ? "cross-border-badge-medium" : "cross-border-badge-low");
+                badge.textContent = riskLevel === "critical" ? "NGHIÊM TRỌNG" : riskLevel === "high" ? "CAO" : riskLevel === "medium" ? "TRUNG BÌNH" : "THẤP";
+            }
+
+            setElementText("cross-border-foreign-count", crossBorderSignals.companies_outside_vietnam || "0");
+            setElementText("cross-border-highrisk-count", crossBorderSignals.high_risk_country_exposure?.count || "0");
+            setElementText("cross-border-score", toFiniteNumber(crossBorderSignals.risk_score, 0).toFixed(1));
+
+            const total = toFiniteNumber(crossBorderSignals.scope_companies_total, 0);
+            const foreign = toFiniteNumber(crossBorderSignals.companies_outside_vietnam, 0);
+            const crossTradesCount = toFiniteNumber(crossBorderSignals.cross_border_invoice_count, 0);
+            const summary = document.getElementById("cross-border-summary-text");
+            if (summary) {
+                summary.innerHTML = `Phát hiện <b>${foreign}/${total}</b> tỷ lệ ngoài lãnh thổ. Ghi nhận <b>${crossTradesCount}</b> giao dịch chéo quốc gia.`;
+            }
+
+            const chipsContainer = document.getElementById("cross-border-country-chips");
+            if (chipsContainer && Array.isArray(crossBorderSignals.country_company_distribution)) {
+                const limitChips = crossBorderSignals.country_company_distribution.slice(0, 4);
+                chipsContainer.innerHTML = limitChips.map(c => {
+                    const countryName = c.country || "Unknown";
+                    const isVN = countryName.toLowerCase() === "vietnam" || countryName.toLowerCase() === "việt nam";
+                    const flag = isVN ? "🇻🇳" : "🏳️";
+                    const count = c.companies || 0;
+                    const highRisk = !isVN && count > 0 ? "high-risk" : "";
+                    return `<span class="country-chip ${highRisk}"><span class="chip-flag">${flag}</span> ${escapeHtml(countryName)} <span class="chip-count">x${count}</span></span>`;
+                }).join("");
+            }
+        } else {
+            strip.classList.add("hidden");
+        }
+    } else if (strip) {
+        strip.classList.add("hidden");
+    }
+}
+
+
 function buildIntegratedEvidencePaths(data, forensicIntel) {
-    const basePaths = Array.isArray(data?.evidence_paths) ? data.evidence_paths : [];
+    let basePaths = [];
+    if (Array.isArray(data?.evidence_chains) && data.evidence_chains.length > 0) {
+        basePaths = data.evidence_chains;
+    } else if (Array.isArray(data?.evidence_paths)) {
+        basePaths = data.evidence_paths;
+    }
     const integratedPaths = [];
 
     const ringPayload = forensicIntel && typeof forensicIntel.ring === "object" ? forensicIntel.ring : null;
@@ -2321,6 +2518,9 @@ function renderForensicPanel(data, forensicIntel = null) {
         }
     }
 
+    // Render Geo-Forensic Compatibility v2
+    renderGeoForensicSignals(payload.compatibility_diagnostics, payload.cross_border_signals);
+
     // Evidence Paths Rendering
     const pathsContainer = document.getElementById("evidence-paths-container");
     const pathBadge = document.getElementById("path-badge");
@@ -2351,27 +2551,58 @@ function renderForensicPanel(data, forensicIntel = null) {
                 const companiesCsv = Array.isArray(p.companies) ? p.companies.map(c => String(c)).join(",") : "";
                 const companiesEncoded = encodeURIComponent(companiesCsv);
                 const hops = Array.isArray(p.hops) ? p.hops : [];
+                const chainScore = typeof p.chain_score !== 'undefined' ? 
+                                    `<span class="evidence-chain-score" data-level="${riskLevelKey}">
+                                        <span class="material-symbols-outlined" style="font-size: 11px;">radar</span> ${toFiniteNumber(p.chain_score, 0).toFixed(1)}
+                                    </span>` : '';
                 
-                const hopsHTML = hops.length ? hops.map((h) => `
+                const hopsHTML = hops.length ? hops.map((h) => {
+                    const fromCountry = typeof h.provenance?.from_country === 'string' && h.provenance.from_country.trim() !== '' ? h.provenance.from_country : '';
+                    const toCountry = typeof h.provenance?.to_country === 'string' && h.provenance.to_country.trim() !== '' ? h.provenance.to_country : '';
+                    const isFromVN = fromCountry.toLowerCase() === 'vietnam' || fromCountry.toLowerCase() === 'việt nam';
+                    const isToVN = toCountry.toLowerCase() === 'vietnam' || toCountry.toLowerCase() === 'việt nam';
+                    
+                    let fromTag = '';
+                    if (fromCountry) {
+                        const styleClass = isFromVN ? '' : 'foreign';
+                        const flag = '🇻🇳'; // Assuming VN mostly, or generic marker
+                        const displayFlag = isFromVN ? flag : '🏳️';
+                        fromTag = `<span class="hop-country-tag ${styleClass}">${displayFlag} ${escapeHtml(fromCountry)}</span>`;
+                    }
+                    
+                    let toTag = '';
+                    if (toCountry) {
+                        const styleClass = isToVN ? '' : 'foreign';
+                        const displayFlag = isToVN ? '🇻🇳' : '🏳️';
+                        toTag = `<span class="hop-country-tag ${styleClass}">${displayFlag} ${escapeHtml(toCountry)}</span>`;
+                    }
+                    
+                    return `
                     <div class="relative pl-6 pb-4 border-l-2 border-slate-200 last:border-transparent last:pb-0">
                         <div class="absolute -left-[5px] top-1 w-2 h-2 rounded-full bg-primary-container z-10"></div>
                         <div class="bg-surface-container-low p-2 rounded-lg border border-outline-variant/30 text-[10px]">
-                            <div class="flex justify-between font-bold text-primary-container mb-1">
-                                <span>${escapeHtml(String(h.from || "").substring(0, 6))}... → ${escapeHtml(String(h.to || "").substring(0, 6))}...</span>
-                                <span class="text-error">${escapeHtml(h.amount_formatted || formatVndCompact(h.amount || 0))}</span>
+                            <div class="flex justify-between items-center mb-1">
+                                <span class="font-bold text-primary-container">
+                                    ${escapeHtml(String(h.from || "").substring(0, 6))}... → ${escapeHtml(String(h.to || "").substring(0, 6))}...
+                                </span>
+                                <span class="text-error font-bold">${escapeHtml(h.amount_formatted || formatVndCompact(h.amount || 0))}</span>
                             </div>
+                            ${fromTag || toTag ? `<div class="flex gap-1.5 mb-1.5">${fromTag}${toTag ? '<span class="text-slate-400 mt-[-1px]">→</span>' + toTag : ''}</div>` : ''}
                             <div class="flex justify-between text-slate-500 font-mono">
                                 <span>Ngày: ${escapeHtml(h.date || "")}</span>
                                 <span>Xác suất: ${toFiniteNumber(h.fraud_probability, 0).toFixed(2)}</span>
                             </div>
                         </div>
                     </div>
-                `).join("") : `<p class="text-[10px] text-slate-400 italic">Chuỗi này chưa có chi tiết giao dịch theo từng chặng.</p>`;
+                `}).join("") : `<p class="text-[10px] text-slate-400 italic">Chuỗi này chưa có chi tiết giao dịch theo từng chặng.</p>`;
 
                 return `
                     <div class="border border-outline-variant/30 rounded-xl p-3 mb-4 log-entry" style="animation: fadeSlideIn 0.4s ease ${pIdx * 0.1}s both;">
                         <div class="flex justify-between items-center mb-2">
-                            <span class="text-xs font-black text-primary-container">${pathId}</span>
+                            <div class="flex items-center gap-2">
+                                <span class="text-xs font-black text-primary-container">${pathId}</span>
+                                ${chainScore}
+                            </div>
                             <span class="text-[9px] font-black uppercase px-2 py-0.5 rounded border ${cColor}">${riskLevel}</span>
                         </div>
                         <p class="text-[10px] text-on-surface-variant font-medium leading-relaxed mb-3">${summary}</p>

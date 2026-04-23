@@ -38,6 +38,7 @@ FRAUD_QUALITY_FILE = MODELS_DIR / "fraud_quality_report.json"
 GNN_QUALITY_FILE = MODELS_DIR / "serving_e2e_report.json"
 OSINT_QUALITY_FILE = MODELS_DIR / "osint_quality_report.json"
 SIM_QUALITY_FILE = MODELS_DIR / "simulation_quality_report.json"
+MIN_REQUIRED_TRAINING_SAMPLES = 10_000
 
 
 def _utc_now() -> str:
@@ -88,7 +89,14 @@ def _collect_failed_criteria(criteria: dict[str, Any] | None) -> list[str]:
     return failed
 
 
-def _evaluate_fraud_gate() -> dict[str, Any]:
+def _to_int(value: Any, default: int = 0) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return int(default)
+
+
+def _evaluate_fraud_gate(min_training_samples: int) -> dict[str, Any]:
     payload = _load_json(FRAUD_QUALITY_FILE)
     if not payload:
         return {
@@ -103,7 +111,22 @@ def _evaluate_fraud_gate() -> dict[str, Any]:
     gates = payload.get("acceptance_gates") or {}
     criteria = gates.get("criteria") or {}
     calibrated = ((payload.get("performance") or {}).get("calibrated") or {})
-    passed = bool(gates.get("overall_pass", False))
+    dataset = payload.get("dataset") or {}
+
+    total_samples = _to_int(dataset.get("total_size"), 0)
+    if total_samples <= 0:
+        total_samples = (
+            _to_int(dataset.get("train_size"), 0)
+            + _to_int(dataset.get("calibration_size"), 0)
+            + _to_int(dataset.get("test_size"), 0)
+        )
+
+    quality_pass = bool(gates.get("overall_pass", False))
+    sample_pass = total_samples >= int(min_training_samples)
+    passed = bool(quality_pass and sample_pass)
+    failed_criteria = _collect_failed_criteria(criteria)
+    if not sample_pass and "training_samples_min" not in failed_criteria:
+        failed_criteria.append("training_samples_min")
 
     return {
         "track": "fraud",
@@ -111,17 +134,21 @@ def _evaluate_fraud_gate() -> dict[str, Any]:
         "status": "pass" if passed else "fail",
         "report_file": str(FRAUD_QUALITY_FILE),
         "message": "Fraud gate passed." if passed else "Fraud gate failed.",
-        "failed_criteria": _collect_failed_criteria(criteria),
+        "failed_criteria": failed_criteria,
+        "thresholds": {
+            "training_samples_min": int(min_training_samples),
+        },
         "metrics": {
             "auc_roc": calibrated.get("auc_roc"),
             "pr_auc": calibrated.get("pr_auc"),
             "brier": calibrated.get("brier"),
             "ece": calibrated.get("ece"),
+            "total_samples": int(total_samples),
         },
     }
 
 
-def _evaluate_gnn_gate() -> dict[str, Any]:
+def _evaluate_gnn_gate(min_training_samples: int) -> dict[str, Any]:
     payload = _load_json(GNN_QUALITY_FILE)
     if not payload:
         return {
@@ -136,7 +163,18 @@ def _evaluate_gnn_gate() -> dict[str, Any]:
     gates = payload.get("acceptance_gates") or {}
     criteria = gates.get("criteria") or {}
     raw_test = payload.get("raw_test") or {}
-    passed = bool(gates.get("overall_pass", False))
+    dataset = payload.get("dataset") or {}
+
+    total_samples = _to_int(dataset.get("invoices_total"), 0)
+    if total_samples <= 0:
+        total_samples = _to_int(dataset.get("graph_edges"), 0)
+
+    quality_pass = bool(gates.get("overall_pass", False))
+    sample_pass = total_samples >= int(min_training_samples)
+    passed = bool(quality_pass and sample_pass)
+    failed_criteria = _collect_failed_criteria(criteria)
+    if not sample_pass and "training_edges_min" not in failed_criteria:
+        failed_criteria.append("training_edges_min")
 
     return {
         "track": "vat_gnn",
@@ -144,17 +182,21 @@ def _evaluate_gnn_gate() -> dict[str, Any]:
         "status": "pass" if passed else "fail",
         "report_file": str(GNN_QUALITY_FILE),
         "message": "GNN gate passed." if passed else "GNN gate failed.",
-        "failed_criteria": _collect_failed_criteria(criteria),
+        "failed_criteria": failed_criteria,
+        "thresholds": {
+            "training_samples_min": int(min_training_samples),
+        },
         "metrics": {
             "node_f1": raw_test.get("node_f1"),
             "edge_f1": raw_test.get("edge_f1"),
             "node_pr_auc": raw_test.get("node_pr_auc"),
             "edge_pr_auc": raw_test.get("edge_pr_auc"),
+            "total_samples": int(total_samples),
         },
     }
 
 
-def _evaluate_osint_gate(min_auc: float, min_pr_auc: float) -> dict[str, Any]:
+def _evaluate_osint_gate(min_auc: float, min_pr_auc: float, min_training_samples: int) -> dict[str, Any]:
     payload = _load_json(OSINT_QUALITY_FILE)
     if not payload:
         return {
@@ -170,16 +212,20 @@ def _evaluate_osint_gate(min_auc: float, min_pr_auc: float) -> dict[str, Any]:
     metrics = payload.get("metrics") or {}
     auc = metrics.get("auc")
     pr_auc = metrics.get("pr_auc")
+    total_samples = _to_int((payload.get("dataset") or {}).get("total_samples"), 0)
 
     pass_auc = isinstance(auc, (int, float)) and float(auc) >= float(min_auc)
     pass_pr = isinstance(pr_auc, (int, float)) and float(pr_auc) >= float(min_pr_auc)
-    passed = bool(pass_auc and pass_pr)
+    pass_samples = total_samples >= int(min_training_samples)
+    passed = bool(pass_auc and pass_pr and pass_samples)
 
     failed = []
     if not pass_auc:
         failed.append("auc")
     if not pass_pr:
         failed.append("pr_auc")
+    if not pass_samples:
+        failed.append("training_samples_min")
 
     return {
         "track": "osint",
@@ -191,16 +237,17 @@ def _evaluate_osint_gate(min_auc: float, min_pr_auc: float) -> dict[str, Any]:
         "thresholds": {
             "auc_min": float(min_auc),
             "pr_auc_min": float(min_pr_auc),
+            "training_samples_min": int(min_training_samples),
         },
         "metrics": {
             "auc": auc,
             "pr_auc": pr_auc,
-            "total_samples": (payload.get("dataset") or {}).get("total_samples"),
+            "total_samples": int(total_samples),
         },
     }
 
 
-def _evaluate_simulation_gate(min_r2: float, max_rmse: float) -> dict[str, Any]:
+def _evaluate_simulation_gate(min_r2: float, max_rmse: float, min_training_samples: int) -> dict[str, Any]:
     payload = _load_json(SIM_QUALITY_FILE)
     if not payload:
         return {
@@ -216,16 +263,20 @@ def _evaluate_simulation_gate(min_r2: float, max_rmse: float) -> dict[str, Any]:
     metrics = payload.get("metrics") or {}
     r2 = metrics.get("r2")
     rmse = metrics.get("rmse")
+    total_samples = _to_int((payload.get("dataset") or {}).get("total_samples"), 0)
 
     pass_r2 = isinstance(r2, (int, float)) and float(r2) >= float(min_r2)
     pass_rmse = isinstance(rmse, (int, float)) and float(rmse) <= float(max_rmse)
-    passed = bool(pass_r2 and pass_rmse)
+    pass_samples = total_samples >= int(min_training_samples)
+    passed = bool(pass_r2 and pass_rmse and pass_samples)
 
     failed = []
     if not pass_r2:
         failed.append("r2")
     if not pass_rmse:
         failed.append("rmse")
+    if not pass_samples:
+        failed.append("training_samples_min")
 
     return {
         "track": "simulation",
@@ -237,22 +288,32 @@ def _evaluate_simulation_gate(min_r2: float, max_rmse: float) -> dict[str, Any]:
         "thresholds": {
             "r2_min": float(min_r2),
             "rmse_max": float(max_rmse),
+            "training_samples_min": int(min_training_samples),
         },
         "metrics": {
             "r2": r2,
             "rmse": rmse,
             "mae": metrics.get("mae"),
-            "total_samples": (payload.get("dataset") or {}).get("total_samples"),
+            "total_samples": int(total_samples),
         },
     }
 
 
 def _evaluate_all_gates(args: argparse.Namespace) -> dict[str, Any]:
+    min_training_samples = int(args.min_training_samples)
     tracks = [
-        _evaluate_fraud_gate(),
-        _evaluate_gnn_gate(),
-        _evaluate_osint_gate(min_auc=float(args.osint_min_auc), min_pr_auc=float(args.osint_min_pr_auc)),
-        _evaluate_simulation_gate(min_r2=float(args.simulation_min_r2), max_rmse=float(args.simulation_max_rmse)),
+        _evaluate_fraud_gate(min_training_samples=min_training_samples),
+        _evaluate_gnn_gate(min_training_samples=min_training_samples),
+        _evaluate_osint_gate(
+            min_auc=float(args.osint_min_auc),
+            min_pr_auc=float(args.osint_min_pr_auc),
+            min_training_samples=min_training_samples,
+        ),
+        _evaluate_simulation_gate(
+            min_r2=float(args.simulation_min_r2),
+            max_rmse=float(args.simulation_max_rmse),
+            min_training_samples=min_training_samples,
+        ),
     ]
 
     failed = [track["track"] for track in tracks if not bool(track.get("pass", False))]
@@ -266,7 +327,12 @@ def _evaluate_all_gates(args: argparse.Namespace) -> dict[str, Any]:
     }
 
 
-def _build_training_commands(py: str, simulation_sample_size: int, seed_variant: int) -> list[tuple[str, list[str]]]:
+def _build_training_commands(
+    py: str,
+    simulation_sample_size: int,
+    seed_variant: int,
+    min_training_samples: int,
+) -> list[tuple[str, list[str]]]:
     return [
         ("fraud", [py, "ml_engine/train_model.py"]),
         ("vat_gnn", [py, "app/scripts/train_gnn.py"]),
@@ -277,6 +343,8 @@ def _build_training_commands(py: str, simulation_sample_size: int, seed_variant:
                 "ml_engine/train_osint.py",
                 "--db-url",
                 "default",
+                "--min-samples",
+                str(min_training_samples),
                 "--seed",
                 str(seed_variant),
             ],
@@ -290,6 +358,8 @@ def _build_training_commands(py: str, simulation_sample_size: int, seed_variant:
                 "default",
                 "--sample-size",
                 str(simulation_sample_size),
+                "--min-samples",
+                str(min_training_samples),
                 "--seed",
                 str(seed_variant),
             ],
@@ -329,6 +399,7 @@ def _run_single_attempt(args: argparse.Namespace, attempt: int, py: str) -> dict
         py=py,
         simulation_sample_size=int(args.simulation_sample_size),
         seed_variant=seed_variant,
+        min_training_samples=int(args.min_training_samples),
     )
 
     command_results: list[dict[str, Any]] = []
@@ -369,6 +440,7 @@ def run_pipeline(args: argparse.Namespace) -> int:
     print(f"[INFO] python={py}")
     print(f"[INFO] backend={BACKEND_DIR}")
     print(f"[INFO] max_attempts={args.max_attempts} retry_reseed={args.retry_reseed}")
+    print(f"[INFO] min_training_samples={args.min_training_samples}")
 
     attempts: list[dict[str, Any]] = []
     success = False
@@ -425,6 +497,7 @@ def run_pipeline(args: argparse.Namespace) -> int:
             "seed_stride": int(args.seed_stride),
         },
         "quality_thresholds": {
+            "min_training_samples": int(args.min_training_samples),
             "osint_min_auc": float(args.osint_min_auc),
             "osint_min_pr_auc": float(args.osint_min_pr_auc),
             "simulation_min_r2": float(args.simulation_min_r2),
@@ -474,6 +547,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--osint-min-pr-auc", type=float, default=0.35)
     parser.add_argument("--simulation-min-r2", type=float, default=0.90)
     parser.add_argument("--simulation-max-rmse", type=float, default=0.08)
+    parser.add_argument("--min-training-samples", type=int, default=MIN_REQUIRED_TRAINING_SAMPLES)
 
     parser.add_argument("--simulation-sample-size", type=int, default=20000)
     parser.add_argument("--report-file", type=str, default=str(DEFAULT_REPORT_FILE))
@@ -504,8 +578,11 @@ def main() -> int:
     if float(args.simulation_max_rmse) <= 0.0:
         print("[ERROR] --simulation-max-rmse must be > 0")
         return 1
-    if int(args.simulation_sample_size) < 1000:
-        print("[ERROR] --simulation-sample-size must be >= 1000")
+    if int(args.min_training_samples) < MIN_REQUIRED_TRAINING_SAMPLES:
+        print(f"[ERROR] --min-training-samples must be >= {MIN_REQUIRED_TRAINING_SAMPLES}")
+        return 1
+    if int(args.simulation_sample_size) < int(args.min_training_samples):
+        print("[ERROR] --simulation-sample-size must be >= --min-training-samples")
         return 1
 
     return run_pipeline(args)

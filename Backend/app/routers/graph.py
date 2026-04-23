@@ -11,9 +11,11 @@ from sqlalchemy.orm import Session
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 from typing import Optional, Any
+import os
 import hashlib
 import json
 import re
+from datetime import datetime, timezone
 
 from ..database import get_db
 from ..observability import get_structured_logger, log_event
@@ -30,6 +32,17 @@ SUBGRAPH_MAX_NODES = 150
 SUBGRAPH_INVOICE_LIMIT = 500
 FULL_GRAPH_COMPANY_LIMIT = 200
 OWNERSHIP_LINK_QUERY_LIMIT = 500
+GRAPH_COMPAT_SCHEMA_VERSION = "graph-forensic-compat-v2"
+GRAPH_CONTEXT_SOURCE = "graph_forensic_shared"
+GRAPH_FORENSIC_FEATURE_FLAG = os.getenv("GRAPH_FORENSIC_COMPAT_V2", "1").strip().lower() not in {"0", "false", "off", "no"}
+COUNTRY_CONFIDENCE_MIN = 0.55
+HIGH_RISK_COUNTRY_KEYS = {
+    "cayman islands",
+    "british virgin islands",
+    "bvi",
+    "panama",
+    "seychelles",
+}
 
 
 def _ensure_numeric_tax_code(tax_code: Optional[str]) -> Optional[str]:
@@ -205,6 +218,532 @@ def _to_float(value: Any, default: float = 0.0) -> float:
         return float(value)
     except (TypeError, ValueError):
         return float(default)
+
+
+def _to_int(value: Any, default: int = 0) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return int(default)
+
+
+def _utc_now_iso() -> str:
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def _normalize_country(value: Any) -> str:
+    raw = str(value or "").strip()
+    if not raw:
+        return ""
+    lowered = raw.lower()
+    aliases = {
+        "vn": "Vietnam",
+        "viet nam": "Vietnam",
+        "vietnam": "Vietnam",
+        "việt nam": "Vietnam",
+        "hong kong sar": "Hong Kong",
+        "cayman": "Cayman Islands",
+        "british virgin islands (bvi)": "British Virgin Islands",
+    }
+    return aliases.get(lowered, raw)
+
+
+def _is_high_risk_country(country: str) -> bool:
+    return str(country or "").strip().lower() in HIGH_RISK_COUNTRY_KEYS
+
+
+def _extract_company_geo_profiles(companies: list[dict]) -> dict[str, dict[str, Any]]:
+    profiles: dict[str, dict[str, Any]] = {}
+    for company in companies:
+        if not isinstance(company, dict):
+            continue
+        tax_code = str(company.get("tax_code", "")).strip()
+        if not tax_code:
+            continue
+
+        country = _normalize_country(company.get("country_inferred"))
+        is_within_vietnam_raw = company.get("is_within_vietnam")
+        is_within_vietnam = bool(is_within_vietnam_raw) if is_within_vietnam_raw is not None else None
+        if not country and is_within_vietnam is True:
+            country = "Vietnam"
+
+        confidence = max(0.0, min(1.0, _to_float(company.get("confidence_country"), 0.0)))
+        method = str(company.get("geocoding_method") or "").strip().lower() or "unknown"
+        lat = _to_float(company.get("lat"), 0.0)
+        lng = _to_float(company.get("lng"), 0.0)
+        has_geom = not (abs(lat) < 1e-9 and abs(lng) < 1e-9)
+
+        profiles[tax_code] = {
+            "tax_code": tax_code,
+            "country": country,
+            "confidence": confidence,
+            "is_within_vietnam": is_within_vietnam,
+            "geocoding_method": method,
+            "has_geom": has_geom,
+            "lat": lat,
+            "lng": lng,
+            "industry": str(company.get("industry") or "").strip(),
+        }
+    return profiles
+
+
+def _build_cross_border_signals(
+    companies: list[dict],
+    invoices: list[dict],
+    ownership_links: Optional[list[dict]] = None,
+    rings: Optional[list[dict]] = None,
+) -> dict[str, Any]:
+    profiles = _extract_company_geo_profiles(companies)
+    total_companies = len(companies)
+    with_country = 0
+    unknown_country = 0
+    low_confidence = 0
+    invalid_or_missing_geom = 0
+    within_vietnam = 0
+    foreign_companies = 0
+    offshore_proxy_companies = 0
+    country_company_counts: dict[str, int] = {}
+
+    for profile in profiles.values():
+        tax_code = str(profile.get("tax_code") or "")
+        country = str(profile.get("country") or "")
+        confidence = _to_float(profile.get("confidence"), 0.0)
+        method = str(profile.get("geocoding_method") or "")
+        is_within_vietnam = profile.get("is_within_vietnam") is True
+        industry = str(profile.get("industry") or "")
+
+        if tax_code.startswith("99") or industry.lower() == "offshore entity":
+            offshore_proxy_companies += 1
+
+        if country:
+            with_country += 1
+            country_company_counts[country] = country_company_counts.get(country, 0) + 1
+            if country != "Vietnam":
+                foreign_companies += 1
+        else:
+            unknown_country += 1
+
+        if confidence < COUNTRY_CONFIDENCE_MIN:
+            low_confidence += 1
+        if method in {"missing_geom", "invalid_geom", "unknown"} or profile.get("has_geom") is False:
+            invalid_or_missing_geom += 1
+        if is_within_vietnam:
+            within_vietnam += 1
+
+    cross_border_invoice_count = 0
+    invoice_country_coverage_count = 0
+    country_pair_counts: dict[str, int] = {}
+    for inv in invoices:
+        if not isinstance(inv, dict):
+            continue
+        seller = str(inv.get("seller_tax_code", inv.get("from", ""))).strip()
+        buyer = str(inv.get("buyer_tax_code", inv.get("to", ""))).strip()
+        seller_country = str((profiles.get(seller) or {}).get("country") or "")
+        buyer_country = str((profiles.get(buyer) or {}).get("country") or "")
+        if not seller_country or not buyer_country:
+            continue
+        invoice_country_coverage_count += 1
+        if seller_country != buyer_country:
+            cross_border_invoice_count += 1
+            pair_key = f"{seller_country}->{buyer_country}"
+            country_pair_counts[pair_key] = country_pair_counts.get(pair_key, 0) + 1
+
+    high_risk_countries = sorted(
+        [country for country in country_company_counts.keys() if _is_high_risk_country(country)]
+    )
+
+    cross_border_ratio = (
+        float(cross_border_invoice_count) / float(max(1, invoice_country_coverage_count))
+    )
+    invoice_coverage = float(invoice_country_coverage_count) / float(max(1, len(invoices)))
+
+    risk_score = min(
+        100.0,
+        (cross_border_ratio * 55.0)
+        + (min(5, len(high_risk_countries)) * 8.0)
+        + (min(10, foreign_companies) * 2.5)
+        + (min(10, offshore_proxy_companies) * 1.5),
+    )
+    if risk_score >= 70.0:
+        risk_level = "high"
+    elif risk_score >= 35.0:
+        risk_level = "medium"
+    else:
+        risk_level = "low"
+
+    top_country_exposures = sorted(
+        [
+            {
+                "country": country,
+                "companies": count,
+                "high_risk": _is_high_risk_country(country),
+            }
+            for country, count in country_company_counts.items()
+            if country and country != "Vietnam"
+        ],
+        key=lambda row: (row["companies"], row["high_risk"]),
+        reverse=True,
+    )[:6]
+
+    top_country_pairs = sorted(
+        [
+            {"pair": pair, "invoice_count": count}
+            for pair, count in country_pair_counts.items()
+        ],
+        key=lambda row: row["invoice_count"],
+        reverse=True,
+    )[:6]
+
+    return {
+        "available": bool(total_companies > 0),
+        "risk_level": risk_level,
+        "risk_score": round(float(risk_score), 2),
+        "scope_companies_total": int(total_companies),
+        "scope_invoices_total": int(len(invoices)),
+        "companies_with_country": int(with_country),
+        "companies_unknown_country": int(unknown_country),
+        "companies_with_low_confidence": int(low_confidence),
+        "companies_invalid_or_missing_geom": int(invalid_or_missing_geom),
+        "companies_within_vietnam": int(within_vietnam),
+        "companies_outside_vietnam": int(foreign_companies),
+        "offshore_proxy_companies": int(offshore_proxy_companies),
+        "cross_border_invoice_count": int(cross_border_invoice_count),
+        "cross_border_invoice_ratio": round(float(cross_border_ratio), 4),
+        "invoice_country_coverage": round(float(invoice_coverage), 4),
+        "high_risk_country_exposure": {
+            "count": int(len(high_risk_countries)),
+            "countries": high_risk_countries,
+        },
+        "country_company_distribution": top_country_exposures,
+        "cross_border_country_pairs": top_country_pairs,
+        "ownership_links_count": int(len(ownership_links or [])),
+        "rings_count": int(len(rings or [])),
+    }
+
+
+def _classify_zero_semantics(
+    data_status: str,
+    metric_name: str,
+    metric_value: Any,
+    coverage_value: Optional[Any] = None,
+) -> dict[str, Any]:
+    status = str(data_status or "unknown").strip().lower()
+    value = _to_float(metric_value, 0.0)
+    coverage = None if coverage_value is None else _to_float(coverage_value, 0.0)
+
+    if value > 0.0:
+        meaning = "observed_non_zero"
+        ambiguous = False
+    elif status in {
+        "no_invoice_context",
+        "no_ownership_links",
+        "ownership_outside_invoice_scope",
+        "request_failed",
+        "http_error",
+        "invalid_payload",
+    }:
+        meaning = "zero_due_to_missing_coverage"
+        ambiguous = False
+    elif coverage is not None and coverage <= 0.0:
+        meaning = "zero_with_low_coverage"
+        ambiguous = True
+    else:
+        meaning = "true_zero_observed"
+        ambiguous = False
+
+    return {
+        "metric": metric_name,
+        "value": value,
+        "coverage": coverage,
+        "data_status": status,
+        "semantic_meaning": meaning,
+        "ambiguous": bool(ambiguous),
+    }
+
+
+def _build_forensic_provenance(
+    endpoint: str,
+    snapshot_id: str,
+    query_scope: dict[str, Any],
+    companies: list[dict],
+    invoices: list[dict],
+    extra_counts: Optional[dict[str, Any]] = None,
+) -> dict[str, Any]:
+    records = {
+        "companies": int(len(companies)),
+        "invoices": int(len(invoices)),
+    }
+    for key, value in (extra_counts or {}).items():
+        records[str(key)] = _to_int(value, 0)
+
+    source_tables = ["companies", "invoices"]
+    if records.get("ownership_links", 0) > 0:
+        source_tables.append("ownership_links")
+
+    return {
+        "schema_version": GRAPH_COMPAT_SCHEMA_VERSION,
+        "endpoint": endpoint,
+        "generated_at": _utc_now_iso(),
+        "snapshot_id": snapshot_id,
+        "shared_context_id": str(query_scope.get("shared_context_id") or snapshot_id),
+        "query_scope_source": str(query_scope.get("source") or endpoint),
+        "source_tables": source_tables,
+        "record_counts": records,
+        "scope_limits": {
+            "company_row_limit": query_scope.get("company_row_limit"),
+            "invoice_row_limit": query_scope.get("invoice_row_limit"),
+            "ownership_links_limit": query_scope.get("ownership_links_limit"),
+        },
+    }
+
+
+def _build_kpi_snapshot(
+    snapshot_id: str,
+    query_scope: dict[str, Any],
+    ring_metrics: Optional[dict[str, Any]],
+    ownership_metrics: Optional[dict[str, Any]],
+    provenance: dict[str, Any],
+) -> dict[str, Any]:
+    return {
+        "snapshot_id": snapshot_id,
+        "scope": {
+            "company_rows_returned": _to_int(query_scope.get("company_rows_returned"), 0),
+            "invoice_rows_returned": _to_int(query_scope.get("invoice_rows_returned"), 0),
+            "graph_mode": str(query_scope.get("graph_mode") or "unknown"),
+        },
+        "ring_metrics": ring_metrics or {"available": False},
+        "ownership_metrics": ownership_metrics or {"available": False},
+        "provenance": {
+            "endpoint": provenance.get("endpoint"),
+            "generated_at": provenance.get("generated_at"),
+            "source_tables": provenance.get("source_tables"),
+        },
+    }
+
+
+def _build_compatibility_diagnostics(
+    endpoint: str,
+    data_status: str,
+    query_scope: dict[str, Any],
+    kpi_snapshot: dict[str, Any],
+    zero_semantics: dict[str, Any],
+    cross_border_signals: dict[str, Any],
+) -> dict[str, Any]:
+    required = {
+        "snapshot_id": bool(kpi_snapshot.get("snapshot_id")),
+        "scope": isinstance(kpi_snapshot.get("scope"), dict),
+        "ring_metrics": isinstance(kpi_snapshot.get("ring_metrics"), dict),
+        "ownership_metrics": isinstance(kpi_snapshot.get("ownership_metrics"), dict),
+        "provenance": isinstance(kpi_snapshot.get("provenance"), dict),
+        "shared_context_id": bool(query_scope.get("shared_context_id")),
+    }
+
+    total_required = max(1, len(required))
+    passed_required = sum(1 for value in required.values() if value)
+    completion_ratio = round((float(passed_required) / float(total_required)) * 100.0, 2)
+
+    if completion_ratio >= 100.0:
+        status = "pass"
+    elif completion_ratio >= 80.0:
+        status = "partial"
+    else:
+        status = "fail"
+
+    return {
+        "schema_version": GRAPH_COMPAT_SCHEMA_VERSION,
+        "endpoint": endpoint,
+        "status": status,
+        "completion_ratio": completion_ratio,
+        "required_fields": required,
+        "data_status": str(data_status or "unknown"),
+        "zero_semantics": zero_semantics,
+        "cross_border_risk_level": cross_border_signals.get("risk_level"),
+        "cross_border_risk_score": cross_border_signals.get("risk_score"),
+        "feature_flag_enabled": bool(GRAPH_FORENSIC_FEATURE_FLAG),
+    }
+
+
+def _append_cross_border_logs(base_logs: Any, cross_border_signals: dict[str, Any]) -> list[dict[str, Any]]:
+    logs: list[dict[str, Any]] = []
+    if isinstance(base_logs, list):
+        logs.extend([log for log in base_logs if isinstance(log, dict)])
+
+    if not cross_border_signals:
+        return logs
+
+    now_ts = _utc_now_iso()
+    risk_level = str(cross_border_signals.get("risk_level") or "low").lower()
+    cross_border_count = _to_int(cross_border_signals.get("cross_border_invoice_count"), 0)
+    unknown_country = _to_int(cross_border_signals.get("companies_unknown_country"), 0)
+
+    if cross_border_count > 0:
+        logs.append(
+            {
+                "timestamp": now_ts,
+                "severity": "high" if risk_level == "high" else "medium",
+                "title": f"Tín hiệu xuyên biên giới: {cross_border_count} giao dịch khác quốc gia",
+                "description": "Phân tích geospatial phát hiện luồng hóa đơn giữa các pháp nhân thuộc quốc gia khác nhau trong cùng snapshot.",
+            }
+        )
+
+    if unknown_country > 0:
+        logs.append(
+            {
+                "timestamp": now_ts,
+                "severity": "medium",
+                "title": f"Thiếu phủ geospatial trên {unknown_country} pháp nhân",
+                "description": "Một phần pháp nhân chưa đủ dữ liệu tọa độ/country inference; cần backfill để tránh hiểu sai zero coverage.",
+            }
+        )
+
+    return logs[:120]
+
+
+def _build_evidence_chains(
+    evidence_paths: Any,
+    company_geo_profiles: dict[str, dict[str, Any]],
+) -> list[dict[str, Any]]:
+    if not isinstance(evidence_paths, list):
+        return []
+
+    chains: list[dict[str, Any]] = []
+    for path in evidence_paths:
+        if not isinstance(path, dict):
+            continue
+
+        hops_raw = path.get("hops") if isinstance(path.get("hops"), list) else []
+        companies_raw = path.get("companies") if isinstance(path.get("companies"), list) else []
+
+        hops_enriched = []
+        probs: list[float] = []
+        cross_border_hops = 0
+        weighted_cross_border = 0.0
+        for hop in hops_raw:
+            if not isinstance(hop, dict):
+                continue
+            from_tc = str(hop.get("from") or "").strip()
+            to_tc = str(hop.get("to") or "").strip()
+            from_geo = company_geo_profiles.get(from_tc, {})
+            to_geo = company_geo_profiles.get(to_tc, {})
+            from_country = str(from_geo.get("country") or "")
+            to_country = str(to_geo.get("country") or "")
+            cross_border = bool(from_country and to_country and from_country != to_country)
+            if cross_border:
+                cross_border_hops += 1
+                hop_weight = 1.0
+                if _is_high_risk_country(from_country) or _is_high_risk_country(to_country):
+                    hop_weight = 1.35
+                weighted_cross_border += hop_weight
+
+            prob = max(0.0, min(1.0, _to_float(hop.get("fraud_probability"), 0.0)))
+            probs.append(prob)
+
+            hops_enriched.append(
+                {
+                    **hop,
+                    "cross_border": cross_border,
+                    "narrative": (
+                        f"{from_tc} -> {to_tc}: {from_country or 'Unknown'}"
+                        f" to {to_country or 'Unknown'}"
+                        + (" (cross-border)" if cross_border else " (domestic/unknown)")
+                    ),
+                    "provenance": {
+                        "from_country": from_country or None,
+                        "to_country": to_country or None,
+                        "from_confidence": from_geo.get("confidence"),
+                        "to_confidence": to_geo.get("confidence"),
+                        "from_geocoding_method": from_geo.get("geocoding_method"),
+                        "to_geocoding_method": to_geo.get("geocoding_method"),
+                    },
+                }
+            )
+
+        hop_count = max(1, len(hops_enriched))
+        company_count = max(1, len(companies_raw))
+        unique_companies = len({str(code or "") for code in companies_raw if str(code or "").strip()})
+        repeat_factor = max(0.0, float(company_count - unique_companies) / float(company_count))
+
+        circularity_score = round(min(100.0, (sum(probs) / float(max(1, len(probs)))) * 100.0), 2)
+        ownership_score = round(min(100.0, repeat_factor * 100.0), 2)
+        cross_border_score = round(min(100.0, (weighted_cross_border / float(hop_count)) * 60.0), 2)
+        chain_score = round(
+            (0.5 * circularity_score) + (0.2 * ownership_score) + (0.3 * cross_border_score),
+            2,
+        )
+
+        if chain_score >= 70.0:
+            risk_level = "critical"
+        elif chain_score >= 50.0:
+            risk_level = "high"
+        elif chain_score >= 30.0:
+            risk_level = "medium"
+        else:
+            risk_level = "low"
+
+        chains.append(
+            {
+                "path_id": path.get("path_id"),
+                "summary": path.get("summary"),
+                "risk_level": risk_level,
+                "chain_score": chain_score,
+                "scoring_breakdown": {
+                    "circularity": circularity_score,
+                    "ownership": ownership_score,
+                    "cross_border": cross_border_score,
+                },
+                "companies": companies_raw,
+                "hops": hops_enriched,
+                "cross_border_hops": int(cross_border_hops),
+                "narrative": (
+                    f"Chuoi {path.get('path_id', 'unknown')}: circularity={circularity_score:.1f}, "
+                    f"ownership={ownership_score:.1f}, cross-border={cross_border_score:.1f}."
+                ),
+            }
+        )
+
+    return chains
+
+
+def _resolve_graph_context(
+    db: Session,
+    tax_code: Optional[str],
+    depth: Optional[int],
+    source: str,
+    ownership_links_limit: Optional[int] = None,
+) -> dict[str, Any]:
+    if tax_code:
+        resolved_depth = int(depth) if depth is not None else 2
+        companies, invoices = _extract_subgraph(db, tax_code, resolved_depth)
+    else:
+        resolved_depth = None
+        companies, invoices = _extract_full_graph(db, limit=FULL_GRAPH_COMPANY_LIMIT)
+
+    snapshot_id = _build_snapshot_id(
+        tax_code=tax_code,
+        depth=resolved_depth,
+        companies=companies,
+        invoices=invoices,
+        source=GRAPH_CONTEXT_SOURCE,
+    )
+    query_scope = _build_query_scope(
+        tax_code=tax_code,
+        depth=resolved_depth,
+        companies=companies,
+        invoices=invoices,
+        source=source,
+        ownership_links_limit=ownership_links_limit,
+    )
+    query_scope["shared_context_id"] = snapshot_id
+    query_scope["compatibility_schema"] = GRAPH_COMPAT_SCHEMA_VERSION
+
+    return {
+        "tax_code": tax_code,
+        "depth": resolved_depth,
+        "companies": companies,
+        "invoices": invoices,
+        "snapshot_id": snapshot_id,
+        "query_scope": query_scope,
+    }
 
 
 def _sanitize_policy(policy: Any) -> dict:
@@ -410,10 +949,16 @@ def get_vat_invoice_graph(
     tax_code = _ensure_numeric_tax_code(tax_code)
 
     try:
-        if tax_code:
-            companies, invoices = _extract_subgraph(db, tax_code, depth)
-        else:
-            companies, invoices = _extract_full_graph(db, limit=FULL_GRAPH_COMPANY_LIMIT)
+        ctx = _resolve_graph_context(
+            db=db,
+            tax_code=tax_code,
+            depth=depth,
+            source="graph_main",
+        )
+        companies = ctx["companies"]
+        invoices = ctx["invoices"]
+        snapshot_id = ctx["snapshot_id"]
+        query_scope = ctx["query_scope"]
     except SQLAlchemyError as e:
         log_event(
             logger,
@@ -437,21 +982,6 @@ def get_vat_invoice_graph(
 
     if not companies:
         raise HTTPException(status_code=404, detail="Không tìm thấy dữ liệu cho mã số thuế này.")
-
-    query_scope = _build_query_scope(
-        tax_code=tax_code,
-        depth=depth,
-        companies=companies,
-        invoices=invoices,
-        source="graph_main",
-    )
-    snapshot_id = _build_snapshot_id(
-        tax_code=tax_code,
-        depth=depth,
-        companies=companies,
-        invoices=invoices,
-        source="graph_main",
-    )
 
     # Run GNN inference
     try:
@@ -505,10 +1035,61 @@ def get_vat_invoice_graph(
         result = _enrich_graph_result(result, engine=engine, tax_code=tax_code, depth=depth)
         result["snapshot_id"] = snapshot_id
         result["query_scope"] = query_scope
-        result["data_status"] = "ok" if invoices else "no_invoice_context"
+        query_scope["shared_context_id"] = snapshot_id
+        query_scope["compatibility_schema"] = GRAPH_COMPAT_SCHEMA_VERSION
+        data_status = "ok" if invoices else "no_invoice_context"
+        result["data_status"] = data_status
         result["split_trigger_status"] = _build_split_trigger_status_context(
             snapshot_source="graph_main",
         )
+
+        # ── Forensic Compatibility v2 ──
+        if GRAPH_FORENSIC_FEATURE_FLAG:
+            cross_border_signals = _build_cross_border_signals(companies, invoices)
+            result["cross_border_signals"] = cross_border_signals
+
+            forensic_metrics = result.get("forensic_metrics", {}) if isinstance(result.get("forensic_metrics"), dict) else {}
+            circular_edge_count = _to_int(forensic_metrics.get("circular_edge_count"), 0)
+            zero_semantics = _classify_zero_semantics(
+                data_status=data_status,
+                metric_name="circular_edge_count",
+                metric_value=circular_edge_count,
+                coverage_value=forensic_metrics.get("circular_edge_cycle_coverage"),
+            )
+
+            provenance = _build_forensic_provenance(
+                endpoint="graph_main",
+                snapshot_id=snapshot_id,
+                query_scope=query_scope,
+                companies=companies,
+                invoices=invoices,
+            )
+            result["forensic_provenance"] = provenance
+
+            kpi_snapshot = _build_kpi_snapshot(
+                snapshot_id=snapshot_id,
+                query_scope=query_scope,
+                ring_metrics=None,
+                ownership_metrics=None,
+                provenance=provenance,
+            )
+
+            diagnostics = _build_compatibility_diagnostics(
+                endpoint="graph_main",
+                data_status=data_status,
+                query_scope=query_scope,
+                kpi_snapshot=kpi_snapshot,
+                zero_semantics=zero_semantics,
+                cross_border_signals=cross_border_signals,
+            )
+            result["compatibility_diagnostics"] = diagnostics
+
+            base_logs = result.get("logs") if isinstance(result.get("logs"), list) else []
+            result["logs"] = _append_cross_border_logs(base_logs, cross_border_signals)
+
+            geo_profiles = _extract_company_geo_profiles(companies)
+            base_evidence = result.get("evidence_paths") if isinstance(result.get("evidence_paths"), list) else []
+            result["evidence_chains"] = _build_evidence_chains(base_evidence, geo_profiles)
 
     return result
 
@@ -670,14 +1251,16 @@ def _extract_subgraph(db: Session, center_tax_code: str, depth: int, max_nodes: 
     if has_geom:
         comp_result = db.execute(text(f"""
             SELECT tax_code, name, industry, registration_date, risk_score, is_active,
-                   COALESCE(ST_Y(geom), 0) as lat, COALESCE(ST_X(geom), 0) as lng
+                   COALESCE(ST_Y(geom), 0) as lat, COALESCE(ST_X(geom), 0) as lng,
+                   country_inferred, confidence_country, is_within_vietnam, geocoding_method
             FROM companies
             WHERE tax_code IN ({placeholders})
         """), params)
     else:
         comp_result = db.execute(text(f"""
             SELECT tax_code, name, industry, registration_date, risk_score, is_active,
-                   0.0 as lat, 0.0 as lng
+                   0.0 as lat, 0.0 as lng,
+                   country_inferred, confidence_country, is_within_vietnam, geocoding_method
             FROM companies
             WHERE tax_code IN ({placeholders})
         """), params)
@@ -715,7 +1298,8 @@ def _extract_full_graph(db: Session, limit: int = FULL_GRAPH_COMPANY_LIMIT) -> t
     if has_geom:
         comp_result = db.execute(text("""
             SELECT tax_code, name, industry, registration_date, risk_score, is_active,
-                   COALESCE(ST_Y(geom), 0) as lat, COALESCE(ST_X(geom), 0) as lng
+                   COALESCE(ST_Y(geom), 0) as lat, COALESCE(ST_X(geom), 0) as lng,
+                   country_inferred, confidence_country, is_within_vietnam, geocoding_method
             FROM companies
             ORDER BY risk_score DESC
             LIMIT :limit
@@ -723,7 +1307,8 @@ def _extract_full_graph(db: Session, limit: int = FULL_GRAPH_COMPANY_LIMIT) -> t
     else:
         comp_result = db.execute(text("""
             SELECT tax_code, name, industry, registration_date, risk_score, is_active,
-                   0.0 as lat, 0.0 as lng
+                   0.0 as lat, 0.0 as lng,
+                   NULL as country_inferred, 0.0 as confidence_country, NULL as is_within_vietnam, NULL as geocoding_method
             FROM companies
             ORDER BY risk_score DESC
             LIMIT :limit
@@ -892,11 +1477,12 @@ def analyze_ownership_network(
         ownership_cols = [col for col in ownership_result.keys()]
         ownership_links = [dict(zip(ownership_cols, row)) for row in ownership_result.fetchall()]
 
-        # Load relevant invoices for cross-ownership trade detection
-        if tax_code:
-            companies_for_scope, invoices = _extract_subgraph(db, tax_code, depth=2)
-        else:
-            companies_for_scope, invoices = _extract_full_graph(db, limit=FULL_GRAPH_COMPANY_LIMIT)
+        # Load relevant invoices via shared context for cross-ownership trade detection
+        ctx = _resolve_graph_context(db, tax_code, ownership_depth or 2, "graph_ownership")
+        companies_for_scope = ctx["companies"]
+        invoices = ctx["invoices"]
+        snapshot_id = ctx["snapshot_id"]
+        query_scope = ctx["query_scope"]
 
     except Exception as e:
         log_event(logger, "error", "graph_ownership_data_error", error=str(e))
@@ -935,21 +1521,6 @@ def analyze_ownership_network(
     ownership_pairs_in_invoice_scope = sum(
         1 for parent, child in ownership_edges if parent in invoice_nodes and child in invoice_nodes
     )
-    query_scope = _build_query_scope(
-        tax_code=tax_code,
-        depth=ownership_depth,
-        companies=companies_for_scope,
-        invoices=invoices,
-        source="graph_ownership",
-        ownership_links_limit=OWNERSHIP_LINK_QUERY_LIMIT,
-    )
-    snapshot_id = _build_snapshot_id(
-        tax_code=tax_code,
-        depth=ownership_depth,
-        companies=companies_for_scope,
-        invoices=invoices,
-        source="graph_ownership",
-    )
 
     try:
         from ml_engine.graph_intelligence import OwnershipGraphAnalyzer
@@ -985,6 +1556,44 @@ def analyze_ownership_network(
             "ownership_pairs_in_invoice_scope": ownership_pairs_in_invoice_scope,
         }
 
+        # ── Forensic Compatibility v2 ──
+        if GRAPH_FORENSIC_FEATURE_FLAG:
+            cross_border_signals = _build_cross_border_signals(companies_for_scope, invoices)
+            result["cross_border_signals"] = cross_border_signals
+
+            provenance = _build_forensic_provenance(
+                endpoint="graph_ownership",
+                snapshot_id=snapshot_id,
+                query_scope=query_scope,
+                companies=companies_for_scope,
+                invoices=invoices,
+            )
+            result["forensic_provenance"] = provenance
+
+            ownership_metrics = {
+                "available": True,
+                "total_clusters": total_clusters,
+                "total_cross_trades": total_cross_trades,
+                "coverage": ownership_invoice_node_coverage,
+            }
+            kpi_snapshot = _build_kpi_snapshot(
+                snapshot_id=snapshot_id,
+                query_scope=query_scope,
+                ring_metrics=None,
+                ownership_metrics=ownership_metrics,
+                provenance=provenance,
+            )
+
+            diagnostics_compat = _build_compatibility_diagnostics(
+                endpoint="graph_ownership",
+                data_status=data_status,
+                query_scope=query_scope,
+                kpi_snapshot=kpi_snapshot,
+                zero_semantics=None,
+                cross_border_signals=cross_border_signals,
+            )
+            result["compatibility_diagnostics"] = diagnostics_compat
+
         log_event(
             logger, "info", "graph_ownership_analysis_complete",
             clusters=total_clusters,
@@ -1012,27 +1621,13 @@ def score_transaction_rings(
     tax_code = _ensure_numeric_tax_code(tax_code)
 
     try:
-        if tax_code:
-            companies, invoices = _extract_subgraph(db, tax_code, depth)
-        else:
-            companies, invoices = _extract_full_graph(db, limit=FULL_GRAPH_COMPANY_LIMIT)
+        ctx = _resolve_graph_context(db, tax_code, depth, "graph_ring_scoring")
+        companies = ctx["companies"]
+        invoices = ctx["invoices"]
+        snapshot_id = ctx["snapshot_id"]
+        query_scope = ctx["query_scope"]
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Lỗi truy vấn dữ liệu: {str(e)}")
-
-    query_scope = _build_query_scope(
-        tax_code=tax_code,
-        depth=depth,
-        companies=companies,
-        invoices=invoices,
-        source="graph_ring_scoring",
-    )
-    snapshot_id = _build_snapshot_id(
-        tax_code=tax_code,
-        depth=depth,
-        companies=companies,
-        invoices=invoices,
-        source="graph_ring_scoring",
-    )
 
     if not invoices:
         return {
@@ -1103,7 +1698,8 @@ def score_transaction_rings(
             cycles_detected=total_cycles_detected,
             data_status=data_status,
         )
-        return {
+
+        ring_result = {
             "rings": scored_rings,
             "total": total_rings_returned,
             "critical_count": critical_count,
@@ -1122,6 +1718,53 @@ def score_transaction_rings(
             },
             "query_context": {"tax_code": tax_code, "depth": depth},
         }
+
+        # ── Forensic Compatibility v2 ──
+        if GRAPH_FORENSIC_FEATURE_FLAG:
+            cross_border_signals = _build_cross_border_signals(companies, invoices, rings=scored_rings)
+            ring_result["cross_border_signals"] = cross_border_signals
+
+            zero_semantics = _classify_zero_semantics(
+                data_status=data_status,
+                metric_name="circular_edge_count",
+                metric_value=circular_edge_count,
+                coverage_value=circular_edge_cycle_coverage,
+            )
+
+            provenance = _build_forensic_provenance(
+                endpoint="graph_ring_scoring",
+                snapshot_id=snapshot_id,
+                query_scope=query_scope,
+                companies=companies,
+                invoices=invoices,
+            )
+            ring_result["forensic_provenance"] = provenance
+
+            ring_metrics = {
+                "available": True,
+                "total": total_rings_returned,
+                "critical_count": critical_count,
+                "cycles_detected": total_cycles_detected,
+            }
+            kpi_snapshot = _build_kpi_snapshot(
+                snapshot_id=snapshot_id,
+                query_scope=query_scope,
+                ring_metrics=ring_metrics,
+                ownership_metrics=None,
+                provenance=provenance,
+            )
+
+            diagnostics_compat = _build_compatibility_diagnostics(
+                endpoint="graph_ring_scoring",
+                data_status=data_status,
+                query_scope=query_scope,
+                kpi_snapshot=kpi_snapshot,
+                zero_semantics=zero_semantics,
+                cross_border_signals=cross_border_signals,
+            )
+            ring_result["compatibility_diagnostics"] = diagnostics_compat
+
+        return ring_result
 
     except Exception as e:
         log_event(logger, "error", "graph_ring_scoring_failed", error=str(e))

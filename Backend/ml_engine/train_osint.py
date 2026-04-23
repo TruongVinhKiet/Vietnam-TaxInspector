@@ -44,6 +44,7 @@ FEATURE_NAMES = [
 ]
 OSINT_ACCEPTANCE_AUC_MIN = 0.60
 OSINT_ACCEPTANCE_PR_AUC_MIN = 0.35
+OSINT_MIN_TRAINING_SAMPLES = max(10_000, int(os.environ.get("OSINT_MIN_REQUIRED_SAMPLES", "10000")))
 
 JURISDICTION_RISK = {
     "Cayman Islands": 5.0,
@@ -197,7 +198,7 @@ def build_features(offshore_rows, link_rows, invoice_rows):
         
     return np.array(features), np.array(labels), tax_codes
 
-def train_model(db_url: str, seed: int = 42):
+def train_model(db_url: str, seed: int = 42, min_samples: int = OSINT_MIN_TRAINING_SAMPLES):
     print("=" * 60)
     print("  OSINT OFFSHORE RISK MODEL TRAINING")
     print("=" * 60)
@@ -224,6 +225,12 @@ def train_model(db_url: str, seed: int = 42):
     X, y, tax_codes = build_features(offshore_rows, link_rows, invoice_rows)
     print(f"      Feature Matrix: {X.shape}")
     print(f"      High Risk Label Distribution: {int(y.sum())} / {len(y)}")
+
+    required_samples = max(OSINT_MIN_TRAINING_SAMPLES, int(min_samples))
+    if len(y) < required_samples:
+        raise RuntimeError(
+            f"OSINT training requires at least {required_samples:,} samples; got {len(y):,}."
+        )
 
     if len(np.unique(y)) < 2:
         raise RuntimeError("OSINT training requires both positive and negative labels; current dataset has one class only.")
@@ -291,6 +298,11 @@ def train_model(db_url: str, seed: int = 42):
         json.dump(config, f, indent=2)
 
     acceptance_criteria = {
+        "training_samples_min": {
+            "pass": bool(len(y) >= required_samples),
+            "actual": int(len(y)),
+            "threshold": int(required_samples),
+        },
         "auc_min": {
             "pass": bool(auc >= OSINT_ACCEPTANCE_AUC_MIN),
             "actual": round(auc, 4),
@@ -316,6 +328,7 @@ def train_model(db_url: str, seed: int = 42):
         },
         "dataset": {
             "total_samples": len(y),
+            "required_min_samples": int(required_samples),
             "high_risk_ratio": round(float(y.sum() / len(y)), 4),
             "train_size": len(X_train),
             "test_size": len(X_test),
@@ -344,6 +357,11 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--db-url", default="default")
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--min-samples", type=int, default=OSINT_MIN_TRAINING_SAMPLES)
     args = parser.parse_args()
     
-    train_model(args.db_url, seed=args.seed)
+    train_model(
+        args.db_url,
+        seed=args.seed,
+        min_samples=max(OSINT_MIN_TRAINING_SAMPLES, int(args.min_samples)),
+    )
