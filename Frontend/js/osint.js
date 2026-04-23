@@ -69,7 +69,7 @@ async function loadJurisdictions() {
 async function loadHighRiskUBO(page = 1) {
     currentPage = page;
     try {
-        const res = await secureFetch(`${OSINT_API}/high-risk-ubo?page=${page}&page_size=${PAGE_SIZE}&min_risk=60`);
+        const res = await secureFetch(`${OSINT_API}/high-risk-ubo?page=${page}&page_size=${PAGE_SIZE}&min_risk=50`);
         if (!res.ok) return;
         const data = await res.json();
 
@@ -88,11 +88,19 @@ async function loadHighRiskUBO(page = 1) {
                     director_overlap: "bg-violet-50 text-violet-700 border-violet-200",
                     shares_ownership: "bg-sky-50 text-sky-700 border-sky-200",
                     suspicious_wire_transfer: "bg-rose-50 text-rose-700 border-rose-200",
+                    Owner: "bg-sky-50 text-sky-700 border-sky-200",
+                    Subsidiary: "bg-emerald-50 text-emerald-700 border-emerald-200",
+                    RelatedParty: "bg-amber-50 text-amber-700 border-amber-200",
+                    Relative: "bg-violet-50 text-violet-700 border-violet-200",
                 };
                 const labels = {
                     director_overlap: "Giám đốc trùng",
                     shares_ownership: "Sở hữu cổ phần",
                     suspicious_wire_transfer: "Chuyển tiền nghi vấn",
+                    Owner: "Chủ sở hữu",
+                    Subsidiary: "Công ty con",
+                    RelatedParty: "Bên liên quan",
+                    Relative: "Họ hàng",
                 };
                 return `<span class="px-1.5 py-0.5 rounded text-[9px] font-bold border ${colors[r] || 'bg-slate-50 text-slate-600 border-slate-200'}">${labels[r] || r}</span>`;
             }).join(" ");
@@ -110,7 +118,8 @@ async function loadHighRiskUBO(page = 1) {
                     <td class="px-4 py-3"><div class="flex flex-wrap gap-1">${relBadges}</div></td>
                     <td class="px-4 py-3">
                         <button class="osint-view-graph-btn px-3 py-1.5 rounded-lg bg-primary-container text-white text-[10px] font-bold hover:opacity-90 transition-opacity"
-                                data-tax-codes="${item.top_domestic_tax_codes.join(',')}">
+                                data-tax-codes="${item.top_domestic_tax_codes.join(',')}"
+                                data-proxy-tax-code="${item.proxy_tax_code || ''}">
                             <span class="material-symbols-outlined text-[14px]">hub</span> Xem mạng
                         </button>
                     </td>
@@ -138,16 +147,13 @@ async function loadHighRiskUBO(page = 1) {
         // Bind view graph buttons
         tbody.querySelectorAll(".osint-view-graph-btn").forEach(btn => {
             btn.addEventListener("click", () => {
-                const codes = btn.dataset.taxCodes?.split(",").filter(Boolean);
-                if (codes?.length) {
-                    const graphTab = document.getElementById("workbench-tab-graph");
-                    if (graphTab) graphTab.click();
-                    if (typeof loadGraph === 'function') {
-                        loadGraph(codes[0]);
-                    } else {
-                        loadOsintGraph(codes[0]);
-                    }
-                }
+                const codes = btn.dataset.taxCodes?.split(",").filter(Boolean) || [];
+                const proxyTaxCode = String(btn.dataset.proxyTaxCode || "").trim();
+                const targetTaxCode = proxyTaxCode || (codes.length ? codes[0] : "");
+                if (!targetTaxCode) return;
+                const osintTab = document.getElementById("workbench-tab-osint");
+                if (osintTab) osintTab.click();
+                loadOsintGraph(targetTaxCode);
             });
         });
     } catch (e) {

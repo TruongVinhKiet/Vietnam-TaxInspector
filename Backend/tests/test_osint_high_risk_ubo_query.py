@@ -34,7 +34,7 @@ class _FakeDB:
         if "SELECT COUNT(*)" in sql and "FROM offshore_entities oe" in sql:
             return _Result(scalar_value=1)
 
-        if "FROM offshore_entities oe" in sql and "ARRAY_AGG(DISTINCT ol.child_tax_code)" in sql:
+        if "FROM offshore_entities oe" in sql and "ARRAY_REMOVE(ARRAY_AGG(DISTINCT CASE" in sql:
             # Regression lock: this alias usage caused AmbiguousColumn in PostgreSQL.
             assert "GROUP BY oe.entity_code, oe.proxy_tax_code, display_name, country, risk_score" not in sql
             assert "ORDER BY risk_score DESC" not in sql

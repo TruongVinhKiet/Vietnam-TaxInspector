@@ -26,8 +26,10 @@ from app.scripts.generate_graph_mock_data import (
     generate_normal_invoices,
     generate_circular_invoices,
     generate_hard_negatives,
+    generate_invoice_enrichment,
     DATA_START, DATA_END
 )
+from app.scripts.seed_ownership import seed_ownership_networks
 
 DB_HOST = os.getenv("DB_HOST", "localhost")
 DB_PORT = os.getenv("DB_PORT", "5432")
@@ -66,6 +68,7 @@ def rebuild_and_seed():
     generate_normal_invoices(conn, companies)
     generate_circular_invoices(conn, companies)
     generate_hard_negatives(conn, companies)
+    generate_invoice_enrichment(conn)
 
     print("[3] Loading Official Vietnam GeoJSON MultiPolygon Boundary...")
     json_path = BACKEND_DIR.parent / "Frontend" / "json" / "vietnam.json"
@@ -184,7 +187,21 @@ def rebuild_and_seed():
                     THEN 0.7
                 ELSE 0.6
             END AS jurisdiction_risk_weight,
-            GREATEST(COALESCE(c.risk_score, 50.0), 60.0) AS risk_score,
+            LEAST(
+                99.5,
+                GREATEST(
+                    42.0,
+                    (
+                        COALESCE(c.risk_score, 50.0) * 0.85
+                        + CASE
+                            WHEN LOWER(COALESCE(c.country_inferred, c.province, '')) IN ('cayman islands', 'british virgin islands', 'panama', 'seychelles') THEN 42.0
+                            WHEN LOWER(COALESCE(c.country_inferred, c.province, '')) IN ('singapore', 'hong kong') THEN 26.0
+                            ELSE 16.0
+                          END
+                        + ABS(MOD((('x' || SUBSTRING(md5(c.tax_code), 1, 8))::bit(32)::int), 23))
+                    )
+                )
+            ) AS risk_score,
             'shell_company' AS entity_type,
             c.registration_date,
             CASE WHEN c.is_active IS FALSE THEN 'inactive' ELSE 'active' END AS status,
@@ -206,6 +223,11 @@ def rebuild_and_seed():
     """)
     offshore_entities_seeded = cur.rowcount
 
+    print("[6] Seeding ownership graph links for UBO relation coverage...")
+    seed_ownership_networks()
+    cur.execute("SELECT COUNT(*) FROM ownership_links;")
+    ownership_links_seeded = cur.fetchone()[0]
+
     # Cleanup temporary table
     cur.execute("DROP TABLE _vietnam_boundary;")
 
@@ -222,6 +244,7 @@ def rebuild_and_seed():
     print(f"Geo-MAPPED OFFSHORE: {offshore_count}")
     print(f"Offshore industry normalized: {offshore_industry_tagged}")
     print(f"offshore_entities seeded: {offshore_entities_seeded}")
+    print(f"ownership_links seeded: {ownership_links_seeded}")
     print("=" * 60)
 
 if __name__ == "__main__":

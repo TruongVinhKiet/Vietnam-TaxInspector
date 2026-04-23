@@ -78,8 +78,14 @@ class _SubgraphDB:
 
         if "FROM invoices" in sql and "invoice_number" in sql:
             return _Result(
-                rows=[("0101000001", "0202000002", 1500000000.0, 10.0, "2024-10-01", "INV-001")],
-                keys=["seller_tax_code", "buyer_tax_code", "amount", "vat_rate", "date", "invoice_number"],
+                rows=[(1, "0101000001", "0202000002", 1500000000.0, 10.0, "2024-10-01", "INV-001", "paid", "Thép", False)],
+                keys=["id", "seller_tax_code", "buyer_tax_code", "amount", "vat_rate", "date", "invoice_number", "payment_status", "goods_category", "is_adjustment"],
+            )
+
+        if "FROM ownership_links" in sql:
+            return _Result(
+                rows=[("0101000001", "0202000002", 55.0, "shareholder", "PID-001")],
+                keys=["parent_tax_code", "child_tax_code", "ownership_percent", "relationship_type", "person_id"],
             )
 
         raise AssertionError(f"Unexpected SQL in fake subgraph DB: {sql}")
@@ -112,7 +118,7 @@ def test_extract_subgraph_expands_from_ownership_seed(monkeypatch):
         lambda db, tax_code, limit=40: ["0101000001"],
     )
 
-    companies, invoices = graph._extract_subgraph(
+    companies, invoices, ownership_links = graph._extract_subgraph(
         _SubgraphDB(),
         center_tax_code="9900000711",
         depth=1,
@@ -122,3 +128,4 @@ def test_extract_subgraph_expands_from_ownership_seed(monkeypatch):
     company_codes = {row["tax_code"] for row in companies}
     assert {"9900000711", "0101000001", "0202000002"}.issubset(company_codes)
     assert len(invoices) == 1
+    assert len(ownership_links) == 1

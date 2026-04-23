@@ -61,6 +61,7 @@ class OsintGraphResponse(BaseModel):
 
 class HighRiskUBOItem(BaseModel):
     offshore_id: str
+    proxy_tax_code: str
     label: str
     country: str
     risk_score: float
@@ -370,7 +371,7 @@ def get_graph_for_tax_code(tax_code: str, depth: int = Query(default=2, ge=1, le
 def list_high_risk_ubo(
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=5, le=100),
-    min_risk: float = Query(default=60.0, ge=0.0, le=100.0),
+    min_risk: float = Query(default=50.0, ge=0.0, le=100.0),
     country: Optional[str] = None,
     db: Session = Depends(get_db),
 ):
@@ -402,12 +403,22 @@ def list_high_risk_ubo(
                 COALESCE(oe.name, c.name, oe.entity_code) AS display_name,
                 COALESCE(oe.country, c.province, 'Unknown') AS country,
                 COALESCE(oe.risk_score, c.risk_score, 0) AS risk_score,
-                COUNT(DISTINCT CASE WHEN ol.child_tax_code ~ '^\\d{{10}}$' THEN ol.child_tax_code END) AS domestic_count,
-                ARRAY_AGG(DISTINCT ol.relationship_type) AS rel_types,
-                ARRAY_AGG(DISTINCT ol.child_tax_code) AS child_codes
+                COUNT(DISTINCT CASE
+                    WHEN ol.parent_tax_code = oe.proxy_tax_code AND ol.child_tax_code ~ '^\\d{{10}}$' THEN ol.child_tax_code
+                    WHEN ol.child_tax_code = oe.proxy_tax_code AND ol.parent_tax_code ~ '^\\d{{10}}$' THEN ol.parent_tax_code
+                    ELSE NULL
+                END) AS domestic_count,
+                ARRAY_REMOVE(ARRAY_AGG(DISTINCT COALESCE(ol.relationship_type, '')), '') AS rel_types,
+                ARRAY_REMOVE(ARRAY_AGG(DISTINCT CASE
+                    WHEN ol.parent_tax_code = oe.proxy_tax_code THEN ol.child_tax_code
+                    WHEN ol.child_tax_code = oe.proxy_tax_code THEN ol.parent_tax_code
+                    ELSE NULL
+                END), NULL) AS child_codes
             FROM offshore_entities oe
             LEFT JOIN companies c ON c.tax_code = oe.proxy_tax_code
-            LEFT JOIN ownership_links ol ON ol.parent_tax_code = oe.proxy_tax_code
+            LEFT JOIN ownership_links ol
+                ON ol.parent_tax_code = oe.proxy_tax_code
+                OR ol.child_tax_code = oe.proxy_tax_code
             WHERE {where_sql}
             GROUP BY
                 oe.entity_code,
@@ -438,11 +449,21 @@ def list_high_risk_ubo(
                 c.name,
                 COALESCE(NULLIF(c.country_inferred, ''), c.province, 'Unknown') as country,
                 c.risk_score,
-                COUNT(DISTINCT CASE WHEN ol.child_tax_code ~ '^\\d{{10}}$' THEN ol.child_tax_code END) as domestic_count,
-                ARRAY_AGG(DISTINCT ol.relationship_type) as rel_types,
-                ARRAY_AGG(DISTINCT ol.child_tax_code) as child_codes
+                COUNT(DISTINCT CASE
+                    WHEN ol.parent_tax_code = c.tax_code AND ol.child_tax_code ~ '^\\d{{10}}$' THEN ol.child_tax_code
+                    WHEN ol.child_tax_code = c.tax_code AND ol.parent_tax_code ~ '^\\d{{10}}$' THEN ol.parent_tax_code
+                    ELSE NULL
+                END) as domestic_count,
+                ARRAY_REMOVE(ARRAY_AGG(DISTINCT COALESCE(ol.relationship_type, '')), '') as rel_types,
+                ARRAY_REMOVE(ARRAY_AGG(DISTINCT CASE
+                    WHEN ol.parent_tax_code = c.tax_code THEN ol.child_tax_code
+                    WHEN ol.child_tax_code = c.tax_code THEN ol.parent_tax_code
+                    ELSE NULL
+                END), NULL) as child_codes
             FROM companies c
-            LEFT JOIN ownership_links ol ON ol.parent_tax_code = c.tax_code
+            LEFT JOIN ownership_links ol
+                ON ol.parent_tax_code = c.tax_code
+                OR ol.child_tax_code = c.tax_code
             WHERE {where_sql}
             GROUP BY c.tax_code, c.name, COALESCE(NULLIF(c.country_inferred, ''), c.province, 'Unknown'), c.risk_score
             ORDER BY c.risk_score DESC
@@ -452,10 +473,13 @@ def list_high_risk_ubo(
     items = []
     for r in rows:
         rel_types = [x for x in (r[6] or []) if x] if has_offshore else [x for x in (r[5] or []) if x]
+        if not rel_types:
+            rel_types = ["shares_ownership"]
         child_raw = r[7] if has_offshore else r[6]
         child_codes = [x for x in (child_raw or []) if _is_numeric_tax_code(x)]
         items.append(HighRiskUBOItem(
             offshore_id=r[0],
+            proxy_tax_code=r[1] or r[0],
             label=r[2] or r[0],
             country=r[3] or "Unknown",
             risk_score=round(float(r[4] or 0), 2),

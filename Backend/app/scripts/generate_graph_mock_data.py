@@ -67,6 +67,25 @@ INDUSTRIES = [
     "Dệt may", "Nông nghiệp", "Dịch vụ tài chính",
 ]
 
+GOODS_CATEGORY_BY_INDUSTRY = {
+    "Sản xuất": ["Linh kiện điện tử", "Thiết bị cơ khí", "Nhựa công nghiệp"],
+    "Thương mại": ["Hàng tiêu dùng", "Thiết bị văn phòng", "Vật tư tổng hợp"],
+    "Xây dựng": ["Sắt thép xây dựng", "Xi măng", "Cát đá"],
+    "Vận tải & Logistics": ["Dịch vụ vận tải", "Kho bãi", "Nhiên liệu vận hành"],
+    "Công nghệ thông tin": ["Phần mềm", "Thiết bị CNTT", "Dịch vụ cloud"],
+    "Thực phẩm & Đồ uống": ["Nông sản tươi", "Đồ uống", "Thực phẩm chế biến"],
+    "Bất động sản": ["Dịch vụ môi giới", "Vật tư hoàn thiện", "Thiết kế nội thất"],
+    "Dệt may": ["Sợi vải", "Phụ kiện may", "Nguyên liệu nhuộm"],
+    "Nông nghiệp": ["Phân bón", "Nông sản", "Thức ăn chăn nuôi"],
+    "Dịch vụ tài chính": ["Dịch vụ tư vấn", "Phí xử lý", "Dịch vụ thanh toán"],
+}
+
+INCOMPATIBLE_GOODS = [
+    "Thủy hải sản tươi sống",
+    "Xỉ than",
+    "Sắt thép xây dựng",
+]
+
 LEGIT_COMPANY_PREFIXES = [
     "TNHH", "Công ty CP", "CTY TNHH", "DN Tư Nhân", "Tập đoàn",
 ]
@@ -358,6 +377,158 @@ def generate_hard_negatives(conn, companies):
     return len(hard_neg_invoices)
 
 
+def generate_invoice_enrichment(conn):
+    """
+    Backfill enriched invoice fields + line items + lifecycle events + invoice payments.
+    Coverage is intentionally sparse for realistic forensic behavior.
+    """
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT i.id, i.invoice_number, i.seller_tax_code, i.buyer_tax_code, i.amount, i.date,
+               c.industry AS seller_industry, COALESCE(c.province, c.country_inferred, 'Unknown') AS seller_region
+        FROM invoices i
+        JOIN companies c ON c.tax_code = i.seller_tax_code
+        ORDER BY i.id
+        """
+    )
+    rows = cur.fetchall()
+    if not rows:
+        print("[WARN] No invoices found for enrichment")
+        return
+
+    updates = []
+    line_items = []
+    lifecycle_events = []
+    payments = []
+
+    for row in rows:
+        (
+            invoice_id,
+            invoice_number,
+            seller_tax_code,
+            buyer_tax_code,
+            amount,
+            inv_date,
+            seller_industry,
+            _seller_region,
+        ) = row
+        seller_industry = seller_industry or "Thương mại"
+        amount_float = float(amount or 0.0)
+        base_categories = GOODS_CATEGORY_BY_INDUSTRY.get(seller_industry, GOODS_CATEGORY_BY_INDUSTRY["Thương mại"])
+        goods_category = random.choice(base_categories)
+        if random.random() < 0.04:
+            goods_category = random.choice(INCOMPATIBLE_GOODS)
+
+        payment_status = random.choices(
+            ["paid", "partial", "pending", "overdue"],
+            weights=[0.58, 0.18, 0.16, 0.08],
+            k=1,
+        )[0]
+        is_adjustment = random.random() < 0.06
+        updates.append((payment_status, goods_category, is_adjustment, invoice_id))
+
+        item_count = random.randint(1, 3)
+        remaining = amount_float
+        for idx in range(item_count):
+            if idx == item_count - 1:
+                line_amount = max(1.0, remaining)
+            else:
+                ratio = random.uniform(0.2, 0.5)
+                line_amount = max(1.0, amount_float * ratio)
+                remaining -= line_amount
+            quantity = max(1.0, round(random.uniform(1, 200), 2))
+            unit_price = max(1000.0, round(line_amount / quantity, 2))
+            line_items.append(
+                (
+                    invoice_id,
+                    f"{goods_category} - dòng {idx + 1}",
+                    f"ITM-{invoice_id}-{idx + 1}",
+                    quantity,
+                    unit_price,
+                    round(line_amount, 2),
+                    round(line_amount * 0.1, 2),
+                    random.choice(["kg", "pcs", "m3", "service"]),
+                )
+            )
+
+        base_time = datetime.combine(inv_date, datetime.min.time())
+        lifecycle_events.append((invoice_id, "issued", base_time + timedelta(hours=random.randint(7, 18)), None, "seed_engine", "mock_rebuild", "auto-issued"))
+        if is_adjustment:
+            lifecycle_events.append((invoice_id, "adjusted", base_time + timedelta(days=random.randint(1, 15)), None, "seed_engine", "mock_rebuild", "auto-adjusted"))
+        if random.random() < 0.05:
+            lifecycle_events.append((invoice_id, "canceled", base_time + timedelta(days=random.randint(5, 45)), None, "seed_engine", "mock_rebuild", "late cancel"))
+        elif random.random() < 0.04:
+            lifecycle_events.append((invoice_id, "replaced", base_time + timedelta(days=random.randint(1, 10)), None, "seed_engine", "mock_rebuild", "re-issued"))
+
+        should_create_payment = payment_status in {"paid", "partial"} or random.random() < 0.35
+        if should_create_payment:
+            portions = 1 if payment_status != "partial" else random.randint(2, 3)
+            total_paid = amount_float if payment_status == "paid" else amount_float * random.uniform(0.35, 0.85)
+            for p_idx in range(portions):
+                part = total_paid / portions
+                paid_at = base_time + timedelta(days=random.randint(0, 40), hours=random.randint(8, 19))
+                payer = buyer_tax_code if random.random() > 0.08 else seller_tax_code
+                payee = seller_tax_code if random.random() > 0.05 else buyer_tax_code
+                payments.append(
+                    (
+                        invoice_id,
+                        payer,
+                        payee,
+                        round(part, 2),
+                        paid_at,
+                        random.choice(["bank_transfer", "cash", "ewallet"]),
+                        f"PMT-{invoice_number}-{p_idx+1}",
+                    )
+                )
+
+    cur.executemany(
+        """
+        UPDATE invoices
+        SET payment_status = %s,
+            goods_category = %s,
+            is_adjustment = %s
+        WHERE id = %s
+        """,
+        updates,
+    )
+
+    cur.execute("TRUNCATE TABLE invoice_line_items RESTART IDENTITY CASCADE;")
+    cur.executemany(
+        """
+        INSERT INTO invoice_line_items (
+            invoice_id, item_description, item_code, quantity, unit_price, line_amount, vat_amount, unit
+        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+        """,
+        line_items,
+    )
+
+    cur.execute("TRUNCATE TABLE invoice_lifecycle_events RESTART IDENTITY CASCADE;")
+    cur.executemany(
+        """
+        INSERT INTO invoice_lifecycle_events (
+            invoice_id, event_type, event_time, replacement_invoice_id, actor, source, event_note
+        ) VALUES (%s, %s, %s, %s, %s, %s, %s)
+        """,
+        lifecycle_events,
+    )
+
+    cur.execute("TRUNCATE TABLE invoice_payments RESTART IDENTITY CASCADE;")
+    cur.executemany(
+        """
+        INSERT INTO invoice_payments (
+            invoice_id, payer_tax_code, payee_tax_code, paid_amount, paid_at, payment_channel, reference_no
+        ) VALUES (%s, %s, %s, %s, %s, %s, %s)
+        """,
+        payments,
+    )
+    conn.commit()
+    print(f"[OK] Enriched invoices: {len(updates)}")
+    print(f"[OK] Line items seeded: {len(line_items)}")
+    print(f"[OK] Lifecycle events seeded: {len(lifecycle_events)}")
+    print(f"[OK] Invoice payments seeded: {len(payments)}")
+
+
 def main():
     print("=" * 60)
     print("  TaxInspector – Graph Mock Data Generator")
@@ -394,6 +565,7 @@ def main():
         generate_normal_invoices(conn, companies)
         circular_invs, rings = generate_circular_invoices(conn, companies)
         hard_neg_count = generate_hard_negatives(conn, companies)
+        generate_invoice_enrichment(conn)
 
         # Summary
         cur.execute("SELECT COUNT(*) FROM companies;")

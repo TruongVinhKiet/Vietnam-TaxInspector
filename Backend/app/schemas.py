@@ -512,10 +512,12 @@ class GraphGateSummary(BaseModel):
     serving_pass: Optional[bool] = None
     stress_pass: Optional[bool] = None
     all_pass: bool = False
+    failed_gates: List[Dict[str, Any]] = Field(default_factory=list)
 
 
 class GraphQualityResponse(BaseModel):
     status: Literal["healthy", "warning", "degraded", "unknown"] = "unknown"
+    status_reason: Optional[str] = None
     generated_at: str
     model_info: GraphModelInfoSummary
     gate_summary: GraphGateSummary

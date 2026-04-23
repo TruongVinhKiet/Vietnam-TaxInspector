@@ -208,7 +208,9 @@ def test_graph_quality_summary_reports_gate_status(client, monkeypatch, tmp_path
 
     payload = response.json()
     assert payload["status"] == "healthy"
+    assert payload["status_reason"] == "all_quality_gates_passed"
     assert payload["gate_summary"]["all_pass"] is True
+    assert payload["gate_summary"]["failed_gates"] == []
     assert payload["serving"]["overall_pass"] is True
     assert payload["stress"]["overall_pass"] is True
     assert payload["serving"]["criteria"]["node_pr_auc_drop"]["actual"] == pytest.approx(0.0)
@@ -234,9 +236,57 @@ def test_graph_quality_summary_handles_missing_reports(client, monkeypatch, tmp_
 
     payload = response.json()
     assert payload["status"] == "unknown"
+    assert payload["status_reason"] == "quality_reports_unavailable"
     assert payload["serving"]["available"] is False
     assert payload["stress"]["available"] is False
     assert payload["gate_summary"]["all_pass"] is False
+    assert payload["gate_summary"]["failed_gates"] == []
+
+
+def test_graph_quality_summary_surfaces_failed_stress_gate(client, monkeypatch, tmp_path):
+    serving_report = {
+        "serving_path_test": {"node": {"f1": 0.9}, "edge": {"f1": 0.88}},
+        "acceptance_gates": {"overall_pass": True, "criteria": {}},
+    }
+    stress_report = {
+        "stress_summary": {"worst_node_f1_delta": -0.2},
+        "stress_acceptance_gates": {
+            "overall_pass": False,
+            "criteria": {
+                "temporal_plus3m_edge_f1_drop": {"pass": False, "actual": 0.13, "threshold": 0.1},
+            },
+        },
+    }
+    (tmp_path / "serving_e2e_report.json").write_text(json.dumps(serving_report), encoding="utf-8")
+    (tmp_path / "stress_evaluation_report.json").write_text(json.dumps(stress_report), encoding="utf-8")
+    (tmp_path / "gat_model.pt").write_text("dummy", encoding="utf-8")
+    monkeypatch.setattr(monitoring, "MODEL_DIR", tmp_path)
+    monkeypatch.setattr(
+        monitoring,
+        "_build_drift_report",
+        lambda lookback_days, baseline_days, min_samples: {
+            "drift_detected": False,
+            "drift_severity": "low",
+            "drifted_features": [],
+            "recommendation": "",
+            "features": {},
+        },
+    )
+
+    response = client.get("/api/monitoring/graph_quality?include_criteria=true")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "degraded"
+    assert payload["status_reason"] == "stress_temporal_plus3m_edge_f1_drop_failed"
+    assert payload["gate_summary"]["stress_pass"] is False
+    assert payload["gate_summary"]["failed_gates"] == [
+        {
+            "source": "stress",
+            "gate": "temporal_plus3m_edge_f1_drop",
+            "actual": pytest.approx(0.13),
+            "threshold": pytest.approx(0.1),
+        }
+    ]
 
 
 def test_graph_link_prediction_returns_non_empty_for_open_chain(client, monkeypatch):

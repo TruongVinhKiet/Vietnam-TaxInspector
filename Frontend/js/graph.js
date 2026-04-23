@@ -38,6 +38,7 @@ let zoomBehavior = null;
 let activeWorkbenchMode = "companies";
 let currentTaxCode = null;
 let graphQuality = null;
+let forensicIntelData = null;
 let timelineMonth = 12;
 let timelinePlaybackTimer = null;
 let graphRenderState = {
@@ -279,6 +280,36 @@ function formatQualityState(value) {
     if (state === "warning") return "CẢNH BÁO";
     if (state === "degraded") return "SUY GIẢM";
     return "KHÔNG RÕ";
+}
+
+function formatQualityReason(reason) {
+    const value = String(reason || "").toLowerCase();
+    const labels = {
+        all_quality_gates_passed: "Tất cả cổng chất lượng đều đạt ngưỡng.",
+        quality_reports_unavailable: "Chưa có đủ báo cáo serving/stress để kết luận chất lượng.",
+        drift_high_detected: "Phát hiện trôi dữ liệu mức cao, cần theo dõi và tái huấn luyện.",
+        drift_medium_detected: "Có dấu hiệu trôi dữ liệu mức trung bình.",
+    };
+    if (labels[value]) return labels[value];
+    if (value.includes("temporal_plus3m_edge_f1_drop")) {
+        return "Mô hình suy giảm do gate temporal edge F1 drop vượt ngưỡng cho phép.";
+    }
+    if (value.includes("_failed")) {
+        return "Một hoặc nhiều gate kiểm định không đạt ngưỡng.";
+    }
+    return "Không có diễn giải chi tiết.";
+}
+
+function formatGateLabel(raw) {
+    const gate = String(raw || "").toLowerCase();
+    const labels = {
+        temporal_plus3m_edge_f1_drop: "Giảm Edge F1 (+3 tháng)",
+        temporal_plus3m_edge_prauc_drop: "Giảm Edge PR-AUC (+3 tháng)",
+        unseen_node_generalization_gap: "Khoảng cách tổng quát hóa nút mới",
+        node_pr_auc_drop: "Suy giảm Node PR-AUC",
+        edge_pr_auc_drop: "Suy giảm Edge PR-AUC",
+    };
+    return labels[gate] || gate.replaceAll("_", " ");
 }
 
 
@@ -716,6 +747,7 @@ async function loadGraph(taxCode) {
     // Show loading
     showLoading(true);
     currentTaxCode = taxCode;
+    forensicIntelData = null;
 
     try {
         const requestedDepth = 2;
@@ -745,7 +777,8 @@ async function loadGraph(taxCode) {
         forensicPromise
             .then((forensicIntel) => {
                 if (currentTaxCode !== taxCode) return;
-                renderForensicPanel(graphData, forensicIntel);
+                forensicIntelData = forensicIntel;
+                renderForensicPanel(graphData, forensicIntelData);
             })
             .catch((err) => {
                 console.warn("Forensic intel load warning:", err);
@@ -1051,6 +1084,8 @@ function renderQualitySummary(quality) {
     const gateSummary = payload.gate_summary && typeof payload.gate_summary === "object" ? payload.gate_summary : {};
     const drift = payload.drift && typeof payload.drift === "object" ? payload.drift : {};
     const modelInfo = payload.model_info && typeof payload.model_info === "object" ? payload.model_info : {};
+    const failedGates = Array.isArray(gateSummary.failed_gates) ? gateSummary.failed_gates : [];
+    const statusReason = String(payload.status_reason || "").trim();
 
     const servingPass = gateSummary.serving_pass;
     const stressPass = gateSummary.stress_pass;
@@ -1094,6 +1129,37 @@ function renderQualitySummary(quality) {
         "quality-updated-at",
         updatedAt ? `Ảnh chụp ${formatShortTimestamp(updatedAt)}${modelVersion}` : "Ảnh chụp chất lượng chưa sẵn sàng",
     );
+
+    const reasonEl = document.getElementById("quality-reason");
+    if (reasonEl) {
+        const topGateSummary = failedGates
+            .slice(0, 2)
+            .map((item) => {
+                const actual = Number(item?.actual);
+                const threshold = Number(item?.threshold);
+                const actualLabel = Number.isFinite(actual) ? actual.toFixed(4) : "--";
+                const thresholdLabel = Number.isFinite(threshold) ? threshold.toFixed(4) : "--";
+                return `${formatGateLabel(item?.gate)}: ${actualLabel}/${thresholdLabel}`;
+            })
+            .join(" | ");
+        const reasonLabel = formatQualityReason(statusReason);
+        reasonEl.textContent = topGateSummary ? `${reasonLabel} Gate fail: ${topGateSummary}.` : reasonLabel;
+    }
+
+    const failBtn = document.getElementById("quality-fail-action");
+    if (failBtn) {
+        if (failedGates.length) {
+            failBtn.classList.remove("hidden");
+            failBtn.onclick = () => {
+                switchForensicTab("logs");
+                const logs = document.getElementById("investigation-logs");
+                if (logs) logs.scrollIntoView({ behavior: "smooth", block: "start" });
+            };
+        } else {
+            failBtn.classList.add("hidden");
+            failBtn.onclick = null;
+        }
+    }
 }
 
 
@@ -2397,6 +2463,61 @@ function renderGeoForensicSignals(compatDiagnostics, crossBorderSignals) {
 }
 
 
+function formatDateAndSpanLabel(startDateRaw, endDateRaw, spanDaysRaw) {
+    const start = String(startDateRaw || "").trim();
+    const end = String(endDateRaw || "").trim();
+    let spanDays = Number.isFinite(Number(spanDaysRaw)) ? Number(spanDaysRaw) : null;
+
+    const fmt = (value) => {
+        if (!value) return "";
+        const d = new Date(value);
+        if (Number.isNaN(d.getTime())) return "";
+        return d.toLocaleDateString("vi-VN");
+    };
+
+    const startFmt = fmt(start);
+    const endFmt = fmt(end);
+    if (spanDays === null && startFmt && endFmt) {
+        const startDate = new Date(start);
+        const endDate = new Date(end);
+        if (!Number.isNaN(startDate.getTime()) && !Number.isNaN(endDate.getTime())) {
+            spanDays = Math.max(0, Math.round((endDate.getTime() - startDate.getTime()) / 86400000));
+        }
+    }
+
+    if (startFmt && endFmt) {
+        if (spanDays !== null) return `${startFmt} - ${endFmt} (${spanDays} ngày)`;
+        return `${startFmt} - ${endFmt}`;
+    }
+    if (startFmt) {
+        if (spanDays !== null) return `${startFmt} (${spanDays} ngày)`;
+        return startFmt;
+    }
+    if (spanDays !== null) return `Khoảng thời gian: ${spanDays} ngày`;
+    return "Không có";
+}
+
+
+function resolveHopAmountLabel(hop) {
+    const formatted = String(hop?.amount_formatted || "").trim();
+    if (formatted) return formatted;
+
+    const candidates = [
+        hop?.transfer_amount,
+        hop?.amount,
+        hop?.value,
+        hop?.transaction_amount,
+    ];
+    for (const raw of candidates) {
+        const num = Number(raw);
+        if (Number.isFinite(num) && num > 0) {
+            return formatVndCompact(num);
+        }
+    }
+    return "Không có dữ liệu";
+}
+
+
 function buildIntegratedEvidencePaths(data, forensicIntel) {
     let basePaths = [];
     if (Array.isArray(data?.evidence_chains) && data.evidence_chains.length > 0) {
@@ -2415,7 +2536,7 @@ function buildIntegratedEvidencePaths(data, forensicIntel) {
         const totalAmount = toFiniteNumber(ring.total_amount, 0);
         const perHopAmount = nodes.length ? totalAmount / nodes.length : totalAmount;
         const ringScore = toFiniteNumber(ring.ring_score, 0);
-        const spanDays = Number.isFinite(Number(ring.time_span_days)) ? `${Number(ring.time_span_days)} ngày` : "Không có";
+        const ringDateLabel = formatDateAndSpanLabel(ring.start_date, ring.end_date, ring.time_span_days);
 
         const hops = nodes.map((fromNode, hopIdx) => {
             const toNode = nodes[(hopIdx + 1) % nodes.length];
@@ -2423,7 +2544,7 @@ function buildIntegratedEvidencePaths(data, forensicIntel) {
                 from: fromNode,
                 to: toNode,
                 amount_formatted: formatVndCompact(perHopAmount),
-                date: spanDays,
+                date: ringDateLabel,
                 fraud_probability: ringScore,
             };
         });
@@ -2460,7 +2581,7 @@ function buildIntegratedEvidencePaths(data, forensicIntel) {
                     from: parent,
                     to: child,
                     amount_formatted: `Sở hữu ${ownershipPercent.toFixed(1)}%`,
-                    date: "Không có",
+                    date: formatDateAndSpanLabel(trade?.start_date, trade?.end_date, trade?.time_span_days),
                     fraud_probability: Math.min(1, ownershipPercent / 100),
                 },
             ],
@@ -2488,14 +2609,17 @@ function renderForensicPanel(data, forensicIntel = null) {
         const amount = toFiniteNumber(payload.total_suspicious_amount, 0);
         totalEl.textContent = new Intl.NumberFormat("vi-VN").format(amount) + " VNĐ";
         // Animate counter
-        animateCounter(totalEl, 0, amount, 1500);
+        animateCounter(totalEl, 0, amount, 1500, (v) => `${new Intl.NumberFormat("vi-VN").format(Math.round(v))} VNĐ`);
     }
 
     // Invoice count
     const countEl = document.getElementById("suspicious-invoice-count");
     if (countEl) {
         const totalInv = toFiniteNumber(payload.total_suspicious_invoices, 0);
-        countEl.textContent = `Bao gồm ${totalInv} hóa đơn không phát sinh hàng hóa thật được luân chuyển.`;
+        const integrityStatus = payload?.integrity_signals?.available ? "Integrity sẵn sàng" : "Integrity thiếu dữ liệu";
+        const pricingStatus = payload?.pricing_signals?.available ? "Pricing sẵn sàng" : "Pricing thiếu dữ liệu";
+        const phoenixStatus = payload?.phoenix_signals?.available ? "Phoenix sẵn sàng" : "Phoenix thiếu dữ liệu";
+        countEl.textContent = `Bao gồm ${totalInv} hóa đơn nghi vấn. Trạng thái: ${integrityStatus}, ${pricingStatus}, ${phoenixStatus}.`;
     }
 
     // Advanced Fraud Patterns
@@ -2505,11 +2629,50 @@ function renderForensicPanel(data, forensicIntel = null) {
         const smurfEl = document.getElementById("fraud-smurfing");
         const ghostEl = document.getElementById("fraud-ghost");
         const teleEl = document.getElementById("fraud-teleportation");
+        const baselineEl = document.getElementById("fraud-kpi-baseline");
 
-        if (smurfEl) animateCounter(smurfEl, 0, payload.forensic_metrics.smurfing_count || 0, 1000);
-        if (ghostEl) animateCounter(ghostEl, 0, payload.forensic_metrics.ghost_node_count || 0, 1000);
-        if (teleEl) animateCounter(teleEl, 0, payload.forensic_metrics.teleportation_count || 0, 1000);
+        const smurfCount = toFiniteNumber(payload.forensic_metrics.smurfing_count, 0);
+        const ghostCount = toFiniteNumber(payload.forensic_metrics.ghost_node_count, 0);
+        const teleCount = toFiniteNumber(payload.forensic_metrics.teleportation_count, 0);
+        const totalInv = Math.max(1, toFiniteNumber(payload.total_suspicious_invoices, 0));
+        const totalNodes = Math.max(1, Array.isArray(payload.nodes) ? payload.nodes.length : 0);
+        const totalEdges = Math.max(1, Array.isArray(payload.edges) ? payload.edges.length : 0);
+
+        if (smurfEl) animateCounter(smurfEl, 0, smurfCount, 1000, (v) => `${new Intl.NumberFormat("vi-VN").format(Math.round(v))} ca`);
+        if (ghostEl) animateCounter(ghostEl, 0, ghostCount, 1000, (v) => `${new Intl.NumberFormat("vi-VN").format(Math.round(v))} nút`);
+        if (teleEl) animateCounter(teleEl, 0, teleCount, 1000, (v) => `${new Intl.NumberFormat("vi-VN").format(Math.round(v))} cạnh`);
+
+        if (baselineEl) {
+            const smurfPer1k = ((smurfCount / totalInv) * 1000).toFixed(1);
+            const ghostPer1k = ((ghostCount / totalNodes) * 1000).toFixed(1);
+            const telePer1k = ((teleCount / totalEdges) * 1000).toFixed(1);
+            baselineEl.textContent = `Chuẩn hóa quy mô: Smurf ${smurfPer1k}/1.000 hóa đơn | Ghost ${ghostPer1k}/1.000 nút | Teleport ${telePer1k}/1.000 cạnh.`;
+        }
+
+        advFraudStrip.querySelectorAll("[data-fraud-filter]").forEach((card) => {
+            if (card.getAttribute("data-initialized") === "true") return;
+            card.setAttribute("data-initialized", "true");
+            card.addEventListener("click", () => {
+                switchForensicTab("paths");
+                const paths = document.getElementById("evidence-paths-container");
+                if (paths) paths.scrollIntoView({ behavior: "smooth", block: "start" });
+            });
+        });
+
+        const extraSignals = [
+            { id: "washout", value: payload.forensic_metrics.vat_washout_node_count || 0, label: "Nút washout" },
+            { id: "mismatch", value: payload.forensic_metrics.mismatch_edge_count || 0, label: "Cạnh lệch ngành-hàng" },
+            { id: "phoenix", value: payload.forensic_metrics.phoenix_link_count || 0, label: "Chuỗi phoenix" },
+            { id: "payment", value: payload.forensic_metrics.payment_mismatch_count || 0, label: "Lệch thanh toán" },
+        ];
+        const panel = document.getElementById("forensic-intel-updated");
+        if (panel && extraSignals.some((item) => item.value > 0)) {
+            const summary = extraSignals.map((item) => `${item.label}: ${item.value}`).join(" | ");
+            panel.textContent = `${panel.textContent || ""} | ${summary}`.trim();
+        }
     }
+
+    renderForensicSignalsV21(payload);
 
     // Severity badge
     const badge = document.getElementById("severity-badge");
@@ -2629,13 +2792,17 @@ function renderForensicPanel(data, forensicIntel = null) {
                         <div class="bg-surface-container-low p-2 rounded-lg border border-outline-variant/30 text-[10px]">
                             <div class="flex justify-between items-center mb-1">
                                 <span class="font-bold text-primary-container">
-                                    ${escapeHtml(String(h.from || "").substring(0, 6))}... → ${escapeHtml(String(h.to || "").substring(0, 6))}...
+                                    <span title="MST: ${escapeHtml(String(h.from || ""))}">${escapeHtml(String(h.from || ""))}</span>
+                                    <button class="ml-1 text-[9px] text-slate-400 hover:text-primary-container" data-copy-tax="${escapeHtml(String(h.from || ""))}" title="Sao chép MST">Copy</button>
+                                    →
+                                    <span title="MST: ${escapeHtml(String(h.to || ""))}">${escapeHtml(String(h.to || ""))}</span>
+                                    <button class="ml-1 text-[9px] text-slate-400 hover:text-primary-container" data-copy-tax="${escapeHtml(String(h.to || ""))}" title="Sao chép MST">Copy</button>
                                 </span>
-                                <span class="text-error font-bold">${escapeHtml(h.amount_formatted || formatVndCompact(h.amount || 0))}</span>
+                                <span class="text-error font-bold">${escapeHtml(resolveHopAmountLabel(h))}</span>
                             </div>
                             ${fromTag || toTag ? `<div class="flex gap-1.5 mb-1.5">${fromTag}${toTag ? '<span class="text-slate-400 mt-[-1px]">→</span>' + toTag : ''}</div>` : ''}
                             <div class="flex justify-between text-slate-500 font-mono">
-                                <span>Ngày: ${escapeHtml(h.date || "")}</span>
+                                <span>Thời gian: ${escapeHtml(h.date || "Không có")}</span>
                                 <span>Xác suất: ${toFiniteNumber(h.fraud_probability, 0).toFixed(2)}</span>
                             </div>
                         </div>
@@ -2669,10 +2836,96 @@ function renderForensicPanel(data, forensicIntel = null) {
                     if (companies) highlightCycleNodes(companies);
                 });
             });
+            pathsContainer.querySelectorAll("button[data-copy-tax]").forEach((btn) => {
+                btn.addEventListener("click", async () => {
+                    const taxCode = String(btn.dataset.copyTax || "").trim();
+                    if (!taxCode) return;
+                    try {
+                        await navigator.clipboard.writeText(taxCode);
+                        showGraphToast("Đã sao chép MST", taxCode, "success");
+                    } catch (_err) {
+                        showGraphToast("Không thể sao chép", "Trình duyệt không cấp quyền clipboard.", "warning");
+                    }
+                });
+            });
         }
     }
 
     setupForensicTabs();
+}
+
+function renderForensicSignalsV21(payload) {
+    const strip = document.getElementById("forensic-v21-strip");
+    const cards = document.getElementById("forensic-v21-cards");
+    const hint = document.getElementById("forensic-v21-hint");
+    const contractBadge = document.getElementById("forensic-v21-contract");
+    if (!strip || !cards || !hint || !contractBadge) return;
+
+    const integrity = payload?.integrity_signals || {};
+    const pricing = payload?.pricing_signals || {};
+    const phoenix = payload?.phoenix_signals || {};
+    const hasAny = Boolean(integrity.available || pricing.available || phoenix.available);
+
+    contractBadge.textContent = String(payload?.contract_version || "graph-intelligence-v2.1");
+
+    if (!hasAny) {
+        strip.classList.add("hidden");
+        return;
+    }
+
+    strip.classList.remove("hidden");
+    const cardDefs = [
+        {
+            title: "Lifecycle Integrity",
+            available: Boolean(integrity.available),
+            value: `Rủi ro ${(toFiniteNumber(integrity.integrity_risk_score, 0) * 100).toFixed(0)}%`,
+            detail: integrity.available
+                ? `Hủy: ${(toFiniteNumber(integrity.cancel_rate, 0) * 100).toFixed(1)}% · Cuối quý-hủy: ${toFiniteNumber(integrity.quarter_end_issue_then_cancel, 0)}`
+                : `Lý do: ${integrity.reason || "Thiếu dữ liệu lifecycle"}`,
+            tone: integrity.available ? "text-error border-error/30 bg-error/5" : "text-slate-500 border-slate-300 bg-white",
+        },
+        {
+            title: "Pricing & Mismatch",
+            available: Boolean(pricing.available),
+            value: pricing.available
+                ? `${toFiniteNumber(pricing.mismatch_edge_count, 0)} cạnh cảnh báo`
+                : "Chưa sẵn sàng",
+            detail: pricing.available
+                ? "Đã tính lệch ngành-hàng và độ lệch đơn giá theo baseline."
+                : `Lý do: ${pricing.reason || "Thiếu line-items chuẩn hóa"}`,
+            tone: pricing.available ? "text-amber-700 border-amber-500/30 bg-amber-500/5" : "text-slate-500 border-slate-300 bg-white",
+        },
+        {
+            title: "Phoenix Sequencing",
+            available: Boolean(phoenix.available),
+            value: phoenix.available
+                ? `${Array.isArray(phoenix.successions) ? phoenix.successions.length : 0} chuỗi kế thừa`
+                : "Chưa sẵn sàng",
+            detail: phoenix.available
+                ? "Theo dõi doanh nghiệp kế nhiệm và điểm kế thừa rủi ro."
+                : `Lý do: ${phoenix.reason || "Thiếu dữ liệu liên kết thực thể"}`,
+            tone: phoenix.available ? "text-indigo-700 border-indigo-500/30 bg-indigo-500/5" : "text-slate-500 border-slate-300 bg-white",
+        },
+        {
+            title: "Payment Consistency",
+            available: pricing.available || integrity.available,
+            value: integrity.available
+                ? `Mismatch: ${toFiniteNumber(integrity.cross_party_mismatch_count, 0)}`
+                : "Đang đồng bộ",
+            detail: "Đối soát hóa đơn-thanh toán theo invoice_id/reference/amount/time.",
+            tone: integrity.available ? "text-primary-container border-primary-container/20 bg-primary-container/5" : "text-slate-500 border-slate-300 bg-white",
+        },
+    ];
+
+    cards.innerHTML = cardDefs.map((item, idx) => `
+        <div class="rounded-lg border px-2.5 py-2.5 log-entry ${item.tone}" style="animation-delay:${idx * 80}ms">
+            <p class="text-[9px] font-black uppercase tracking-wider">${escapeHtml(item.title)}</p>
+            <p class="mt-1 text-xs font-black">${escapeHtml(item.value)}</p>
+            <p class="mt-1 text-[10px] leading-relaxed opacity-90">${escapeHtml(item.detail)}</p>
+        </div>
+    `).join("");
+
+    hint.textContent = "Các tín hiệu mới đang render theo chuẩn Forensic v2.1, giữ tương thích ngược với dữ liệu hiện hữu.";
 }
 
 
@@ -2813,15 +3066,18 @@ function showEmptyState(message) {
     }
 }
 
-function animateCounter(el, from, to, duration) {
+function animateCounter(el, from, to, duration, formatter = null) {
     const start = performance.now();
     const diff = to - from;
+    const render = typeof formatter === "function"
+        ? formatter
+        : (value) => new Intl.NumberFormat("vi-VN").format(Math.round(value));
     function step(now) {
         const elapsed = now - start;
         const progress = Math.min(elapsed / duration, 1);
         const eased = 1 - Math.pow(1 - progress, 3); // ease-out cubic
         const current = from + diff * eased;
-        el.textContent = new Intl.NumberFormat("vi-VN").format(Math.round(current)) + " VNĐ";
+        el.textContent = render(current);
         if (progress < 1) requestAnimationFrame(step);
     }
     requestAnimationFrame(step);

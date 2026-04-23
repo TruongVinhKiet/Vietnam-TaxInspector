@@ -942,6 +942,10 @@
                         <span id="quality-drift-pill" class="quality-pill" data-state="unknown">TRÔI</span>
                     </div>
                     <p id="quality-updated-at" aria-live="polite" class="mt-2 text-[10px] text-slate-400 font-medium">Ảnh chụp chất lượng chưa sẵn sàng</p>
+                    <p id="quality-reason" class="mt-1 text-[10px] text-slate-500 font-medium">Đang chờ diễn giải chất lượng mô hình...</p>
+                    <button id="quality-fail-action" class="hidden mt-2 text-[10px] font-black uppercase px-2 py-1 rounded border border-amber-300 text-amber-700 bg-amber-50 hover:bg-amber-100 transition-colors">
+                        Xem gate fail
+                    </button>
                 </div>
                 <div id="graph-split-gate-strip" class="px-6 py-3 border-b border-surface-container bg-surface-container-low/30">
                     <div class="flex items-center justify-between gap-2">
@@ -988,19 +992,28 @@
                 <div id="advanced-fraud-strip" class="hidden px-6 py-3 border-b border-surface-container bg-surface-container-low/50">
                     <p class="text-[10px] font-black uppercase tracking-widest text-slate-500">Mô hình Hành vi Gian lận Rủi ro Cao</p>
                     <div class="mt-2 grid grid-cols-3 gap-2">
-                        <div class="bg-amber-500/10 border border-amber-500/30 rounded-lg px-2.5 py-2 text-center">
+                        <div data-fraud-filter="smurfing" class="cursor-pointer bg-amber-500/10 border border-amber-500/30 rounded-lg px-2.5 py-2 text-center hover:bg-amber-500/15 transition-colors" title="Bấm để tập trung chuỗi bằng chứng liên quan">
                             <p class="text-[8px] font-bold uppercase tracking-wider text-amber-700">Chia nhỏ Hoá đơn</p>
                             <p id="fraud-smurfing" class="text-sm font-black text-amber-700">0</p>
                         </div>
-                        <div class="bg-rose-500/10 border border-rose-500/30 rounded-lg px-2.5 py-2 text-center">
+                        <div data-fraud-filter="ghost" class="cursor-pointer bg-rose-500/10 border border-rose-500/30 rounded-lg px-2.5 py-2 text-center hover:bg-rose-500/15 transition-colors" title="Bấm để tập trung chuỗi bằng chứng liên quan">
                             <p class="text-[8px] font-bold uppercase tracking-wider text-rose-700">Nút ảo (Ghost)</p>
                             <p id="fraud-ghost" class="text-sm font-black text-rose-700">0</p>
                         </div>
-                        <div class="bg-indigo-500/10 border border-indigo-500/30 rounded-lg px-2.5 py-2 text-center">
+                        <div data-fraud-filter="teleportation" class="cursor-pointer bg-indigo-500/10 border border-indigo-500/30 rounded-lg px-2.5 py-2 text-center hover:bg-indigo-500/15 transition-colors" title="Bấm để tập trung chuỗi bằng chứng liên quan">
                             <p class="text-[8px] font-bold uppercase tracking-wider text-indigo-700">Tốc độ địa lý cao</p>
                             <p id="fraud-teleportation" class="text-sm font-black text-indigo-700">0</p>
                         </div>
                     </div>
+                    <p id="fraud-kpi-baseline" class="mt-2 text-[10px] text-slate-400 font-medium">Đang chuẩn hóa theo quy mô giao dịch...</p>
+                </div>
+                <div id="forensic-v21-strip" class="hidden px-6 py-3 border-b border-surface-container bg-surface-container-low/40">
+                    <div class="flex items-center justify-between gap-2 mb-2">
+                        <p class="text-[10px] font-black uppercase tracking-widest text-slate-500">Tín hiệu Forensic v2.1</p>
+                        <span id="forensic-v21-contract" class="text-[9px] font-black uppercase px-2 py-0.5 rounded border border-slate-300 text-slate-500 bg-white">--</span>
+                    </div>
+                    <div id="forensic-v21-cards" class="grid grid-cols-2 gap-2"></div>
+                    <p id="forensic-v21-hint" class="mt-2 text-[10px] text-slate-400 font-medium">Đang chờ dữ liệu integrity/pricing/phoenix...</p>
                 </div>
                 <!-- ── Geo-Forensic Compatibility v2 ── -->
                 <div id="geo-compat-banner" class="hidden px-6 py-3 border-b border-surface-container bg-surface-container-low/30">

@@ -27,6 +27,7 @@ TAX_CODE_PATTERN = re.compile(r"^\d{10}$")
 
 # Lazy-loaded GNN inference engine
 _gnn_engine = None
+_graph_feature_pipeline = None
 
 SUBGRAPH_MAX_NODES = 150
 SUBGRAPH_INVOICE_LIMIT = 500
@@ -211,6 +212,14 @@ def _get_gnn_engine():
                 error=str(e),
             )
     return _gnn_engine
+
+
+def _get_graph_feature_pipeline():
+    global _graph_feature_pipeline
+    if _graph_feature_pipeline is None:
+        from ml_engine.graph_feature_pipeline import GraphFeaturePipeline
+        _graph_feature_pipeline = GraphFeaturePipeline()
+    return _graph_feature_pipeline
 
 
 def _to_float(value: Any, default: float = 0.0) -> float:
@@ -903,9 +912,9 @@ def _enrich_graph_result(result: dict, engine: Any, tax_code: Optional[str], dep
         "depth": int(depth),
     }
 
-    result["contract_version"] = "graph-intelligence-v1"
+    result["contract_version"] = "graph-intelligence-v2.1"
     result["model_info"] = {
-        "contract_version": "graph-intelligence-v1",
+        "contract_version": "graph-intelligence-v2.1",
         "inference_mode": "gnn_ensemble" if model_loaded else "heuristic_fallback",
         "model_loaded": model_loaded,
         "ensemble_active": ensemble_active,
@@ -1034,6 +1043,32 @@ def get_vat_invoice_graph(
             )
 
         result = _enrich_graph_result(result, engine=engine, tax_code=tax_code, depth=depth)
+        pipeline = _get_graph_feature_pipeline()
+        feature_result = pipeline.run(
+            db=db,
+            companies=companies,
+            invoices=invoices,
+            nodes=result.get("nodes", []) if isinstance(result.get("nodes"), list) else [],
+            edges=result.get("edges", []) if isinstance(result.get("edges"), list) else [],
+            ownership_links=ctx.get("ownership_links", []),
+        )
+        result["contract_version"] = feature_result.get("contract_version", result.get("contract_version", "graph-intelligence-v2.1"))
+        result["nodes"] = feature_result.get("nodes", result.get("nodes", []))
+        result["edges"] = feature_result.get("edges", result.get("edges", []))
+        result["integrity_signals"] = feature_result.get("integrity_signals", {"available": False, "reason": "pipeline_unavailable"})
+        result["pricing_signals"] = feature_result.get("pricing_signals", {"available": False, "reason": "pipeline_unavailable"})
+        result["phoenix_signals"] = feature_result.get("phoenix_signals", {"available": False, "reason": "pipeline_unavailable"})
+        if isinstance(result.get("forensic_metrics"), dict) and isinstance(feature_result.get("forensic_metrics_patch"), dict):
+            result["forensic_metrics"].update(feature_result.get("forensic_metrics_patch", {}))
+        extra_logs = feature_result.get("forensic_logs", [])
+        if isinstance(extra_logs, list):
+            base_logs = result.get("logs") if isinstance(result.get("logs"), list) else []
+            result["logs"] = [*extra_logs, *base_logs][:40]
+        extra_paths = feature_result.get("evidence_paths", [])
+        if isinstance(extra_paths, list):
+            base_paths = result.get("evidence_paths") if isinstance(result.get("evidence_paths"), list) else []
+            result["evidence_paths"] = [*extra_paths, *base_paths][:30]
+
         result["snapshot_id"] = snapshot_id
         result["query_scope"] = query_scope
         query_scope["shared_context_id"] = snapshot_id
@@ -1273,7 +1308,7 @@ def _extract_subgraph(db: Session, center_tax_code: str, depth: int, max_nodes: 
     # Lấy các hóa đơn giữa những doanh nghiệp nằm trong sub-graph
     # Giới hạn số lượng invoice để tránh crash DOM frontend (max 500 đường nối)
     inv_result = db.execute(text(f"""
-        SELECT seller_tax_code, buyer_tax_code, amount, vat_rate, date, invoice_number
+        SELECT id, seller_tax_code, buyer_tax_code, amount, vat_rate, date, invoice_number, payment_status, goods_category, is_adjustment
         FROM invoices
         WHERE seller_tax_code IN ({placeholders})
           AND buyer_tax_code IN ({placeholders})
@@ -1337,7 +1372,7 @@ def _extract_full_graph(db: Session, limit: int = FULL_GRAPH_COMPANY_LIMIT) -> t
     params = {f"tc{i}": tc for i, tc in enumerate(tax_codes)}
 
     inv_result = db.execute(text(f"""
-        SELECT seller_tax_code, buyer_tax_code, amount, vat_rate, date, invoice_number
+        SELECT id, seller_tax_code, buyer_tax_code, amount, vat_rate, date, invoice_number, payment_status, goods_category, is_adjustment
         FROM invoices
         WHERE seller_tax_code IN ({placeholders})
           AND buyer_tax_code IN ({placeholders})

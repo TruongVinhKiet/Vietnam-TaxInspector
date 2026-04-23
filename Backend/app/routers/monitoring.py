@@ -1377,6 +1377,27 @@ async def get_graph_quality_summary(include_criteria: bool = False):
     serving_pass = bool(serving_gates.get("overall_pass")) if serving_available else None
     stress_pass = bool(stress_gates.get("overall_pass")) if stress_available else None
     all_pass = bool(serving_pass and stress_pass)
+    failed_gates: list[dict[str, Any]] = []
+
+    def _collect_failed(criteria: Any, source: str) -> None:
+        if not isinstance(criteria, dict):
+            return
+        for gate_name, gate_payload in criteria.items():
+            if not isinstance(gate_payload, dict):
+                continue
+            if gate_payload.get("pass") is not False:
+                continue
+            failed_gates.append(
+                {
+                    "source": source,
+                    "gate": str(gate_name),
+                    "actual": gate_payload.get("actual"),
+                    "threshold": gate_payload.get("threshold"),
+                }
+            )
+
+    _collect_failed(serving_criteria, "serving")
+    _collect_failed(stress_criteria, "stress")
 
     drift_severity = str(drift_payload.get("drift_severity", "insufficient_data"))
     if not serving_available and not stress_available:
@@ -1390,8 +1411,20 @@ async def get_graph_quality_summary(include_criteria: bool = False):
     else:
         status = "warning"
 
+    status_reason = "status_unknown"
+    if status == "unknown":
+        status_reason = "quality_reports_unavailable"
+    elif failed_gates:
+        top_gate = failed_gates[0]
+        status_reason = f"{top_gate.get('source', 'gate')}_{top_gate.get('gate', 'unknown')}_failed"
+    elif status == "warning" and drift_severity in {"high", "medium"}:
+        status_reason = f"drift_{drift_severity}_detected"
+    elif status == "healthy":
+        status_reason = "all_quality_gates_passed"
+
     response = {
         "status": status,
+        "status_reason": status_reason,
         "generated_at": datetime.utcnow().isoformat() + "Z",
         "model_info": {
             "model_version": config_payload.get("model_version") if isinstance(config_payload, dict) else None,
@@ -1402,6 +1435,7 @@ async def get_graph_quality_summary(include_criteria: bool = False):
             "serving_pass": serving_pass,
             "stress_pass": stress_pass,
             "all_pass": all_pass,
+            "failed_gates": failed_gates,
         },
         "serving": {
             "available": serving_available,

@@ -468,6 +468,8 @@ class RingScorer:
             ring_amount = 0
             time_span_days = None
             edge_count = len(cycle)
+            ring_start_date = None
+            ring_end_date = None
 
             for i in range(len(cycle)):
                 src = cycle[i]
@@ -480,11 +482,17 @@ class RingScorer:
                     try:
                         first = date.fromisoformat(sorted_dates[0])
                         last = date.fromisoformat(sorted_dates[-1])
-                        span = (last - first).days
-                        if time_span_days is None or span < time_span_days:
-                            time_span_days = span
+                        if ring_start_date is None or first < ring_start_date:
+                            ring_start_date = first
+                        if ring_end_date is None or last > ring_end_date:
+                            ring_end_date = last
                     except (ValueError, TypeError):
                         pass
+
+            if ring_start_date is not None and ring_end_date is not None:
+                # Keep ring timing semantics consistent across backend/UI:
+                # span reflects the full observation window of the ring.
+                time_span_days = max(0, (ring_end_date - ring_start_date).days)
 
             # Scoring factors
             amount_score = min(1.0, ring_amount / 5_000_000_000)  # 5B VND ceiling
@@ -504,6 +512,9 @@ class RingScorer:
                 "ring_size": edge_count,
                 "total_amount": round(ring_amount, 0),
                 "time_span_days": time_span_days,
+                "start_date": ring_start_date.isoformat() if ring_start_date else None,
+                "end_date": ring_end_date.isoformat() if ring_end_date else None,
+                "span_method": "global_ring_window",
                 "ring_score": ring_score,
                 "amount_factor": round(amount_score, 4),
                 "speed_factor": round(speed_score, 4),
