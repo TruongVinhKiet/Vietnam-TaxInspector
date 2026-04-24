@@ -258,6 +258,384 @@ class KPITriggerPolicy(Base):
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
 
+# ════════════════════════════════════════════════════════════════
+#  Feature Store (point-in-time, leakage-safe)
+# ════════════════════════════════════════════════════════════════
+
+class FeatureSet(Base):
+    __tablename__ = "feature_sets"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(80), nullable=False, index=True)
+    version = Column(String(40), nullable=False, index=True)
+    owner = Column(String(80), nullable=True)
+    description = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class FeatureSnapshot(Base):
+    __tablename__ = "feature_snapshots"
+
+    id = Column(Integer, primary_key=True, index=True)
+    entity_type = Column(String(20), nullable=False, index=True)  # company|invoice|edge|case
+    entity_id = Column(String(120), nullable=False, index=True)   # tax_code / invoice_number / composite key
+    as_of_date = Column(Date, nullable=False, index=True)
+    feature_set_id = Column(Integer, ForeignKey("feature_sets.id", ondelete="CASCADE"), nullable=False, index=True)
+    features_json = Column(JSON, nullable=False, default=dict)
+    source_hash = Column(String(64), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+# ════════════════════════════════════════════════════════════════
+#  Model Registry + Inference Audit Trail
+# ════════════════════════════════════════════════════════════════
+
+class ModelRegistry(Base):
+    __tablename__ = "model_registry"
+
+    id = Column(Integer, primary_key=True, index=True)
+    model_name = Column(String(80), nullable=False, index=True)
+    model_version = Column(String(80), nullable=False, index=True)
+    artifact_path = Column(String(400), nullable=True)
+    feature_set_id = Column(Integer, ForeignKey("feature_sets.id", ondelete="SET NULL"), nullable=True, index=True)
+    train_data_hash = Column(String(64), nullable=True)
+    code_hash = Column(String(64), nullable=True)
+    metrics_json = Column(JSON, nullable=True)
+    gates_json = Column(JSON, nullable=True)
+    status = Column(String(20), nullable=False, default="staging")  # staging|prod|archived
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class InferenceAuditLog(Base):
+    __tablename__ = "inference_audit_logs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    model_name = Column(String(80), nullable=False, index=True)
+    model_version = Column(String(80), nullable=False, index=True)
+    request_id = Column(String(64), nullable=True, index=True)
+    actor_badge_id = Column(String(50), nullable=True)
+    actor_user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    entity_type = Column(String(20), nullable=False, index=True)
+    entity_id = Column(String(120), nullable=False, index=True)
+    as_of_date = Column(Date, nullable=True, index=True)
+    input_feature_hash = Column(String(64), nullable=True)
+    output_hash = Column(String(64), nullable=True)
+    outputs_json = Column(JSON, nullable=True)
+    explanation_ref = Column(String(200), nullable=True)
+    latency_ms = Column(Float, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class ModelQualitySnapshot(Base):
+    __tablename__ = "model_quality_snapshots"
+
+    id = Column(Integer, primary_key=True, index=True)
+    model_name = Column(String(80), nullable=False, index=True)
+    model_version = Column(String(80), nullable=True, index=True)
+    window_start = Column(DateTime(timezone=True), nullable=True)
+    window_end = Column(DateTime(timezone=True), nullable=True)
+    quality_json = Column(JSON, nullable=False, default=dict)
+    status = Column(String(20), nullable=True, default="unknown")
+    status_reason = Column(String(120), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class FeatureDriftStat(Base):
+    __tablename__ = "feature_drift_stats"
+
+    id = Column(Integer, primary_key=True, index=True)
+    model_name = Column(String(80), nullable=False, index=True)
+    model_version = Column(String(80), nullable=True, index=True)
+    feature_name = Column(String(120), nullable=False, index=True)
+    window_start = Column(DateTime(timezone=True), nullable=True)
+    window_end = Column(DateTime(timezone=True), nullable=True)
+    psi = Column(Float, nullable=True)
+    ks = Column(Float, nullable=True)
+    missing_rate = Column(Float, nullable=True)
+    mean = Column(Float, nullable=True)
+    std = Column(Float, nullable=True)
+    baseline_mean = Column(Float, nullable=True)
+    baseline_std = Column(Float, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class InvoiceEvent(Base):
+    __tablename__ = "invoice_events"
+
+    id = Column(Integer, primary_key=True, index=True)
+    invoice_number = Column(String(50), ForeignKey("invoices.invoice_number", ondelete="CASCADE"), nullable=False, index=True)
+    event_type = Column(String(30), nullable=False, index=True)
+    event_time = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), index=True)
+    reason = Column(String(200), nullable=True)
+    replaced_invoice_number = Column(String(50), nullable=True)
+    payload_json = Column(JSON, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class InvoiceFingerprint(Base):
+    __tablename__ = "invoice_fingerprints"
+
+    id = Column(Integer, primary_key=True, index=True)
+    invoice_number = Column(String(50), ForeignKey("invoices.invoice_number", ondelete="CASCADE"), nullable=False, unique=True, index=True)
+    hash_near_dup = Column(String(64), nullable=True, index=True)
+    hash_line_items = Column(String(64), nullable=True)
+    hash_counterparty = Column(String(64), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class InvoiceRiskPrediction(Base):
+    __tablename__ = "invoice_risk_predictions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    invoice_number = Column(String(50), ForeignKey("invoices.invoice_number", ondelete="CASCADE"), nullable=False, index=True)
+    as_of_date = Column(Date, nullable=False, index=True)
+    model_version = Column(String(80), nullable=True)
+    risk_score = Column(Float, nullable=False, default=0.0, index=True)
+    risk_level = Column(String(20), nullable=False, default="low")
+    reason_codes = Column(JSON, nullable=True)
+    explanations = Column(JSON, nullable=True)
+    linked_invoice_ids = Column(JSON, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class VatRefundCase(Base):
+    __tablename__ = "vat_refund_cases"
+
+    case_id = Column(String(40), primary_key=True, index=True)
+    tax_code = Column(String(20), ForeignKey("companies.tax_code", ondelete="CASCADE"), nullable=False, index=True)
+    period = Column(String(20), nullable=False, index=True)
+    requested_amount = Column(Numeric(18, 2), nullable=False, default=0.0)
+    submitted_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    status = Column(String(30), nullable=False, default="submitted")
+    channel = Column(String(30), nullable=True)
+    documents_score = Column(Float, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class VatRefundCaseLink(Base):
+    __tablename__ = "vat_refund_case_links"
+
+    id = Column(Integer, primary_key=True, index=True)
+    case_id = Column(String(40), ForeignKey("vat_refund_cases.case_id", ondelete="CASCADE"), nullable=False, index=True)
+    invoice_number = Column(String(50), ForeignKey("invoices.invoice_number", ondelete="CASCADE"), nullable=False, index=True)
+    link_type = Column(String(20), nullable=False, default="supporting")
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class VatRefundPrediction(Base):
+    __tablename__ = "vat_refund_predictions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    case_id = Column(String(40), ForeignKey("vat_refund_cases.case_id", ondelete="CASCADE"), nullable=False, index=True)
+    as_of_date = Column(Date, nullable=False, index=True)
+    model_version = Column(String(80), nullable=True)
+    risk_score = Column(Float, nullable=False, default=0.0)
+    expected_loss = Column(Numeric(18, 2), nullable=False, default=0.0)
+    reason_codes = Column(JSON, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class EntityIdentity(Base):
+    __tablename__ = "entity_identities"
+
+    id = Column(Integer, primary_key=True, index=True)
+    tax_code = Column(String(20), ForeignKey("companies.tax_code", ondelete="CASCADE"), nullable=False, index=True)
+    legal_name = Column(String(255), nullable=True)
+    normalized_name = Column(String(255), nullable=True)
+    address = Column(Text, nullable=True)
+    phone = Column(String(30), nullable=True)
+    email = Column(String(120), nullable=True)
+    representative_name = Column(String(255), nullable=True)
+    representative_id = Column(String(50), nullable=True, index=True)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class EntityAliasEdge(Base):
+    __tablename__ = "entity_alias_edges"
+
+    id = Column(Integer, primary_key=True, index=True)
+    src_tax_code = Column(String(20), ForeignKey("companies.tax_code", ondelete="CASCADE"), nullable=False, index=True)
+    dst_tax_code = Column(String(20), ForeignKey("companies.tax_code", ondelete="CASCADE"), nullable=False, index=True)
+    edge_type = Column(String(30), nullable=False, index=True)
+    score = Column(Float, nullable=False, default=0.0, index=True)
+    evidence_json = Column(JSON, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class PhoenixCandidate(Base):
+    __tablename__ = "phoenix_candidates"
+
+    id = Column(Integer, primary_key=True, index=True)
+    old_tax_code = Column(String(20), ForeignKey("companies.tax_code", ondelete="CASCADE"), nullable=False, index=True)
+    new_tax_code = Column(String(20), ForeignKey("companies.tax_code", ondelete="CASCADE"), nullable=False, index=True)
+    score = Column(Float, nullable=False, default=0.0, index=True)
+    signals_json = Column(JSON, nullable=True)
+    as_of_date = Column(Date, nullable=False, index=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class TradeRecord(Base):
+    __tablename__ = "trade_records"
+
+    record_id = Column(String(40), primary_key=True, index=True)
+    tax_code = Column(String(20), ForeignKey("companies.tax_code", ondelete="CASCADE"), nullable=False, index=True)
+    counterparty_country = Column(String(100), nullable=True)
+    goods_category = Column(String(100), nullable=True)
+    hs_code = Column(String(20), nullable=True)
+    quantity = Column(Numeric(18, 3), nullable=True)
+    unit_price = Column(Numeric(18, 2), nullable=True)
+    trade_date = Column(Date, nullable=False, index=True)
+    channel = Column(String(30), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class PricingReferenceCurve(Base):
+    __tablename__ = "pricing_reference_curves"
+
+    curve_id = Column(String(60), primary_key=True, index=True)
+    goods_key = Column(String(120), nullable=False, index=True)
+    country_pair = Column(String(120), nullable=True)
+    time_bucket = Column(String(20), nullable=False, index=True)
+    p10 = Column(Numeric(18, 2), nullable=True)
+    p50 = Column(Numeric(18, 2), nullable=True)
+    p90 = Column(Numeric(18, 2), nullable=True)
+    n_samples = Column(Integer, nullable=False, default=0)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class MispricingPrediction(Base):
+    __tablename__ = "mispricing_predictions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    record_id = Column(String(40), ForeignKey("trade_records.record_id", ondelete="CASCADE"), nullable=False, index=True)
+    as_of_date = Column(Date, nullable=False, index=True)
+    model_version = Column(String(80), nullable=True)
+    z_score = Column(Float, nullable=True)
+    risk_score = Column(Float, nullable=False, default=0.0)
+    reason_codes = Column(JSON, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class AuditCase(Base):
+    __tablename__ = "audit_cases"
+
+    case_id = Column(String(40), primary_key=True, index=True)
+    tax_code = Column(String(20), ForeignKey("companies.tax_code", ondelete="CASCADE"), nullable=False, index=True)
+    opened_at = Column(DateTime(timezone=True), nullable=True)
+    closed_at = Column(DateTime(timezone=True), nullable=True)
+    case_type = Column(String(40), nullable=True)
+    status = Column(String(30), nullable=True)
+    auditor_team = Column(String(80), nullable=True)
+    effort_hours = Column(Float, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class AuditOutcome(Base):
+    __tablename__ = "audit_outcomes"
+
+    id = Column(Integer, primary_key=True, index=True)
+    case_id = Column(String(40), ForeignKey("audit_cases.case_id", ondelete="CASCADE"), nullable=False, index=True)
+    recovered_amount = Column(Numeric(18, 2), nullable=True)
+    penalty_amount = Column(Numeric(18, 2), nullable=True)
+    dispute_flag = Column(Boolean, default=False)
+    final_amount = Column(Numeric(18, 2), nullable=True)
+    closing_reason = Column(String(120), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class AuditSelectionPrediction(Base):
+    __tablename__ = "audit_selection_predictions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    tax_code = Column(String(20), ForeignKey("companies.tax_code", ondelete="CASCADE"), nullable=False, index=True)
+    as_of_date = Column(Date, nullable=False, index=True)
+    model_version = Column(String(80), nullable=True)
+    prob_recovery = Column(Float, nullable=True)
+    expected_recovery = Column(Numeric(18, 2), nullable=True)
+    expected_effort = Column(Float, nullable=True)
+    priority_score = Column(Float, nullable=True)
+    reason_codes = Column(JSON, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class CollectionAction(Base):
+    __tablename__ = "collection_actions"
+
+    action_id = Column(String(40), primary_key=True, index=True)
+    tax_code = Column(String(20), ForeignKey("companies.tax_code", ondelete="CASCADE"), nullable=False, index=True)
+    action_type = Column(String(40), nullable=False)
+    scheduled_at = Column(DateTime(timezone=True), nullable=True)
+    executed_at = Column(DateTime(timezone=True), nullable=True)
+    result = Column(String(40), nullable=True)
+    notes = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class CollectionOutcome(Base):
+    __tablename__ = "collection_outcomes"
+
+    id = Column(Integer, primary_key=True, index=True)
+    tax_code = Column(String(20), ForeignKey("companies.tax_code", ondelete="CASCADE"), nullable=False, index=True)
+    tax_period = Column(String(20), nullable=True)
+    amount_collected = Column(Numeric(18, 2), nullable=True)
+    collected_at = Column(DateTime(timezone=True), nullable=True)
+    action_id = Column(String(40), ForeignKey("collection_actions.action_id", ondelete="SET NULL"), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class NBAPrediction(Base):
+    __tablename__ = "nba_predictions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    tax_code = Column(String(20), ForeignKey("companies.tax_code", ondelete="CASCADE"), nullable=False, index=True)
+    as_of_date = Column(Date, nullable=False, index=True)
+    model_version = Column(String(80), nullable=True)
+    recommended_action = Column(String(40), nullable=True)
+    uplift_pp = Column(Float, nullable=True)
+    expected_collection = Column(Numeric(18, 2), nullable=True)
+    confidence = Column(String(20), nullable=True)
+    reason_codes = Column(JSON, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class CaseQueue(Base):
+    __tablename__ = "case_queue"
+
+    case_id = Column(String(40), primary_key=True, index=True)
+    case_type = Column(String(30), nullable=False, index=True)
+    entity_id = Column(String(120), nullable=False, index=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    sla_due_at = Column(DateTime(timezone=True), nullable=True)
+    status = Column(String(30), nullable=True)
+    priority = Column(String(20), nullable=True)
+
+
+class CaseEvent(Base):
+    __tablename__ = "case_events"
+
+    id = Column(Integer, primary_key=True, index=True)
+    case_id = Column(String(40), ForeignKey("case_queue.case_id", ondelete="CASCADE"), nullable=False, index=True)
+    event_time = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    event_type = Column(String(60), nullable=True)
+    actor = Column(String(80), nullable=True)
+    payload_json = Column(JSON, nullable=True)
+
+
+class CaseTriagePrediction(Base):
+    __tablename__ = "case_triage_predictions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    case_id = Column(String(40), ForeignKey("case_queue.case_id", ondelete="CASCADE"), nullable=False, index=True)
+    as_of_date = Column(Date, nullable=False, index=True)
+    model_version = Column(String(80), nullable=True)
+    priority_score = Column(Float, nullable=True)
+    urgency_level = Column(String(20), nullable=True)
+    next_steps = Column(JSON, nullable=True)
+    routing_team = Column(String(80), nullable=True)
+    reason_codes = Column(JSON, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
 class KPIMetricSnapshot(Base):
     """
     Point-in-time KPI values used to track split-trigger readiness over time.

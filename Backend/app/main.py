@@ -17,7 +17,23 @@ from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 
 from .database import engine, Base
-from .routers import scoring, graph, delinquency, auth, ai_analysis, monitoring, simulation, osint
+from .routers import (
+    scoring,
+    graph,
+    delinquency,
+    auth,
+    ai_analysis,
+    monitoring,
+    simulation,
+    osint,
+    invoice_risk,
+    vat_refund,
+    entity_resolution,
+    transfer_pricing,
+    audit_selection,
+    collections,
+    case_triage,
+)
 from .security import limiter, SecurityHeadersMiddleware, rate_limit_exceeded_handler
 
 
@@ -183,6 +199,241 @@ async def lifespan(app: FastAPI):
                 "created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP"
                 ");"
             ))
+
+            # Feature store foundation (point-in-time snapshots)
+            conn.execute(text(
+                "CREATE TABLE IF NOT EXISTS feature_sets ("
+                "id SERIAL PRIMARY KEY, "
+                "name VARCHAR(80) NOT NULL, "
+                "version VARCHAR(40) NOT NULL, "
+                "owner VARCHAR(80), "
+                "description TEXT, "
+                "created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP"
+                ");"
+            ))
+            conn.execute(text(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_feature_sets_name_version "
+                "ON feature_sets (name, version);"
+            ))
+            conn.execute(text(
+                "CREATE TABLE IF NOT EXISTS feature_snapshots ("
+                "id SERIAL PRIMARY KEY, "
+                "entity_type VARCHAR(20) NOT NULL, "
+                "entity_id VARCHAR(120) NOT NULL, "
+                "as_of_date DATE NOT NULL, "
+                "feature_set_id INTEGER NOT NULL REFERENCES feature_sets(id) ON DELETE CASCADE, "
+                "features_json JSONB NOT NULL DEFAULT '{}'::jsonb, "
+                "source_hash VARCHAR(64), "
+                "created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP"
+                ");"
+            ))
+            conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS idx_feature_snapshots_entity_asof "
+                "ON feature_snapshots (entity_type, entity_id, as_of_date DESC);"
+            ))
+            conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS idx_feature_snapshots_feature_set_asof "
+                "ON feature_snapshots (feature_set_id, as_of_date DESC);"
+            ))
+            conn.execute(text(
+                "DO $$ "
+                "BEGIN "
+                "IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='feature_snapshots_feature_set_id_fkey') THEN "
+                "ALTER TABLE feature_snapshots "
+                "ADD CONSTRAINT feature_snapshots_feature_set_id_fkey "
+                "FOREIGN KEY (feature_set_id) REFERENCES feature_sets(id) ON DELETE CASCADE; "
+                "END IF; "
+                "END $$;"
+            ))
+
+            # Model registry + inference audit trail
+            conn.execute(text(
+                "CREATE TABLE IF NOT EXISTS model_registry ("
+                "id SERIAL PRIMARY KEY, "
+                "model_name VARCHAR(80) NOT NULL, "
+                "model_version VARCHAR(80) NOT NULL, "
+                "artifact_path VARCHAR(400), "
+                "feature_set_id INTEGER REFERENCES feature_sets(id) ON DELETE SET NULL, "
+                "train_data_hash VARCHAR(64), "
+                "code_hash VARCHAR(64), "
+                "metrics_json JSONB, "
+                "gates_json JSONB, "
+                "status VARCHAR(20) NOT NULL DEFAULT 'staging', "
+                "created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP"
+                ");"
+            ))
+            conn.execute(text(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_model_registry_name_version "
+                "ON model_registry (model_name, model_version);"
+            ))
+            conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS idx_model_registry_status "
+                "ON model_registry (model_name, status);"
+            ))
+            conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS idx_model_registry_created "
+                "ON model_registry (created_at DESC);"
+            ))
+            conn.execute(text(
+                "CREATE TABLE IF NOT EXISTS inference_audit_logs ("
+                "id SERIAL PRIMARY KEY, "
+                "model_name VARCHAR(80) NOT NULL, "
+                "model_version VARCHAR(80) NOT NULL, "
+                "request_id VARCHAR(64), "
+                "actor_badge_id VARCHAR(50), "
+                "actor_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL, "
+                "entity_type VARCHAR(20) NOT NULL, "
+                "entity_id VARCHAR(120) NOT NULL, "
+                "as_of_date DATE, "
+                "input_feature_hash VARCHAR(64), "
+                "output_hash VARCHAR(64), "
+                "outputs_json JSONB, "
+                "explanation_ref VARCHAR(200), "
+                "latency_ms FLOAT, "
+                "created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP"
+                ");"
+            ))
+            conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS idx_infer_audit_model_ts "
+                "ON inference_audit_logs (model_name, created_at DESC);"
+            ))
+            conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS idx_infer_audit_entity_ts "
+                "ON inference_audit_logs (entity_type, entity_id, created_at DESC);"
+            ))
+            conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS idx_infer_audit_request "
+                "ON inference_audit_logs (request_id);"
+            ))
+            conn.execute(text(
+                "CREATE TABLE IF NOT EXISTS model_quality_snapshots ("
+                "id SERIAL PRIMARY KEY, "
+                "model_name VARCHAR(80) NOT NULL, "
+                "model_version VARCHAR(80), "
+                "window_start TIMESTAMP, "
+                "window_end TIMESTAMP, "
+                "quality_json JSONB NOT NULL DEFAULT '{}'::jsonb, "
+                "status VARCHAR(20) DEFAULT 'unknown', "
+                "status_reason VARCHAR(120), "
+                "created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP"
+                ");"
+            ))
+            conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS idx_model_quality_snapshots_model_ts "
+                "ON model_quality_snapshots (model_name, created_at DESC);"
+            ))
+            conn.execute(text(
+                "CREATE TABLE IF NOT EXISTS feature_drift_stats ("
+                "id SERIAL PRIMARY KEY, "
+                "model_name VARCHAR(80) NOT NULL, "
+                "model_version VARCHAR(80), "
+                "feature_name VARCHAR(120) NOT NULL, "
+                "window_start TIMESTAMP, "
+                "window_end TIMESTAMP, "
+                "psi FLOAT, "
+                "ks FLOAT, "
+                "missing_rate FLOAT, "
+                "mean FLOAT, "
+                "std FLOAT, "
+                "baseline_mean FLOAT, "
+                "baseline_std FLOAT, "
+                "created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP"
+                ");"
+            ))
+            conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS idx_feature_drift_stats_model_feature_ts "
+                "ON feature_drift_stats (model_name, feature_name, created_at DESC);"
+            ))
+            conn.execute(text(
+                "CREATE TABLE IF NOT EXISTS invoice_events ("
+                "id SERIAL PRIMARY KEY, "
+                "invoice_number VARCHAR(50) NOT NULL REFERENCES invoices(invoice_number) ON DELETE CASCADE, "
+                "event_type VARCHAR(30) NOT NULL, "
+                "event_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, "
+                "reason VARCHAR(200), "
+                "replaced_invoice_number VARCHAR(50), "
+                "payload_json JSONB, "
+                "created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP"
+                ");"
+            ))
+            conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS idx_invoice_events_invoice_time "
+                "ON invoice_events (invoice_number, event_time DESC);"
+            ))
+            conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS idx_invoice_events_type_time "
+                "ON invoice_events (event_type, event_time DESC);"
+            ))
+            conn.execute(text(
+                "CREATE TABLE IF NOT EXISTS invoice_fingerprints ("
+                "id SERIAL PRIMARY KEY, "
+                "invoice_number VARCHAR(50) NOT NULL UNIQUE REFERENCES invoices(invoice_number) ON DELETE CASCADE, "
+                "hash_near_dup VARCHAR(64), "
+                "hash_line_items VARCHAR(64), "
+                "hash_counterparty VARCHAR(64), "
+                "created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP"
+                ");"
+            ))
+            conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS idx_invoice_fingerprints_near_dup "
+                "ON invoice_fingerprints (hash_near_dup);"
+            ))
+            conn.execute(text(
+                "CREATE TABLE IF NOT EXISTS invoice_risk_predictions ("
+                "id SERIAL PRIMARY KEY, "
+                "invoice_number VARCHAR(50) NOT NULL REFERENCES invoices(invoice_number) ON DELETE CASCADE, "
+                "as_of_date DATE NOT NULL, "
+                "model_version VARCHAR(80), "
+                "risk_score FLOAT NOT NULL DEFAULT 0.0, "
+                "risk_level VARCHAR(20) NOT NULL DEFAULT 'low', "
+                "reason_codes JSONB, "
+                "explanations JSONB, "
+                "linked_invoice_ids JSONB, "
+                "created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP"
+                ");"
+            ))
+            conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS idx_invoice_risk_predictions_invoice_date "
+                "ON invoice_risk_predictions (invoice_number, as_of_date DESC);"
+            ))
+            conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS idx_invoice_risk_predictions_score "
+                "ON invoice_risk_predictions (risk_score DESC);"
+            ))
+            conn.execute(text(
+                "CREATE TABLE IF NOT EXISTS vat_refund_cases ("
+                "case_id VARCHAR(40) PRIMARY KEY, "
+                "tax_code VARCHAR(20) NOT NULL REFERENCES companies(tax_code) ON DELETE CASCADE, "
+                "period VARCHAR(20) NOT NULL, "
+                "requested_amount NUMERIC(18, 2) NOT NULL DEFAULT 0.0, "
+                "submitted_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, "
+                "status VARCHAR(30) NOT NULL DEFAULT 'submitted', "
+                "channel VARCHAR(30), "
+                "documents_score FLOAT, "
+                "created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP"
+                ");"
+            ))
+            conn.execute(text(
+                "CREATE TABLE IF NOT EXISTS vat_refund_case_links ("
+                "id SERIAL PRIMARY KEY, "
+                "case_id VARCHAR(40) NOT NULL REFERENCES vat_refund_cases(case_id) ON DELETE CASCADE, "
+                "invoice_number VARCHAR(50) NOT NULL REFERENCES invoices(invoice_number) ON DELETE CASCADE, "
+                "link_type VARCHAR(20) NOT NULL DEFAULT 'supporting', "
+                "created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP"
+                ");"
+            ))
+            conn.execute(text(
+                "CREATE TABLE IF NOT EXISTS vat_refund_predictions ("
+                "id SERIAL PRIMARY KEY, "
+                "case_id VARCHAR(40) NOT NULL REFERENCES vat_refund_cases(case_id) ON DELETE CASCADE, "
+                "as_of_date DATE NOT NULL, "
+                "model_version VARCHAR(80), "
+                "risk_score FLOAT NOT NULL DEFAULT 0.0, "
+                "expected_loss NUMERIC(18, 2) NOT NULL DEFAULT 0.0, "
+                "reason_codes JSONB, "
+                "created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP"
+                ");"
+            ))
             conn.execute(text(
                 "CREATE INDEX IF NOT EXISTS idx_kpi_snapshot_track_metric_ts "
                 "ON kpi_metric_snapshots (track_name, metric_name, generated_at DESC);"
@@ -320,6 +571,13 @@ app.include_router(ai_analysis.router)
 app.include_router(monitoring.router)
 app.include_router(simulation.router)
 app.include_router(osint.router)
+app.include_router(invoice_risk.router)
+app.include_router(vat_refund.router)
+app.include_router(entity_resolution.router)
+app.include_router(transfer_pricing.router)
+app.include_router(audit_selection.router)
+app.include_router(collections.router)
+app.include_router(case_triage.router)
 
 
 @app.get("/", tags=["Health"])

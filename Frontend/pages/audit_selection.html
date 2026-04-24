@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8"/>
 <meta content="width=device-width, initial-scale=1.0" name="viewport"/>
-<title>Vietnam TaxInspector - Hiệu quả Can thiệp</title>
+<title>Vietnam TaxInspector - Chọn mẫu Thanh tra</title>
 <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&amp;display=swap" rel="stylesheet"/>
 <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
@@ -86,21 +86,17 @@
         font-family: 'Inter', sans-serif;
     }
 
-    .action-meter-fill {
-        transition: width 0.5s var(--motion-ease-emphasis, cubic-bezier(0.16, 1, 0.3, 1));
-    }
-
-    .metric-card {
+    .track-card {
         transition: transform 0.3s ease, box-shadow 0.3s ease;
     }
 
-    .metric-card:hover {
+    .track-card:hover {
         transform: translateY(-2px);
         box-shadow: 0 14px 26px rgba(0, 33, 71, 0.08);
     }
 
-    .status-banner {
-        transition: border-color 0.3s ease, background-color 0.3s ease, color 0.3s ease;
+    .status-pill {
+        transition: background-color 0.3s ease, color 0.3s ease;
     }
 </style>
 <link rel="stylesheet" href="../css/global.css?v=3.2">
@@ -147,6 +143,7 @@
 <span class="text-sm">Tài khoản</span>
 </a>
 </nav>
+
 <div class="mt-auto px-6 pt-6 border-t border-white/5">
 <div class="flex items-center gap-3 p-2 rounded-lg bg-white/5">
 <div class="w-8 h-8 rounded bg-primary-fixed-dim/20 flex items-center justify-center overflow-hidden shrink-0">
@@ -165,8 +162,9 @@
 <nav class="flex items-center space-x-2 text-xs font-medium" id="header-breadcrumb">
 <span class="text-slate-400">Ứng dụng</span>
 <span class="material-symbols-outlined text-[14px] text-slate-300">chevron_right</span>
-<span class="text-primary-container font-bold" id="breadcrumb-current">Hiệu quả Can thiệp và Thu hồi</span>
+<span class="text-primary-container font-bold" id="breadcrumb-current">Chọn mẫu Thanh tra</span>
 </nav>
+<a href="specialized.html" class="ml-4 px-3 py-1.5 text-xs rounded border border-surface-container-highest bg-surface-container-lowest hover:bg-surface-container-low text-slate-500 font-bold transition-colors flex items-center gap-1"><span class="material-symbols-outlined text-[14px]">arrow_back</span> Về Chuyên đề Thanh tra</a>
 </div>
 <div class="flex items-center gap-8">
 <div class="flex items-center gap-3 bg-surface-container-low px-4 py-1.5 rounded-full border border-outline-variant/10">
@@ -185,152 +183,51 @@
 </div>
 </header>
 <main class="ml-64 min-h-screen bg-surface p-8 page-transition">
-<div class="max-w-7xl mx-auto space-y-6">
-<div class="flex flex-wrap items-end justify-between gap-4">
-<div>
-<h2 class="text-3xl font-extrabold tracking-tight text-primary-container mb-2">Hiệu quả Can thiệp và Thu hồi</h2>
-<p class="text-on-surface-variant max-w-3xl text-sm">Theo dõi hiệu quả vận hành theo hành động can thiệp, khả năng hiện thực hóa mức tăng thu hồi và độ an toàn với nhóm rủi ro cao.</p>
+<div class="max-w-6xl mx-auto space-y-6">
+<div class="flex items-end justify-between">
+<div><h2 class="text-3xl font-extrabold tracking-tight text-primary-container mb-2 flex items-center gap-3"><span class="material-symbols-outlined text-primary text-[28px]" style="font-variation-settings: 'FILL' 1;">rule</span>Chọn mẫu Thanh tra</h2></div>
 </div>
-<div class="bg-surface-container-lowest rounded-xl border border-outline-variant/30 px-4 py-3 flex flex-wrap items-end gap-3 shadow-sm">
-<label class="text-[11px] uppercase tracking-widest font-bold text-slate-500">
-Cửa sổ ngày
-<select id="intervention-window-days" class="mt-1 block rounded-lg border-outline-variant/50 text-xs font-semibold text-primary-container bg-white min-w-[96px]">
-<option value="30">30 ngày</option>
-<option value="90" selected>90 ngày</option>
-<option value="180">180 ngày</option>
-<option value="365">365 ngày</option>
-</select>
-</label>
-<label class="text-[11px] uppercase tracking-widest font-bold text-slate-500">
-Top-K độ chính xác
-<select id="intervention-top-k" class="mt-1 block rounded-lg border-outline-variant/50 text-xs font-semibold text-primary-container bg-white min-w-[88px]">
-<option value="25">25</option>
-<option value="50" selected>50</option>
-<option value="100">100</option>
-<option value="200">200</option>
-</select>
-</label>
-<button id="intervention-refresh-btn" class="px-4 py-2 rounded-lg bg-primary-container text-white text-xs font-bold uppercase tracking-widest hover:bg-primary transition-colors flex items-center gap-2">
-<span class="material-symbols-outlined text-[16px]">sync</span>
-Làm mới
-</button>
-<a href="case_triage.html" class="px-4 py-2 rounded-lg border border-primary-container/30 text-primary-container text-xs font-bold uppercase tracking-widest hover:bg-primary-container/10 transition-colors flex items-center gap-2"><span class="material-symbols-outlined text-[16px]">pending_actions</span> Mở Case Triage</a>
-</div>
-</div>
-<div id="intervention-status-banner" class="status-banner rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 flex flex-wrap items-center justify-between gap-3 text-xs">
-<div class="flex items-center gap-2">
-<span id="intervention-status-dot" class="inline-block w-2.5 h-2.5 rounded-full bg-slate-400"></span>
-<span id="intervention-status-text" class="font-bold uppercase tracking-wider text-slate-600">Đang đồng bộ dữ liệu KPI...</span>
-</div>
-<p id="intervention-status-message" class="text-slate-500">Đang truy xuất dữ liệu hiệu quả từ API giám sát.</p>
-</div>
-<p id="intervention-navigation-hint" class="hidden rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-[11px] font-semibold text-blue-700"></p>
-<div id="intervention-overview-section" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
-<div class="metric-card rounded-xl bg-surface-container-lowest border border-outline-variant/20 p-4 shadow-sm">
-<p class="text-[10px] uppercase tracking-widest font-bold text-slate-500">Tổng hồ sơ gắn nhãn</p>
-<p id="intervention-total-labels" class="text-3xl font-black text-primary-container mt-2">--</p>
-</div>
-<div class="metric-card rounded-xl bg-surface-container-lowest border border-outline-variant/20 p-4 shadow-sm">
-<p class="text-[10px] uppercase tracking-widest font-bold text-slate-500">Đã can thiệp</p>
-<p id="intervention-attempted-labels" class="text-3xl font-black text-primary-container mt-2">--</p>
-<p id="intervention-attempted-ratio" class="text-xs text-slate-500 mt-1">Tỷ lệ: --</p>
-</div>
-<div class="metric-card rounded-xl bg-surface-container-lowest border border-outline-variant/20 p-4 shadow-sm">
-<p class="text-[10px] uppercase tracking-widest font-bold text-slate-500">Kết thúc vòng xử lý</p>
-<p id="intervention-terminal-labels" class="text-3xl font-black text-primary-container mt-2">--</p>
-<p id="intervention-positive-recovery" class="text-xs text-slate-500 mt-1">Thu hồi dương: --</p>
-</div>
-<div class="metric-card rounded-xl bg-surface-container-lowest border border-outline-variant/20 p-4 shadow-sm">
-<p class="text-[10px] uppercase tracking-widest font-bold text-slate-500">Precision@K</p>
-<p id="intervention-precision" class="text-3xl font-black text-primary-container mt-2">--</p>
-<p id="intervention-precision-sample" class="text-xs text-slate-500 mt-1">Mẫu: --</p>
-</div>
-<div class="metric-card rounded-xl bg-surface-container-lowest border border-outline-variant/20 p-4 shadow-sm">
-<p class="text-[10px] uppercase tracking-widest font-bold text-slate-500">ROI dương</p>
-<p id="intervention-roi-positive" class="text-3xl font-black text-emerald-700 mt-2">--</p>
-</div>
-<div class="metric-card rounded-xl bg-surface-container-lowest border border-outline-variant/20 p-4 shadow-sm">
-<p class="text-[10px] uppercase tracking-widest font-bold text-slate-500">FN rủi ro cao</p>
-<p id="intervention-fn-high-risk" class="text-3xl font-black text-amber-700 mt-2">--</p>
-</div>
-<div class="metric-card rounded-xl bg-surface-container-lowest border border-outline-variant/20 p-4 shadow-sm">
-<p class="text-[10px] uppercase tracking-widest font-bold text-slate-500">Thu hồi ròng</p>
-<p id="intervention-net-recovery" class="text-3xl font-black text-primary-container mt-2">--</p>
-</div>
-<div class="metric-card rounded-xl bg-surface-container-lowest border border-outline-variant/20 p-4 shadow-sm">
-<p class="text-[10px] uppercase tracking-widest font-bold text-slate-500">Thu hồi TB / hồ sơ</p>
-<p id="intervention-avg-recovery" class="text-3xl font-black text-primary-container mt-2">--</p>
-</div>
-</div>
-<div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
-<div class="rounded-xl bg-surface-container-lowest border border-outline-variant/20 p-4 shadow-sm">
-<p class="text-[10px] uppercase tracking-widest font-bold text-slate-500">Tỷ lệ hiện thực hóa tăng thu hồi</p>
-<p id="intervention-uplift-ratio" class="text-2xl font-black text-primary-container mt-2">--</p>
-<p class="text-xs text-slate-500 mt-1">Thu hồi thực tế / Uplift dự báo</p>
-</div>
-<div class="rounded-xl bg-surface-container-lowest border border-outline-variant/20 p-4 shadow-sm">
-<p class="text-[10px] uppercase tracking-widest font-bold text-slate-500">Tỷ lệ hiện thực hóa thu hồi</p>
-<p id="intervention-recovery-ratio" class="text-2xl font-black text-primary-container mt-2">--</p>
-<p class="text-xs text-slate-500 mt-1">Thu hồi thực tế / Thu hồi kỳ vọng</p>
-</div>
-<div class="rounded-xl bg-surface-container-lowest border border-outline-variant/20 p-4 shadow-sm">
-<p class="text-[10px] uppercase tracking-widest font-bold text-slate-500">Tổng dự báo / thực tế</p>
-<div class="mt-2 space-y-1 text-xs text-slate-600">
-<p>Uplift dự báo: <span id="intervention-total-predicted" class="font-bold text-primary-container">--</span></p>
-<p>Thu hồi kỳ vọng: <span id="intervention-total-expected" class="font-bold text-primary-container">--</span></p>
-<p>Thu hồi thực tế: <span id="intervention-total-actual" class="font-bold text-emerald-700">--</span></p>
-<p>Chi phí kiểm toán: <span id="intervention-total-audit" class="font-bold text-amber-700">--</span></p>
-</div>
-</div>
-</div>
-<div class="grid grid-cols-1 xl:grid-cols-5 gap-4">
-<section id="intervention-actions-section" class="xl:col-span-3 bg-surface-container-lowest rounded-xl border border-outline-variant/20 shadow-sm overflow-hidden">
-<header class="px-4 py-3 border-b border-surface-container flex items-center justify-between gap-3">
-<h3 class="font-bold text-primary-container text-sm flex items-center gap-2">
-<span class="material-symbols-outlined text-primary text-[18px]" style="font-variation-settings: 'FILL' 1;">table_chart</span>
-Hiệu quả theo hành động can thiệp
-</h3>
-<span id="intervention-actions-count" class="text-[10px] uppercase tracking-widest font-bold text-slate-400">0 hành động</span>
-</header>
-<div class="overflow-x-auto">
-<table class="w-full text-left border-collapse min-w-[720px]">
-<thead>
-<tr class="bg-surface-container-low text-[10px] uppercase tracking-widest text-slate-500">
-<th class="px-4 py-3">Hành động</th>
-<th class="px-4 py-3">Mẫu</th>
-<th class="px-4 py-3">Dương tính</th>
-<th class="px-4 py-3">Độ chính xác</th>
-<th class="px-4 py-3">Uplift kỳ vọng</th>
-<th class="px-4 py-3">Thu hồi thực tế</th>
-<th class="px-4 py-3">Hiện thực hóa</th>
-<th class="px-4 py-3">Ròng/Hồ sơ</th>
-</tr>
-</thead>
-<tbody id="intervention-action-table-body" class="divide-y divide-surface-container text-sm">
-<tr>
-<td colspan="8" class="px-4 py-6 text-center text-slate-400 italic">Đang tải dữ liệu hành động...</td>
-</tr>
-</tbody>
-</table>
-</div>
-</section>
-<section class="xl:col-span-2 bg-surface-container-lowest rounded-xl border border-outline-variant/20 shadow-sm overflow-hidden">
-<header class="px-4 py-3 border-b border-surface-container">
-<h3 class="font-bold text-primary-container text-sm flex items-center gap-2">
-<span class="material-symbols-outlined text-primary text-[18px]" style="font-variation-settings: 'FILL' 1;">insights</span>
-Thanh mức hiệu quả theo hành động
-</h3>
-</header>
-<div id="intervention-action-bars" class="p-4 space-y-3">
-<p class="text-slate-400 italic text-sm">Đang tải dữ liệu biểu diễn...</p>
-</div>
-</section>
-</div>
-<div class="flex flex-wrap items-center justify-between gap-3 text-[11px] text-slate-500 uppercase tracking-wider">
-<span id="intervention-updated-at">Cập nhật lần cuối: --</span>
-<span id="intervention-generated-at">Thời điểm tạo: --</span>
-</div>
-</div>
+<div class="bg-surface-container-lowest rounded-2xl border border-outline-variant/20 p-6 shadow-[0_20px_40px_rgba(0,33,71,0.06)]">
+    <div class="flex flex-wrap items-end justify-between gap-4 mb-6">
+        <div>
+            <label class="block text-xs font-semibold text-slate-500 mb-1">Ngân sách Thanh tra (Giờ)</label>
+            <div class="flex items-center gap-2">
+                <input type="number" id="budget" value="400" min="10" step="10" class="w-32 rounded-lg border-outline-variant/40 bg-slate-50 text-sm font-bold text-slate-800" />
+                <button id="load" class="px-4 py-2 rounded-lg bg-primary-container text-white text-sm font-bold uppercase tracking-widest hover:bg-primary transition-colors flex items-center gap-2">
+                    <span class="material-symbols-outlined text-[16px]">bolt</span> Tối ưu hóa Model
+                </button>
+            </div>
+        </div>
+        <div class="text-right">
+            <p class="text-xs font-semibold text-slate-500 mb-1">Trạng thái Phân bổ</p>
+            <div class="flex items-center justify-end gap-3" id="budget-stats">
+                 <div class="bg-slate-100 px-3 py-1.5 rounded-lg text-sm text-slate-600">Sử dụng: <span class="font-bold text-primary-container" id="used-hours">0</span> / <span id="budget-hours" class="font-bold">400</span> h</div>
+                 <div class="bg-slate-100 px-3 py-1.5 rounded-lg text-sm text-slate-600">Hồ sơ chọn: <span class="font-bold text-primary-container" id="selected-count">0</span></div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="w-full bg-slate-100 h-2 rounded-full mb-6 overflow-hidden">
+        <div id="budget-progress-bar" class="bg-green-500 h-2 rounded-full" style="width: 0%; transition: width 0.5s ease-in-out, background-color 0.3s ease;"></div>
+    </div>
+
+    <div class="overflow-x-auto rounded-xl border border-outline-variant/20">
+        <table class="w-full text-sm text-left whitespace-nowrap">
+            <thead class="bg-slate-50 border-b border-outline-variant/20 text-xs font-bold text-slate-500 uppercase tracking-widest">
+                <tr>
+                    <th class="px-4 py-3">Mã số thuế</th>
+                    <th class="px-4 py-3 text-center">Điểm Ưu tiên</th>
+                    <th class="px-4 py-3 text-right">Thu hồi Kỳ vọng</th>
+                    <th class="px-4 py-3 text-center">Xác suất thành công</th>
+                    <th class="px-4 py-3 text-center">Nỗ lực định dạng</th>
+                </tr>
+            </thead>
+            <tbody id="out" class="divide-y divide-outline-variant/10 bg-white">
+                <tr><td colspan="5" class="px-4 py-12 text-center text-slate-400">Vui lòng chạy tối ưu hóa dữ liệu</td></tr>
+            </tbody>
+        </table>
+    </div>
+</div></div>
 </main>
 <footer class="w-full py-4 ml-64 bg-slate-50 dark:bg-slate-950 flex justify-between items-center px-8 border-t border-slate-200 dark:border-slate-800 font-inter text-[10px] uppercase tracking-widest text-slate-500 min-h-[50px] max-w-[calc(100%-16rem)] relative z-10" style="margin-top: auto;">
 <div class="flex items-center gap-6">
@@ -350,10 +247,13 @@ Thanh mức hiệu quả theo hành động
 </div>
 </footer>
 <script src="../js/api.js"></script>
-<script src="../js/intervention.js?v=1.0"></script>
+<script src="../js/audit_selection.js"></script>
 <script>
 document.addEventListener("DOMContentLoaded", function() {
-    const currentPage = window.location.pathname.split("/").pop() || "dashboard.html";
+    const currentPage = "specialized.html";
+    // Force current module title
+    document.getElementById("breadcrumb-current").textContent = "Chọn mẫu Thanh tra";
+    document.getElementById("sidebar-subtitle").textContent = "Chuyên đề Thanh tra";
     const navItems = document.querySelectorAll("#sidebar-nav .nav-item");
     let pageTitle = "Hệ thống Giám sát";
 
@@ -365,8 +265,7 @@ document.addEventListener("DOMContentLoaded", function() {
         }
     });
 
-    const breadcrumbCurrent = document.getElementById("breadcrumb-current");
-    if (breadcrumbCurrent) breadcrumbCurrent.textContent = pageTitle;
+    // Breadcrumb kept as specific child title
     const sidebarSubtitle = document.getElementById("sidebar-subtitle");
     if (sidebarSubtitle) sidebarSubtitle.textContent = pageTitle;
 

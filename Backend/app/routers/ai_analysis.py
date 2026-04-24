@@ -39,6 +39,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
 from ml_engine.pipeline import TaxFraudPipeline
 from ml_engine.feature_engineering import TaxFeatureEngineer
+from ml_engine.model_registry import ModelRegistryService, AuditContext, InferenceTimer
 
 router = APIRouter(prefix="/api/ai", tags=["AI Risk Analysis"])
 
@@ -2022,6 +2023,7 @@ def single_query(tax_code: str, db: Session = Depends(get_db)):
     Nếu không có trong DB, trả về lỗi kèm gợi ý upload CSV.
     """
     resolved_tax_code = _require_numeric_tax_code(tax_code)
+    request_id = uuid.uuid4().hex
     company = db.query(models.Company).filter(
         models.Company.tax_code == resolved_tax_code
     ).first()
@@ -2229,6 +2231,19 @@ def single_query(tax_code: str, db: Session = Depends(get_db)):
             snapshot_source="ai_single_query_cached",
         )
         _append_fraud_inference_metric(response_payload, source="cached")
+        try:
+            registry = ModelRegistryService(db)
+            registry.log_inference(
+                model_name="fraud_ai_single_query",
+                model_version=str(response_payload.get("model_version") or "unknown"),
+                entity_type="company",
+                entity_id=resolved_tax_code,
+                input_features={"tax_code": resolved_tax_code, "source": "cached"},
+                outputs={"risk_score": response_payload.get("risk_score"), "risk_level": response_payload.get("risk_level")},
+                ctx=AuditContext(request_id=request_id),
+            )
+        except Exception:
+            db.rollback()
         return response_payload
 
     # If we have tax_returns data, build financial data for pipeline
@@ -2265,6 +2280,7 @@ def single_query(tax_code: str, db: Session = Depends(get_db)):
 
         company_data = list(yearly_data.values())
         pipeline = get_pipeline()
+        timer = InferenceTimer()
         try:
             result = pipeline.predict_single(company_data)
         except ValueError as exc:
@@ -2320,6 +2336,21 @@ def single_query(tax_code: str, db: Session = Depends(get_db)):
         except Exception as cache_err:
             db.rollback()
             print(f"[WARN] Failed to cache realtime assessment: {cache_err}")
+
+        try:
+            registry = ModelRegistryService(db)
+            registry.log_inference(
+                model_name="fraud_ai_single_query",
+                model_version=str(result.get("model_version") or "unknown"),
+                entity_type="company",
+                entity_id=resolved_tax_code,
+                input_features={"tax_code": resolved_tax_code, "years": len(company_data), "source": "realtime"},
+                outputs={"risk_score": result.get("risk_score"), "risk_level": result.get("risk_level"), "anomaly_score": result.get("anomaly_score")},
+                latency_ms=timer.elapsed_ms(),
+                ctx=AuditContext(request_id=request_id),
+            )
+        except Exception:
+            db.rollback()
 
         result["yearly_history"] = yearly_history_for_cache
         result["history_source"] = history_source

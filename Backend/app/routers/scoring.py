@@ -17,6 +17,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from sqlalchemy import desc
 from typing import Optional
+import uuid
 
 from ..database import get_db
 from .. import models, schemas
@@ -119,6 +120,9 @@ def score_company_risk(tax_code: str, db: Session = Depends(get_db)):
     # Strategy 1: Try real-time ML pipeline inference
     pipeline = _get_pipeline()
     if pipeline is not None:
+        from ml_engine.model_registry import ModelRegistryService, AuditContext, InferenceTimer
+        timer = InferenceTimer()
+        request_id = uuid.uuid4().hex
         tax_returns = (
             db.query(models.TaxReturn)
             .filter(models.TaxReturn.tax_code == tax_code)
@@ -164,7 +168,7 @@ def score_company_risk(tax_code: str, db: Session = Depends(get_db)):
                     risk_score = _to_float(result.get("risk_score"), 0.0)
                     risk_level = _classify_risk_level(risk_score)
 
-                    return schemas.FraudRiskPredictionEnhanced(
+                    response_payload = schemas.FraudRiskPredictionEnhanced(
                         tax_code=tax_code,
                         company_name=company.name,
                         risk_score=risk_score,
@@ -183,6 +187,22 @@ def score_company_risk(tax_code: str, db: Session = Depends(get_db)):
                             if result.get(f) is not None
                         ],
                     )
+                    try:
+                        registry = ModelRegistryService(db)
+                        registry.log_inference(
+                            model_name="fraud_scoring",
+                            model_version=str(result.get("model_version") or "unknown"),
+                            entity_type="company",
+                            entity_id=tax_code,
+                            input_features={"tax_code": tax_code, "rows": len(company_rows)},
+                            outputs={"risk_score": risk_score, "risk_level": risk_level},
+                            latency_ms=timer.elapsed_ms(),
+                            ctx=AuditContext(request_id=request_id),
+                        )
+                    except Exception:
+                        db.rollback()
+
+                    return response_payload
                 except Exception as exc:
                     print(f"[WARN] Pipeline inference failed for {tax_code}, trying cached: {exc}")
 

@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 
 from ..observability import get_structured_logger, log_event
 from .. import schemas, auth, models
-from ..database import get_db
+from ..database import get_db, engine
 
 router = APIRouter(prefix="/api/monitoring", tags=["MLOps"])
 
@@ -90,6 +90,7 @@ SYNTHETIC_LABEL_MARKERS = (
 REAL_LABEL_ORIGINS = ("manual_inspector", "field_verified", "imported_casework")
 SYNTHETIC_LABEL_ORIGINS = ("bootstrap_generated", "auto_seed")
 DATA_REALITY_AUDIT_TABLE = "data_reality_audit_logs"
+
 
 
 class FeedbackData(BaseModel):
@@ -259,6 +260,77 @@ def _safe_read_json(path: Path) -> dict:
             return payload if isinstance(payload, dict) else {}
     except Exception:
         return {}
+
+
+def _persist_model_quality_snapshot(model_name: str, payload: dict[str, Any]) -> None:
+    if not isinstance(payload, dict):
+        return
+    model_info = payload.get("model_info", {}) if isinstance(payload.get("model_info"), dict) else {}
+    drift = payload.get("drift", {}) if isinstance(payload.get("drift"), dict) else {}
+    model_version = model_info.get("model_version")
+    status = payload.get("status")
+    status_reason = payload.get("status_reason")
+    generated_at = _parse_iso_timestamp(str(payload.get("generated_at") or "")) or datetime.utcnow()
+
+    window_end = generated_at
+    window_start = generated_at - timedelta(days=7)
+    quality_json = json.dumps(payload, default=str)
+
+    try:
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    "INSERT INTO model_quality_snapshots "
+                    "(model_name, model_version, window_start, window_end, quality_json, status, status_reason, created_at) "
+                    "VALUES (:model_name, :model_version, :window_start, :window_end, CAST(:quality_json AS jsonb), :status, :status_reason, :created_at)"
+                ),
+                {
+                    "model_name": model_name,
+                    "model_version": model_version,
+                    "window_start": window_start,
+                    "window_end": window_end,
+                    "quality_json": quality_json,
+                    "status": status,
+                    "status_reason": status_reason,
+                    "created_at": generated_at,
+                },
+            )
+
+            features = drift.get("features", {}) if isinstance(drift.get("features"), dict) else {}
+            for feature_name, feature_payload in features.items():
+                if not isinstance(feature_payload, dict):
+                    continue
+                conn.execute(
+                    text(
+                        "INSERT INTO feature_drift_stats "
+                        "(model_name, model_version, feature_name, window_start, window_end, psi, ks, missing_rate, mean, std, baseline_mean, baseline_std, created_at) "
+                        "VALUES "
+                        "(:model_name, :model_version, :feature_name, :window_start, :window_end, :psi, :ks, :missing_rate, :mean, :std, :baseline_mean, :baseline_std, :created_at)"
+                    ),
+                    {
+                        "model_name": model_name,
+                        "model_version": model_version,
+                        "feature_name": str(feature_name),
+                        "window_start": window_start,
+                        "window_end": window_end,
+                        "psi": feature_payload.get("psi"),
+                        "ks": feature_payload.get("ks"),
+                        "missing_rate": feature_payload.get("missing_rate"),
+                        "mean": feature_payload.get("current_mean"),
+                        "std": feature_payload.get("current_std"),
+                        "baseline_mean": feature_payload.get("baseline_mean"),
+                        "baseline_std": feature_payload.get("baseline_std"),
+                        "created_at": generated_at,
+                    },
+                )
+    except Exception as exc:
+        log_event(
+            logger,
+            "warning",
+            "monitoring_quality_snapshot_persist_failed",
+            model_name=model_name,
+            error_type=type(exc).__name__,
+        )
 
 
 def _artifact_report(path: Path) -> dict[str, Any]:
@@ -1475,6 +1547,7 @@ async def get_graph_quality_summary(include_criteria: bool = False):
         serving_pass=serving_pass,
         stress_pass=stress_pass,
     )
+    _persist_model_quality_snapshot("graph", response)
     return response
 
 
@@ -1490,6 +1563,7 @@ async def get_fraud_quality_summary(include_criteria: bool = False):
         drift_severity=response.get("drift", {}).get("severity", "unknown"),
         quality_report_available=response.get("model_info", {}).get("quality_report_available", False),
     )
+    _persist_model_quality_snapshot("fraud", response if isinstance(response, dict) else {})
     return response
 
 
@@ -1505,6 +1579,7 @@ async def get_osint_quality_summary(include_criteria: bool = False):
         drift_severity=response.get("drift", {}).get("severity", "unknown"),
         quality_report_available=response.get("model_info", {}).get("quality_report_available", False),
     )
+    _persist_model_quality_snapshot("osint", response if isinstance(response, dict) else {})
     return response
 
 
@@ -1520,7 +1595,29 @@ async def get_simulation_quality_summary(include_criteria: bool = False):
         drift_severity=response.get("drift", {}).get("severity", "unknown"),
         quality_report_available=response.get("model_info", {}).get("quality_report_available", False),
     )
+    _persist_model_quality_snapshot("simulation", response if isinstance(response, dict) else {})
     return response
+
+
+@router.get("/model_quality/{model_name}")
+async def get_model_quality_summary(model_name: str, include_criteria: bool = False):
+    normalized = str(model_name or "").strip().lower()
+    builders = {
+        "graph": lambda: get_graph_quality_summary(include_criteria=include_criteria),
+        "fraud": lambda: _build_fraud_quality_summary(include_criteria=include_criteria),
+        "osint": lambda: _build_osint_quality_summary(include_criteria=include_criteria),
+        "simulation": lambda: _build_simulation_quality_summary(include_criteria=include_criteria),
+    }
+    if normalized not in builders:
+        raise HTTPException(status_code=404, detail=f"Unsupported model_name: {normalized}")
+
+    payload = builders[normalized]()
+    if hasattr(payload, "__await__"):
+        payload = await payload  # graph endpoint is async
+    if isinstance(payload, dict):
+        _persist_model_quality_snapshot(normalized, payload)
+        return payload
+    return {}
 
 
 @router.get("/osint_drift")

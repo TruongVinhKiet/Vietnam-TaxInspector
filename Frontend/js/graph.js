@@ -2670,6 +2670,12 @@ function renderForensicPanel(data, forensicIntel = null) {
             const summary = extraSignals.map((item) => `${item.label}: ${item.value}`).join(" | ");
             panel.textContent = `${panel.textContent || ""} | ${summary}`.trim();
         }
+        if (panel && Array.isArray(payload.top_invoice_risks) && payload.top_invoice_risks.length > 0) {
+            const top = payload.top_invoice_risks[0];
+            const invNo = String(top.invoice_number || "--");
+            const invScore = toFiniteNumber(top.risk_score, 0).toFixed(1);
+            panel.textContent = `${panel.textContent || ""} | HĐ rủi ro cao: ${invNo} (${invScore})`.trim();
+        }
     }
 
     renderForensicSignalsV21(payload);

@@ -1078,6 +1078,28 @@ def get_vat_invoice_graph(
         result["split_trigger_status"] = _build_split_trigger_status_context(
             snapshot_source="graph_main",
         )
+        try:
+            tax_codes = [str(c.get("tax_code")) for c in companies if isinstance(c, dict) and c.get("tax_code")]
+            if not tax_codes:
+                result["top_invoice_risks"] = []
+            else:
+                risk_rows = db.execute(
+                    text(
+                        """
+                        SELECT p.invoice_number, p.as_of_date, p.risk_score, p.risk_level, p.reason_codes
+                        FROM invoice_risk_predictions p
+                        JOIN invoices i ON i.invoice_number = p.invoice_number
+                        WHERE i.seller_tax_code = ANY(:codes) OR i.buyer_tax_code = ANY(:codes)
+                        ORDER BY p.risk_score DESC, p.created_at DESC
+                        LIMIT 20
+                        """
+                    ),
+                    {"codes": tax_codes},
+                ).mappings().all()
+                result["top_invoice_risks"] = [dict(r) for r in risk_rows]
+        except Exception:
+            db.rollback()
+            result["top_invoice_risks"] = []
 
         # ── Forensic Compatibility v2 ──
         if GRAPH_FORENSIC_FEATURE_FLAG:
