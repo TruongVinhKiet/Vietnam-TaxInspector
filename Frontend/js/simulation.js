@@ -26,6 +26,9 @@ let sensitivityData = null;
 let contributionsData = null;
 let heatmapData = null;
 let historicalData = null;
+let hypothesisPayload = null;
+let externalSignalPayload = null;
+let activeHypothesisTab = 1;
 let simulationRequestToken = 0;
 let advancedRequestToken = 0;
 const charts = Object.create(null);
@@ -178,8 +181,24 @@ async function loadBaseline() {
             historicalData = await histRes.json();
             renderHistoricalChart(historicalData, currentScenario);
         }
+        await loadHypotheses();
     } catch (e) {
         console.error("[Simulation] Failed to load baseline/historical:", e);
+    }
+}
+
+async function loadHypotheses(refresh = true) {
+    try {
+        const [hypRes, signalRes] = await Promise.all([
+            secureFetch(`${SIM_API}/hypotheses?refresh=${refresh ? "true" : "false"}`),
+            secureFetch(`${SIM_API}/external-signals/snapshot?limit=8`),
+        ]);
+        if (!hypRes.ok) return;
+        hypothesisPayload = await hypRes.json();
+        externalSignalPayload = signalRes.ok ? await signalRes.json() : null;
+        renderHypothesisPanel(hypothesisPayload, externalSignalPayload);
+    } catch (err) {
+        console.error("[Simulation] Failed to load hypotheses:", err);
     }
 }
 
@@ -226,6 +245,7 @@ async function runSimulation(name) {
         renderSlopeChart(currentScenario);
         renderRadarChart(currentScenario, params);
         renderProjectionInsights(currentScenario);
+        if (!hypothesisPayload) await loadHypotheses(false);
 
         // Render composite health score specifically
         renderHealthGauge(currentScenario.scenario_health_score);
@@ -434,10 +454,15 @@ function renderProjectionInsights(scenario) {
     const last = points[points.length - 1]?.simulated_value || 0;
     const years = Math.max(1, Number(scenario?.parameters?.projection_years || 1));
     const cagr = first > 0 ? ((Math.pow(last / first, 1 / years) - 1) * 100) : 0;
-    const yoyAvg = (scenario.delta_revenue_pct || 0) / years;
+    const yoyAvg = Number(scenario.avg_yoy_pct ?? NaN);
+    const yoyMedian = Number(scenario.median_yoy_pct ?? NaN);
+    const yoyDispersion = Number(scenario.yoy_dispersion_pct ?? NaN);
+    const hasYoy = Number.isFinite(yoyAvg);
     const values = points.map((p) => p.simulated_value);
     const volatility = Math.max(...values) - Math.min(...values);
     const riskState = scenario.simulated_delinquency_rate >= 70 ? "Áp lực cao" : scenario.simulated_delinquency_rate >= 45 ? "Áp lực trung bình" : "Ổn định";
+    const horizonHyp = (hypothesisPayload?.items || []).find((item) => Number(item.horizon_years) === years);
+    const confidencePct = horizonHyp ? Math.round(Number(horizonHyp.confidence || 0) * 100) : Math.max(55, 82 - years * 3);
 
     container.innerHTML = `
         <div class="rounded-lg border border-slate-200 bg-slate-50 p-3">
@@ -446,7 +471,9 @@ function renderProjectionInsights(scenario) {
         </div>
         <div class="rounded-lg border border-slate-200 bg-slate-50 p-3">
             <p class="text-[10px] uppercase tracking-wider font-bold text-slate-500">YoY trung bình</p>
-            <p class="text-lg font-black ${yoyAvg >= 0 ? "text-emerald-600" : "text-rose-600"}">${yoyAvg >= 0 ? "+" : ""}${yoyAvg.toFixed(2)}%</p>
+            <p class="text-lg font-black ${hasYoy && yoyAvg >= 0 ? "text-emerald-600" : "text-rose-600"}">
+                ${hasYoy ? `${yoyAvg >= 0 ? "+" : ""}${yoyAvg.toFixed(2)}%` : "Chưa đủ dữ liệu"}
+            </p>
         </div>
         <div class="rounded-lg border border-slate-200 bg-slate-50 p-3">
             <p class="text-[10px] uppercase tracking-wider font-bold text-slate-500">Biến động dự phóng</p>
@@ -456,7 +483,198 @@ function renderProjectionInsights(scenario) {
             <p class="text-[10px] uppercase tracking-wider font-bold text-slate-500">Cảnh báo kịch bản</p>
             <p class="text-lg font-black ${scenario.simulated_delinquency_rate >= 70 ? "text-rose-600" : "text-amber-600"}">${riskState}</p>
         </div>
+        <div class="rounded-lg border border-slate-200 bg-slate-50 p-3">
+            <p class="text-[10px] uppercase tracking-wider font-bold text-slate-500">Độ tin cậy giả thuyết</p>
+            <p class="text-lg font-black text-primary-container">${confidencePct}%</p>
+        </div>
+        <div class="rounded-lg border border-slate-200 bg-slate-50 p-3">
+            <p class="text-[10px] uppercase tracking-wider font-bold text-slate-500">Số quý theo dõi</p>
+            <p class="text-lg font-black text-primary-container">${points.length} quý</p>
+        </div>
     `;
+
+    const insightDetails = {
+        growth: hasYoy
+            ? `Tăng trưởng đang phản ánh quỹ đạo ${yoyAvg >= 0 ? "mở rộng" : "chậm lại"} với YoY trung bình ${yoyAvg.toFixed(2)}%, trung vị ${Number.isFinite(yoyMedian) ? yoyMedian.toFixed(2) : "N/A"}% và độ phân tán ${Number.isFinite(yoyDispersion) ? yoyDispersion.toFixed(2) : "N/A"}pp.`
+            : "Chưa đủ chuỗi dữ liệu để tính YoY đáng tin cậy; hệ thống sẽ dùng thêm các chỉ số CAGR/volatility để đánh giá xu hướng.",
+        risk: `Áp lực rủi ro hiện ở mức "${riskState}", cần theo dõi sát các ngành nhạy cảm trong 2 quý tới.`,
+        volatility: `Độ dao động dự báo khoảng ${volatility.toFixed(1)} tỷ, cho thấy mức biến thiên ${volatility > 2500 ? "cao" : "vừa phải"}.`,
+        confidence: `Độ tin cậy mô hình giả thuyết hiện ${confidencePct}%, được suy ra từ dữ liệu nội bộ + tín hiệu external.`,
+    };
+    const detailBox = document.getElementById("sim-insight-detail");
+    if (detailBox) {
+        detailBox.textContent = insightDetails.growth;
+    }
+    document.querySelectorAll("[data-sim-insight-chip]").forEach((chip) => {
+        chip.onclick = () => {
+            const key = chip.getAttribute("data-sim-insight-chip");
+            if (detailBox && key && insightDetails[key]) {
+                detailBox.textContent = insightDetails[key];
+            }
+            document.querySelectorAll("[data-sim-insight-chip]").forEach((item) => {
+                item.classList.remove("bg-primary-container", "text-white", "border-primary-container");
+                item.classList.add("bg-white", "text-slate-600", "border-slate-300");
+            });
+            chip.classList.remove("bg-white", "text-slate-600", "border-slate-300");
+            chip.classList.add("bg-primary-container", "text-white", "border-primary-container");
+        };
+    });
+}
+
+function renderHypothesisPanel(payload, signalPayload) {
+    const content = document.getElementById("sim-hypothesis-content");
+    const meta = document.getElementById("sim-hypothesis-meta");
+    if (!content) return;
+
+    const items = (payload?.items || []).slice().sort((a, b) => a.horizon_years - b.horizon_years);
+    if (!items.length) {
+        content.innerHTML = `<div class="rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600">Chưa có giả thuyết để hiển thị.</div>`;
+        return;
+    }
+
+    const selected = items.find((item) => Number(item.horizon_years) === Number(activeHypothesisTab)) || items[0];
+    activeHypothesisTab = Number(selected.horizon_years);
+    const signalCount = signalPayload?.items?.length || 0;
+    if (meta) {
+        meta.textContent = `Nguồn hybrid external • ${signalCount} tín hiệu gần nhất • Độ tin cậy ${(Number(selected.confidence || 0) * 100).toFixed(1)}%`;
+    }
+
+    const drivers = (selected.drivers || []).map((driver) => {
+        const effect = Number(driver.effect || 0);
+        return `<li class="text-xs text-slate-600">${driver.factor}: <span class="font-bold ${effect >= 0 ? "text-emerald-600" : "text-rose-600"}">${effect >= 0 ? "+" : ""}${effect.toFixed(2)}pp</span></li>`;
+    }).join("");
+    const longform = Array.isArray(selected.longform_analysis) ? selected.longform_analysis : [];
+    const tocButtons = longform.map((section, idx) => `
+        <button type="button" data-hypothesis-section="${idx}" class="rounded-full border border-slate-300 bg-white px-3 py-1 text-[11px] font-semibold text-slate-600 hover:border-primary-container hover:text-primary-container transition">
+            ${section.title || section.id || `Mục ${idx + 1}`}
+        </button>
+    `).join("");
+    const longformSections = longform.map((section, idx) => `
+        <article id="hypothesis-section-${idx}" data-hypothesis-article="${idx}" class="rounded-lg border border-slate-200 bg-white p-3 transition">
+            <div class="flex items-center justify-between gap-3">
+                <h4 class="text-xs font-black text-primary-container tracking-tight">${section.title || section.id || `Mục ${idx + 1}`}</h4>
+                <button type="button" data-hypothesis-collapse="${idx}" class="rounded border border-slate-300 bg-white px-2 py-1 text-[10px] font-bold text-slate-600 hover:border-primary-container hover:text-primary-container transition">
+                    Thu gọn
+                </button>
+            </div>
+            <div data-hypothesis-body="${idx}" class="mt-2">
+                <p class="text-xs text-slate-700 leading-relaxed whitespace-pre-line">${section.content || ""}</p>
+                <div class="mt-2 flex flex-wrap items-center gap-2 text-[10px] text-slate-500">
+                    <span class="rounded-full bg-slate-100 px-2 py-0.5">Confidence ${(Number(selected.confidence || 0) * 100).toFixed(1)}%</span>
+                    <span class="rounded-full bg-slate-100 px-2 py-0.5">Source: hybrid simulation + external signals</span>
+                </div>
+            </div>
+        </article>
+    `).join("");
+
+    content.innerHTML = `
+        <div class="rounded-lg border border-slate-200 bg-slate-50 p-4">
+            <p class="text-[10px] uppercase tracking-wider text-slate-500 font-bold mb-2">Giả thuyết chính</p>
+            <p class="text-sm font-semibold text-slate-700 leading-relaxed">${selected.summary}</p>
+            <div class="mt-3">
+                <p class="text-[10px] uppercase tracking-wider text-slate-500 font-bold mb-1">Drivers chính</p>
+                <ul class="space-y-1">${drivers || "<li class='text-xs text-slate-500'>Chưa có driver.</li>"}</ul>
+            </div>
+        </div>
+        <div class="space-y-3">
+            <div class="rounded-lg border border-rose-100 bg-rose-50 p-3">
+                <p class="text-[10px] uppercase tracking-wider text-rose-600 font-bold mb-1">Kịch bản xấu</p>
+                <p class="text-xs text-rose-700 leading-relaxed">${selected.downside}</p>
+            </div>
+            <div class="rounded-lg border border-emerald-100 bg-emerald-50 p-3">
+                <p class="text-[10px] uppercase tracking-wider text-emerald-600 font-bold mb-1">Kịch bản tốt</p>
+                <p class="text-xs text-emerald-700 leading-relaxed">${selected.upside}</p>
+            </div>
+            <div class="rounded-lg border border-blue-100 bg-blue-50 p-3">
+                <p class="text-[10px] uppercase tracking-wider text-blue-600 font-bold mb-1">Khuyến nghị điều hành</p>
+                <p class="text-xs text-blue-700 leading-relaxed">${selected.recommendations}</p>
+            </div>
+            ${longform.length ? `
+                <div class="sticky top-2 z-10 rounded-lg border border-slate-200 bg-slate-50/95 p-3 backdrop-blur">
+                    <p class="text-[10px] uppercase tracking-wider text-slate-500 font-bold mb-2">Mục lục phân tích chi tiết</p>
+                    <div id="hypothesis-toc" class="flex flex-wrap gap-2">${tocButtons}</div>
+                </div>
+                <div id="hypothesis-longform" class="space-y-3">${longformSections}</div>
+            ` : ""}
+        </div>
+    `;
+
+    if (longform.length) {
+        const tocNodes = Array.from(content.querySelectorAll("[data-hypothesis-section]"));
+        const collapseState = {};
+        content.querySelectorAll("[data-hypothesis-section]").forEach((btn) => {
+            btn.addEventListener("click", () => {
+                const idx = Number(btn.getAttribute("data-hypothesis-section") || 0);
+                const target = content.querySelector(`#hypothesis-section-${idx}`);
+                const body = content.querySelector(`[data-hypothesis-body="${idx}"]`);
+                const collapseBtn = content.querySelector(`[data-hypothesis-collapse="${idx}"]`);
+                if (body && collapseState[idx]) {
+                    body.classList.remove("hidden");
+                    collapseState[idx] = false;
+                    if (collapseBtn) collapseBtn.textContent = "Thu gọn";
+                }
+                if (target) target.scrollIntoView({ behavior: "smooth", block: "start" });
+            });
+        });
+        content.querySelectorAll("[data-hypothesis-collapse]").forEach((btn) => {
+            btn.addEventListener("click", () => {
+                const idx = Number(btn.getAttribute("data-hypothesis-collapse") || 0);
+                const body = content.querySelector(`[data-hypothesis-body="${idx}"]`);
+                const collapsed = Boolean(collapseState[idx]);
+                if (!body) return;
+                if (collapsed) {
+                    body.classList.remove("hidden");
+                    btn.textContent = "Thu gọn";
+                } else {
+                    body.classList.add("hidden");
+                    btn.textContent = "Mở rộng";
+                }
+                collapseState[idx] = !collapsed;
+            });
+        });
+        const applyActiveSection = (idx) => {
+            tocNodes.forEach((node) => {
+                const nodeIdx = Number(node.getAttribute("data-hypothesis-section") || -1);
+                const isActive = nodeIdx === idx;
+                node.classList.toggle("bg-primary-container", isActive);
+                node.classList.toggle("text-white", isActive);
+                node.classList.toggle("border-primary-container", isActive);
+                node.classList.toggle("bg-white", !isActive);
+                node.classList.toggle("text-slate-600", !isActive);
+                node.classList.toggle("border-slate-300", !isActive);
+            });
+            content.querySelectorAll("[data-hypothesis-article]").forEach((article) => {
+                const articleIdx = Number(article.getAttribute("data-hypothesis-article") || -1);
+                const isActive = articleIdx === idx;
+                article.classList.toggle("border-primary-container", isActive);
+                article.classList.toggle("shadow-sm", isActive);
+            });
+        };
+        const observer = new IntersectionObserver((entries) => {
+            const visible = entries
+                .filter((entry) => entry.isIntersecting)
+                .sort((a, b) => b.intersectionRatio - a.intersectionRatio);
+            if (!visible.length) return;
+            const activeId = visible[0].target.getAttribute("data-hypothesis-article");
+            applyActiveSection(Number(activeId || 0));
+        }, {
+            root: null,
+            rootMargin: "-20% 0px -60% 0px",
+            threshold: [0.25, 0.5, 0.75],
+        });
+        content.querySelectorAll("[data-hypothesis-article]").forEach((article) => observer.observe(article));
+        applyActiveSection(0);
+    }
+
+    document.querySelectorAll("[data-hypothesis-tab]").forEach((btn) => {
+        const value = Number(btn.getAttribute("data-hypothesis-tab"));
+        const isActive = value === activeHypothesisTab;
+        btn.classList.toggle("bg-white", isActive);
+        btn.classList.toggle("text-primary-container", isActive);
+        btn.classList.toggle("border", isActive);
+        btn.classList.toggle("border-slate-200", isActive);
+        btn.classList.toggle("text-slate-600", !isActive);
+    });
 }
 
 // ────────────────────────────────────────────────────────────
@@ -1231,6 +1449,15 @@ function bindEvents() {
     document.querySelectorAll('input[name="sim-historical-mode"]').forEach((modeInput) => {
         modeInput.addEventListener("change", () => {
             if (historicalData) renderHistoricalChart(historicalData, currentScenario);
+        });
+    });
+
+    document.querySelectorAll("[data-hypothesis-tab]").forEach((btn) => {
+        btn.addEventListener("click", () => {
+            activeHypothesisTab = Number(btn.getAttribute("data-hypothesis-tab") || 1);
+            if (hypothesisPayload) {
+                renderHypothesisPanel(hypothesisPayload, externalSignalPayload);
+            }
         });
     });
 }

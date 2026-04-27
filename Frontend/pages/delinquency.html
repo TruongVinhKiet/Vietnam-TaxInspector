@@ -510,6 +510,15 @@ Reset
 <div id="sim-projection-insights" class="mt-4 grid grid-cols-2 lg:grid-cols-4 gap-3">
 <div class="rounded-lg border border-slate-200 bg-slate-50 p-3 text-[11px] text-slate-500 font-semibold">Đang chờ dữ liệu mô phỏng...</div>
 </div>
+<div id="sim-insight-chips" class="mt-3 flex flex-wrap gap-2">
+<button type="button" data-sim-insight-chip="growth" class="px-2.5 py-1 rounded-full border border-slate-300 text-[10px] font-bold text-slate-600 bg-white">Tăng trưởng</button>
+<button type="button" data-sim-insight-chip="risk" class="px-2.5 py-1 rounded-full border border-slate-300 text-[10px] font-bold text-slate-600 bg-white">Rủi ro</button>
+<button type="button" data-sim-insight-chip="volatility" class="px-2.5 py-1 rounded-full border border-slate-300 text-[10px] font-bold text-slate-600 bg-white">Biến động</button>
+<button type="button" data-sim-insight-chip="confidence" class="px-2.5 py-1 rounded-full border border-slate-300 text-[10px] font-bold text-slate-600 bg-white">Độ tin cậy</button>
+</div>
+<div id="sim-insight-detail" class="mt-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
+Đang chờ mô phỏng để hiển thị phân tích theo từng góc nhìn.
+</div>
 </div>
 </div>
 
@@ -520,6 +529,25 @@ Reset
 </h3>
 <div id="sim-presets" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
 <div class="text-xs text-slate-400 py-4">Đang tải...</div>
+</div>
+</div>
+
+<div class="mb-10">
+<div class="bg-white rounded-xl shadow-[0_20px_40px_rgba(0,33,71,0.06)] p-6">
+<div class="flex flex-wrap items-center justify-between gap-3 mb-4">
+<h3 class="text-sm font-black text-primary-container tracking-tight flex items-center gap-2">
+<span class="material-symbols-outlined text-[18px]">psychology</span> Giả thuyết Phát triển 1/5/10 năm
+</h3>
+<span id="sim-hypothesis-meta" class="text-[10px] text-slate-500 font-semibold">Đang tải dữ liệu giả thuyết...</span>
+</div>
+<div class="inline-flex rounded-lg border border-slate-200 bg-slate-50 p-1 mb-4 gap-1">
+<button type="button" data-hypothesis-tab="1" class="sim-hyp-tab px-3 py-1.5 rounded text-xs font-bold bg-white text-primary-container border border-slate-200">1 năm</button>
+<button type="button" data-hypothesis-tab="5" class="sim-hyp-tab px-3 py-1.5 rounded text-xs font-bold text-slate-600">5 năm</button>
+<button type="button" data-hypothesis-tab="10" class="sim-hyp-tab px-3 py-1.5 rounded text-xs font-bold text-slate-600">10 năm</button>
+</div>
+<div id="sim-hypothesis-content" class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+<div class="rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600">Đang tổng hợp giả thuyết...</div>
+</div>
 </div>
 </div>
 
@@ -855,5 +883,5 @@ window.addEventListener('pageshow', function() {
 });
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-<script src="../js/simulation.js?v=5.1"></script>
+<script src="../js/simulation.js?v=5.2"></script>
 </body></html>
