@@ -545,58 +545,83 @@ function renderHypothesisPanel(payload, signalPayload) {
     }).join("");
     const longform = Array.isArray(selected.longform_analysis) ? selected.longform_analysis : [];
     const tocButtons = longform.map((section, idx) => `
-        <button type="button" data-hypothesis-section="${idx}" class="rounded-full border border-slate-300 bg-white px-3 py-1 text-[11px] font-semibold text-slate-600 hover:border-primary-container hover:text-primary-container transition">
+        <button type="button" data-hypothesis-section="${idx}" class="rounded border border-slate-200 bg-white px-2.5 py-1 text-[10px] font-bold text-slate-500 shadow-sm hover:border-primary-container hover:bg-primary-container/5 hover:text-primary-container transition-all">
             ${section.title || section.id || `Mục ${idx + 1}`}
         </button>
     `).join("");
     const longformSections = longform.map((section, idx) => `
-        <article id="hypothesis-section-${idx}" data-hypothesis-article="${idx}" class="rounded-lg border border-slate-200 bg-white p-3 transition">
-            <div class="flex items-center justify-between gap-3">
-                <h4 class="text-xs font-black text-primary-container tracking-tight">${section.title || section.id || `Mục ${idx + 1}`}</h4>
-                <button type="button" data-hypothesis-collapse="${idx}" class="rounded border border-slate-300 bg-white px-2 py-1 text-[10px] font-bold text-slate-600 hover:border-primary-container hover:text-primary-container transition">
+        <article id="hypothesis-section-${idx}" data-hypothesis-article="${idx}" class="break-inside-avoid mb-4 rounded-xl border border-slate-200 bg-white p-4 shadow-sm hover:shadow-md transition-all duration-300">
+            <div class="flex items-start justify-between gap-3 mb-2">
+                <h4 class="text-xs font-black text-primary-container tracking-tight leading-snug">${section.title || section.id || `Mục ${idx + 1}`}</h4>
+                <button type="button" data-hypothesis-collapse="${idx}" class="shrink-0 rounded-md border border-slate-200 bg-slate-50 px-2 py-1 text-[10px] font-bold text-slate-500 hover:border-primary-container hover:text-primary-container transition-colors">
                     Thu gọn
                 </button>
             </div>
-            <div data-hypothesis-body="${idx}" class="mt-2">
-                <p class="text-xs text-slate-700 leading-relaxed whitespace-pre-line">${section.content || ""}</p>
-                <div class="mt-2 flex flex-wrap items-center gap-2 text-[10px] text-slate-500">
-                    <span class="rounded-full bg-slate-100 px-2 py-0.5">Confidence ${(Number(selected.confidence || 0) * 100).toFixed(1)}%</span>
-                    <span class="rounded-full bg-slate-100 px-2 py-0.5">Source: hybrid simulation + external signals</span>
+            <div data-hypothesis-body="${idx}" class="mt-2 transition-all duration-300 origin-top">
+                <p class="text-xs text-slate-600 leading-relaxed whitespace-pre-line">${section.content || ""}</p>
+                <div class="mt-3 flex flex-wrap items-center gap-1.5">
+                    <span class="inline-flex items-center gap-1 rounded bg-emerald-50 px-1.5 py-0.5 text-[9px] font-bold text-emerald-600 border border-emerald-100">
+                        <span class="material-symbols-outlined" style="font-size: 10px;">check_circle</span>
+                        Confidence ${(Number(selected.confidence || 0) * 100).toFixed(1)}%
+                    </span>
+                    <span class="inline-flex items-center gap-1 rounded bg-slate-50 px-1.5 py-0.5 text-[9px] font-semibold text-slate-500 border border-slate-200">
+                        <span class="material-symbols-outlined" style="font-size: 10px;">database</span>
+                        hybrid + external
+                    </span>
                 </div>
             </div>
         </article>
     `).join("");
 
     content.innerHTML = `
-        <div class="rounded-lg border border-slate-200 bg-slate-50 p-4">
-            <p class="text-[10px] uppercase tracking-wider text-slate-500 font-bold mb-2">Giả thuyết chính</p>
-            <p class="text-sm font-semibold text-slate-700 leading-relaxed">${selected.summary}</p>
-            <div class="mt-3">
-                <p class="text-[10px] uppercase tracking-wider text-slate-500 font-bold mb-1">Drivers chính</p>
-                <ul class="space-y-1">${drivers || "<li class='text-xs text-slate-500'>Chưa có driver.</li>"}</ul>
-            </div>
-        </div>
-        <div class="space-y-3">
-            <div class="rounded-lg border border-rose-100 bg-rose-50 p-3">
-                <p class="text-[10px] uppercase tracking-wider text-rose-600 font-bold mb-1">Kịch bản xấu</p>
-                <p class="text-xs text-rose-700 leading-relaxed">${selected.downside}</p>
-            </div>
-            <div class="rounded-lg border border-emerald-100 bg-emerald-50 p-3">
-                <p class="text-[10px] uppercase tracking-wider text-emerald-600 font-bold mb-1">Kịch bản tốt</p>
-                <p class="text-xs text-emerald-700 leading-relaxed">${selected.upside}</p>
-            </div>
-            <div class="rounded-lg border border-blue-100 bg-blue-50 p-3">
-                <p class="text-[10px] uppercase tracking-wider text-blue-600 font-bold mb-1">Khuyến nghị điều hành</p>
-                <p class="text-xs text-blue-700 leading-relaxed">${selected.recommendations}</p>
-            </div>
-            ${longform.length ? `
-                <div class="sticky top-2 z-10 rounded-lg border border-slate-200 bg-slate-50/95 p-3 backdrop-blur">
-                    <p class="text-[10px] uppercase tracking-wider text-slate-500 font-bold mb-2">Mục lục phân tích chi tiết</p>
-                    <div id="hypothesis-toc" class="flex flex-wrap gap-2">${tocButtons}</div>
+        <div class="grid grid-cols-1 lg:grid-cols-12 gap-6 mb-2">
+            <div class="lg:col-span-5 flex flex-col gap-4 fade-in-up" style="animation-delay: 0.1s">
+                <div class="rounded-xl border border-slate-200 bg-slate-50/50 p-5 h-full flex flex-col shadow-sm">
+                    <div class="flex items-center gap-2 mb-3">
+                        <div class="w-6 h-6 rounded-full bg-primary-container/10 flex items-center justify-center shrink-0">
+                            <span class="material-symbols-outlined text-[14px] text-primary-container">lightbulb</span>
+                        </div>
+                        <p class="text-[10px] uppercase tracking-widest text-slate-500 font-black">Giả thuyết chính</p>
+                    </div>
+                    <p class="text-sm font-semibold text-slate-800 leading-relaxed mb-4 grow">${selected.summary}</p>
+                    <div class="pt-4 border-t border-slate-200/80 mt-auto">
+                        <p class="text-[10px] uppercase tracking-widest text-slate-500 font-bold mb-2">Drivers chính</p>
+                        <ul class="space-y-1.5">${drivers || "<li class='text-xs text-slate-500'>Chưa có driver.</li>"}</ul>
+                    </div>
                 </div>
-                <div id="hypothesis-longform" class="space-y-3">${longformSections}</div>
-            ` : ""}
+            </div>
+            <div class="lg:col-span-7 flex flex-col gap-3 fade-in-up" style="animation-delay: 0.15s">
+                <div class="rounded-xl border border-rose-100 bg-gradient-to-br from-rose-50 to-white p-4 relative overflow-hidden group shadow-sm transition-shadow hover:shadow-md">
+                    <div class="absolute right-0 top-0 w-16 h-16 bg-rose-500/5 rounded-bl-full transition-transform group-hover:scale-110"></div>
+                    <p class="text-[10px] uppercase tracking-widest text-rose-600 font-black mb-1.5 flex items-center gap-1.5"><span class="material-symbols-outlined text-[14px]">trending_down</span>Kịch bản rủi ro</p>
+                    <p class="text-xs text-rose-700/90 leading-relaxed relative z-10">${selected.downside}</p>
+                </div>
+                <div class="rounded-xl border border-emerald-100 bg-gradient-to-br from-emerald-50 to-white p-4 relative overflow-hidden group shadow-sm transition-shadow hover:shadow-md">
+                    <div class="absolute right-0 top-0 w-16 h-16 bg-emerald-500/5 rounded-bl-full transition-transform group-hover:scale-110"></div>
+                    <p class="text-[10px] uppercase tracking-widest text-emerald-600 font-black mb-1.5 flex items-center gap-1.5"><span class="material-symbols-outlined text-[14px]">trending_up</span>Kịch bản tích cực</p>
+                    <p class="text-xs text-emerald-700/90 leading-relaxed relative z-10">${selected.upside}</p>
+                </div>
+                <div class="rounded-xl border border-blue-100 bg-gradient-to-br from-blue-50 to-white p-4 relative overflow-hidden group shadow-sm transition-shadow hover:shadow-md">
+                    <div class="absolute right-0 top-0 w-16 h-16 bg-blue-500/5 rounded-bl-full transition-transform group-hover:scale-110"></div>
+                    <p class="text-[10px] uppercase tracking-widest text-blue-600 font-black mb-1.5 flex items-center gap-1.5"><span class="material-symbols-outlined text-[14px]">auto_awesome</span>Khuyến nghị hành động</p>
+                    <p class="text-xs text-blue-700/90 leading-relaxed relative z-10">${selected.recommendations}</p>
+                </div>
+            </div>
         </div>
+        ${longform.length ? `
+            <div class="pt-6 border-t border-slate-100 mt-4 fade-in-up" style="animation-delay: 0.2s">
+                <div class="mb-5 flex flex-col md:flex-row md:items-center justify-between gap-4">
+                    <p class="text-[11px] uppercase tracking-widest text-slate-500 font-black flex items-center gap-2 shrink-0">
+                        <span class="material-symbols-outlined text-[16px] text-primary-container">insights</span>
+                        Phân tích chi tiết chuyên sâu
+                    </p>
+                    <div id="hypothesis-toc" class="flex flex-wrap gap-1.5 justify-start md:justify-end">${tocButtons}</div>
+                </div>
+                <div id="hypothesis-longform" class="columns-1 md:columns-2 gap-4">
+                    ${longformSections}
+                </div>
+            </div>
+        ` : ""}
     `;
 
     if (longform.length) {
