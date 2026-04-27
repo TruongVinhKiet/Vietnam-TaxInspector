@@ -553,7 +553,537 @@ async function fetchDelinquencyDetail(taxCode) {
     return response.json();
 }
 
+async function fetchPaymentTimeline(taxCode) {
+    try {
+        const response = await secureFetch(`${API_BASE}/delinquency/${encodeURIComponent(taxCode)}/payment-timeline`);
+        if (!response.ok) return null;
+        return response.json();
+    } catch (e) {
+        console.error("[Detail] Timeline fetch error:", e);
+        return null;
+    }
+}
 
+// ────────────────────────────────────────────────────────────
+//  CHART COLORS
+// ────────────────────────────────────────────────────────────
+const DETAIL_COLORS = {
+    primary: "#002147", sky: "#0284c7", violet: "#7c3aed",
+    emerald: "#10b981", amber: "#f59e0b", orange: "#f97316",
+    rose: "#ef4444", slate: "#64748b", slateLight: "#94a3b8",
+    slateBg: "#f8fafc", gridLine: "#e2e8f0", white: "#ffffff",
+};
+
+const STATUS_COLORS = { on_time: "#10b981", late: "#f97316", unpaid: "#ef4444", partial: "#f59e0b" };
+const STATUS_LABELS = { on_time: "Đúng hạn", late: "Trễ hạn", unpaid: "Chưa nộp", partial: "Nộp thiếu" };
+
+// ────────────────────────────────────────────────────────────
+//  CHART 1: Payment Timeline
+// ────────────────────────────────────────────────────────────
+function renderTimelineChart(timelineData) {
+    const canvas = document.getElementById("detail-timeline-chart");
+    if (!canvas || !timelineData?.timeline?.length) return;
+
+    const ctx = canvas.getContext("2d");
+    const dpr = window.devicePixelRatio || 1;
+    const rect = canvas.parentElement.getBoundingClientRect();
+    const W = rect.width;
+    const H = 200;
+    canvas.width = W * dpr;
+    canvas.height = H * dpr;
+    canvas.style.width = W + "px";
+    canvas.style.height = H + "px";
+    ctx.scale(dpr, dpr);
+
+    const pad = { top: 20, right: 20, bottom: 35, left: 50 };
+    const plotW = W - pad.left - pad.right;
+    const plotH = H - pad.top - pad.bottom;
+
+    ctx.fillStyle = DETAIL_COLORS.slateBg;
+    ctx.fillRect(0, 0, W, H);
+
+    const data = timelineData.timeline;
+    const n = data.length;
+    if (!n) return;
+
+    // Scale
+    const maxAmount = Math.max(...data.map(d => Math.max(d.amount_due, d.amount_paid)), 1);
+    const xScale = (i) => pad.left + (i / Math.max(1, n - 1)) * plotW;
+    const yScale = (v) => pad.top + plotH - (v / maxAmount) * plotH;
+
+    // Grid
+    ctx.strokeStyle = DETAIL_COLORS.gridLine;
+    ctx.lineWidth = 0.5;
+    for (let i = 0; i <= 4; i++) {
+        const y = pad.top + (i / 4) * plotH;
+        ctx.beginPath(); ctx.moveTo(pad.left, y); ctx.lineTo(W - pad.right, y); ctx.stroke();
+    }
+
+    // Amount due line (light)
+    ctx.beginPath();
+    ctx.strokeStyle = DETAIL_COLORS.slateLight + "88";
+    ctx.lineWidth = 1.5;
+    ctx.setLineDash([4, 3]);
+    data.forEach((d, i) => {
+        const x = xScale(i), y = yScale(d.amount_due);
+        i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+    });
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    // Amount paid line
+    ctx.beginPath();
+    ctx.strokeStyle = DETAIL_COLORS.sky;
+    ctx.lineWidth = 2;
+    data.forEach((d, i) => {
+        const x = xScale(i), y = yScale(d.amount_paid);
+        i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+    });
+    ctx.stroke();
+
+    // Status dots
+    data.forEach((d, i) => {
+        const x = xScale(i);
+        const y = yScale(d.amount_paid);
+        const color = STATUS_COLORS[d.status] || DETAIL_COLORS.slate;
+        ctx.beginPath();
+        ctx.arc(x, y, d.days_late > 30 ? 5 : 4, 0, Math.PI * 2);
+        ctx.fillStyle = color;
+        ctx.fill();
+        ctx.strokeStyle = DETAIL_COLORS.white;
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+    });
+
+    // X labels (show every few)
+    ctx.fillStyle = DETAIL_COLORS.slateLight;
+    ctx.font = "9px Inter, sans-serif";
+    ctx.textAlign = "center";
+    const step = Math.max(1, Math.floor(n / 8));
+    data.forEach((d, i) => {
+        if (i % step === 0 || i === n - 1) {
+            const dateStr = d.due_date ? d.due_date.substring(5) : "";
+            ctx.fillText(dateStr, xScale(i), H - pad.bottom + 15);
+        }
+    });
+}
+
+// ────────────────────────────────────────────────────────────
+//  CHART 2: Risk Radar (multi-dimensional profile)
+// ────────────────────────────────────────────────────────────
+function renderDetailRadarChart(detail) {
+    const canvas = document.getElementById("detail-radar-chart");
+    if (!canvas || !detail) return;
+
+    const ctx = canvas.getContext("2d");
+    const dpr = window.devicePixelRatio || 1;
+    const rect = canvas.parentElement.getBoundingClientRect();
+    const size = Math.min(rect.width, 240);
+    canvas.width = size * dpr;
+    canvas.height = size * dpr;
+    canvas.style.width = size + "px";
+    canvas.style.height = size + "px";
+    ctx.scale(dpr, dpr);
+
+    const cx = size / 2, cy = size / 2, R = size * 0.33;
+
+    const prob = Math.max(0, Math.min(1, toSafeNumber(detail.probability, 0)));
+    const p30 = Math.max(0, Math.min(1, toSafeNumber(detail.prob_30d, 0)));
+    const p60 = Math.max(0, Math.min(1, toSafeNumber(detail.prob_60d, 0)));
+    const p90 = Math.max(0, Math.min(1, toSafeNumber(detail.prob_90d, 0)));
+    const summary = detail.payment_history_summary || {};
+    const lateRatio = summary.total_periods ? (summary.late_count + summary.unpaid_count) / summary.total_periods : 0;
+    const penaltyNorm = Math.min(1, toSafeNumber(summary.total_penalties, 0) / 5000000);
+
+    const axes = [
+        { label: "P(30d)", value: p30 },
+        { label: "P(60d)", value: p60 },
+        { label: "P(90d)", value: p90 },
+        { label: "Trễ hạn", value: Math.min(1, lateRatio) },
+        { label: "Phạt", value: penaltyNorm },
+        { label: "Tổng", value: prob },
+    ];
+    const n = axes.length;
+    const angleStep = (2 * Math.PI) / n;
+
+    ctx.fillStyle = DETAIL_COLORS.slateBg;
+    ctx.fillRect(0, 0, size, size);
+
+    // Grid
+    for (let r = 0.25; r <= 1; r += 0.25) {
+        ctx.beginPath();
+        for (let i = 0; i <= n; i++) {
+            const angle = -Math.PI / 2 + i * angleStep;
+            const x = cx + Math.cos(angle) * R * r;
+            const y = cy + Math.sin(angle) * R * r;
+            i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+        }
+        ctx.closePath();
+        ctx.strokeStyle = DETAIL_COLORS.gridLine;
+        ctx.lineWidth = 0.5;
+        ctx.stroke();
+    }
+
+    // Axes + labels
+    axes.forEach((ax, i) => {
+        const angle = -Math.PI / 2 + i * angleStep;
+        ctx.beginPath();
+        ctx.moveTo(cx, cy);
+        ctx.lineTo(cx + Math.cos(angle) * R, cy + Math.sin(angle) * R);
+        ctx.strokeStyle = DETAIL_COLORS.gridLine;
+        ctx.lineWidth = 0.5;
+        ctx.stroke();
+
+        const lx = cx + Math.cos(angle) * (R + 20);
+        const ly = cy + Math.sin(angle) * (R + 20);
+        ctx.fillStyle = DETAIL_COLORS.primary;
+        ctx.font = "bold 9px Inter";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText(ax.label, lx, ly);
+    });
+
+    // Polygon
+    ctx.beginPath();
+    axes.forEach((ax, i) => {
+        const angle = -Math.PI / 2 + i * angleStep;
+        const r = Math.max(0, Math.min(1, ax.value)) * R;
+        const x = cx + Math.cos(angle) * r;
+        const y = cy + Math.sin(angle) * r;
+        i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+    });
+    ctx.closePath();
+    ctx.fillStyle = "rgba(239, 68, 68, 0.15)";
+    ctx.fill();
+    ctx.strokeStyle = DETAIL_COLORS.rose;
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    // Dots
+    axes.forEach((ax, i) => {
+        const angle = -Math.PI / 2 + i * angleStep;
+        const r = Math.max(0, Math.min(1, ax.value)) * R;
+        ctx.beginPath();
+        ctx.arc(cx + Math.cos(angle) * r, cy + Math.sin(angle) * r, 3, 0, Math.PI * 2);
+        ctx.fillStyle = DETAIL_COLORS.rose;
+        ctx.fill();
+    });
+}
+
+// ────────────────────────────────────────────────────────────
+//  CHART 3: Bullet Chart – Probability vs Thresholds
+// ────────────────────────────────────────────────────────────
+function renderBulletChart(detail) {
+    const canvas = document.getElementById("detail-bullet-chart");
+    if (!canvas || !detail) return;
+
+    const ctx = canvas.getContext("2d");
+    const dpr = window.devicePixelRatio || 1;
+    const rect = canvas.parentElement.getBoundingClientRect();
+    const W = rect.width;
+    const H = 240;
+    canvas.width = W * dpr;
+    canvas.height = H * dpr;
+    canvas.style.width = W + "px";
+    canvas.style.height = H + "px";
+    ctx.scale(dpr, dpr);
+
+    ctx.fillStyle = DETAIL_COLORS.slateBg;
+    ctx.fillRect(0, 0, W, H);
+
+    const pad = { top: 15, right: 25, bottom: 15, left: 80 };
+    const plotW = W - pad.left - pad.right;
+
+    const horizons = [
+        { label: "30 ngày", value: toSafeNumber(detail.prob_30d, 0) },
+        { label: "60 ngày", value: toSafeNumber(detail.prob_60d, 0) },
+        { label: "90 ngày", value: toSafeNumber(detail.prob_90d, 0) },
+    ];
+
+    const barH = 40;
+    const gap = 20;
+    const totalH = horizons.length * (barH + gap);
+    const startY = pad.top + (H - pad.top - pad.bottom - totalH) / 2;
+
+    const thresholds = [
+        { value: 0.2, color: "#10b981", label: "Thấp" },
+        { value: 0.4, color: "#f59e0b", label: "TB" },
+        { value: 0.6, color: "#f97316", label: "Cao" },
+        { value: 0.8, color: "#ef4444", label: "Rất cao" },
+    ];
+
+    horizons.forEach((h, i) => {
+        const y = startY + i * (barH + gap);
+
+        // Background zones
+        let prevX = pad.left;
+        thresholds.forEach((t, ti) => {
+            const nextVal = ti < thresholds.length - 1 ? thresholds[ti + 1].value : 1.0;
+            const x1 = pad.left + t.value * plotW;
+            const x2 = pad.left + nextVal * plotW;
+            ctx.fillStyle = t.color + "22";
+            ctx.fillRect(prevX, y, x2 - prevX, barH);
+            prevX = x2;
+        });
+        // last zone
+        ctx.fillStyle = "#ef444422";
+        ctx.fillRect(prevX, y, pad.left + plotW - prevX, barH);
+
+        // Actual value bar
+        const barW = Math.max(2, h.value * plotW);
+        const valueColor = h.value > 0.8 ? DETAIL_COLORS.rose : h.value > 0.6 ? DETAIL_COLORS.orange : h.value > 0.4 ? DETAIL_COLORS.amber : h.value > 0.2 ? DETAIL_COLORS.sky : DETAIL_COLORS.emerald;
+        ctx.fillStyle = valueColor;
+        ctx.beginPath();
+        ctx.roundRect(pad.left, y + barH * 0.25, barW, barH * 0.5, 3);
+        ctx.fill();
+
+        // Value text
+        ctx.fillStyle = DETAIL_COLORS.primary;
+        ctx.font = "bold 11px Inter";
+        ctx.textAlign = "left";
+        ctx.fillText(`${(h.value * 100).toFixed(0)}%`, pad.left + barW + 6, y + barH / 2 + 4);
+
+        // Label
+        ctx.fillStyle = DETAIL_COLORS.primary;
+        ctx.font = "11px Inter";
+        ctx.textAlign = "right";
+        ctx.fillText(h.label, pad.left - 10, y + barH / 2 + 4);
+
+        // Threshold markers
+        thresholds.forEach(t => {
+            const tx = pad.left + t.value * plotW;
+            ctx.strokeStyle = t.color + "88";
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(tx, y);
+            ctx.lineTo(tx, y + barH);
+            ctx.stroke();
+        });
+    });
+
+    // Threshold labels at bottom
+    ctx.font = "8px Inter";
+    ctx.textAlign = "center";
+    thresholds.forEach(t => {
+        const tx = pad.left + t.value * plotW;
+        ctx.fillStyle = t.color;
+        ctx.fillText(`${(t.value * 100)}%`, tx, startY + totalH + 12);
+    });
+}
+
+// ────────────────────────────────────────────────────────────
+//  CHART 4: Payment Status Donut
+// ────────────────────────────────────────────────────────────
+function renderDetailDonut(timelineData) {
+    const canvas = document.getElementById("detail-donut-chart");
+    if (!canvas || !timelineData?.status_counts) return;
+
+    const ctx = canvas.getContext("2d");
+    const dpr = window.devicePixelRatio || 1;
+    const rect = canvas.parentElement.getBoundingClientRect();
+    const size = Math.min(rect.width, 220);
+    canvas.width = size * dpr;
+    canvas.height = size * dpr;
+    canvas.style.width = size + "px";
+    canvas.style.height = size + "px";
+    ctx.scale(dpr, dpr);
+
+    const cx = size / 2, cy = size / 2;
+    const R = size * 0.32;
+
+    ctx.fillStyle = DETAIL_COLORS.slateBg;
+    ctx.fillRect(0, 0, size, size);
+
+    const counts = timelineData.status_counts;
+    const total = Object.values(counts).reduce((a, b) => a + b, 0);
+    if (!total) return;
+
+    let startAngle = -Math.PI / 2;
+    const entries = Object.entries(counts).filter(([, v]) => v > 0);
+
+    entries.forEach(([key, count]) => {
+        const sliceAngle = (count / total) * 2 * Math.PI;
+        ctx.beginPath();
+        ctx.arc(cx, cy, R, startAngle, startAngle + sliceAngle);
+        ctx.lineWidth = R * 0.45;
+        ctx.strokeStyle = STATUS_COLORS[key] || DETAIL_COLORS.slate;
+        ctx.stroke();
+        startAngle += sliceAngle;
+    });
+
+    // Center
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.font = "bold 20px Inter";
+    ctx.fillStyle = DETAIL_COLORS.primary;
+    ctx.fillText(total.toString(), cx, cy - 6);
+    ctx.font = "9px Inter";
+    ctx.fillStyle = DETAIL_COLORS.slate;
+    ctx.fillText("Tổng kỳ", cx, cy + 10);
+
+    // Legend below donut
+    let legendY = cy + R + 25;
+    ctx.font = "9px Inter";
+    entries.forEach(([key, count]) => {
+        const pct = ((count / total) * 100).toFixed(0);
+        ctx.fillStyle = STATUS_COLORS[key] || DETAIL_COLORS.slate;
+        ctx.beginPath();
+        ctx.arc(cx - 45, legendY, 4, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = DETAIL_COLORS.primary;
+        ctx.textAlign = "left";
+        ctx.fillText(`${STATUS_LABELS[key] || key}: ${count} (${pct}%)`, cx - 35, legendY + 3);
+        legendY += 16;
+    });
+}
+
+// ────────────────────────────────────────────────────────────
+//  CHART 5: Sparkline – Monthly Payment Amounts
+// ────────────────────────────────────────────────────────────
+function renderSparklineChart(timelineData) {
+    const canvas = document.getElementById("detail-sparkline-chart");
+    if (!canvas || !timelineData?.monthly_series?.length) return;
+
+    const ctx = canvas.getContext("2d");
+    const dpr = window.devicePixelRatio || 1;
+    const rect = canvas.parentElement.getBoundingClientRect();
+    const W = rect.width;
+    const H = 180;
+    canvas.width = W * dpr;
+    canvas.height = H * dpr;
+    canvas.style.width = W + "px";
+    canvas.style.height = H + "px";
+    ctx.scale(dpr, dpr);
+
+    const pad = { top: 15, right: 20, bottom: 35, left: 60 };
+    const plotW = W - pad.left - pad.right;
+    const plotH = H - pad.top - pad.bottom;
+
+    ctx.fillStyle = DETAIL_COLORS.slateBg;
+    ctx.fillRect(0, 0, W, H);
+
+    const data = timelineData.monthly_series;
+    const n = data.length;
+    const maxVal = Math.max(...data.map(d => Math.max(d.total_due, d.total_paid)), 1);
+
+    const xs = (i) => pad.left + (i / Math.max(1, n - 1)) * plotW;
+    const ys = (v) => pad.top + plotH - (v / maxVal) * plotH;
+
+    // Grid
+    ctx.strokeStyle = DETAIL_COLORS.gridLine;
+    ctx.lineWidth = 0.5;
+    for (let i = 0; i <= 3; i++) {
+        const y = pad.top + (i / 3) * plotH;
+        ctx.beginPath(); ctx.moveTo(pad.left, y); ctx.lineTo(W - pad.right, y); ctx.stroke();
+    }
+
+    // Due area (light fill)
+    ctx.beginPath();
+    data.forEach((d, i) => { i === 0 ? ctx.moveTo(xs(i), ys(d.total_due)) : ctx.lineTo(xs(i), ys(d.total_due)); });
+    ctx.lineTo(xs(n - 1), ys(0));
+    ctx.lineTo(xs(0), ys(0));
+    ctx.closePath();
+    ctx.fillStyle = "rgba(148,163,184,0.1)";
+    ctx.fill();
+
+    // Due line
+    ctx.beginPath();
+    ctx.strokeStyle = DETAIL_COLORS.slateLight;
+    ctx.lineWidth = 1.5;
+    ctx.setLineDash([4, 3]);
+    data.forEach((d, i) => { i === 0 ? ctx.moveTo(xs(i), ys(d.total_due)) : ctx.lineTo(xs(i), ys(d.total_due)); });
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    // Paid line
+    ctx.beginPath();
+    const grad = ctx.createLinearGradient(pad.left, 0, W - pad.right, 0);
+    grad.addColorStop(0, DETAIL_COLORS.sky);
+    grad.addColorStop(1, DETAIL_COLORS.emerald);
+    ctx.strokeStyle = grad;
+    ctx.lineWidth = 2.5;
+    data.forEach((d, i) => { i === 0 ? ctx.moveTo(xs(i), ys(d.total_paid)) : ctx.lineTo(xs(i), ys(d.total_paid)); });
+    ctx.stroke();
+
+    // Dots
+    data.forEach((d, i) => {
+        ctx.beginPath();
+        ctx.arc(xs(i), ys(d.total_paid), 3, 0, Math.PI * 2);
+        ctx.fillStyle = DETAIL_COLORS.sky;
+        ctx.fill();
+    });
+
+    // X labels
+    ctx.fillStyle = DETAIL_COLORS.slateLight;
+    ctx.font = "8px Inter";
+    ctx.textAlign = "center";
+    const labelStep = Math.max(1, Math.floor(n / 6));
+    data.forEach((d, i) => {
+        if (i % labelStep === 0 || i === n - 1) {
+            ctx.fillText(d.month, xs(i), H - 8);
+        }
+    });
+}
+
+// ────────────────────────────────────────────────────────────
+//  CHART 6: Feature Importance (Horizontal Bar)
+// ────────────────────────────────────────────────────────────
+function renderFeatureChart(detail) {
+    const canvas = document.getElementById("detail-feature-chart");
+    if (!canvas || !detail?.top_reasons?.length) return;
+
+    const ctx = canvas.getContext("2d");
+    const dpr = window.devicePixelRatio || 1;
+    const rect = canvas.parentElement.getBoundingClientRect();
+    const W = rect.width;
+    const H = 180;
+    canvas.width = W * dpr;
+    canvas.height = H * dpr;
+    canvas.style.width = W + "px";
+    canvas.style.height = H + "px";
+    ctx.scale(dpr, dpr);
+
+    ctx.fillStyle = DETAIL_COLORS.slateBg;
+    ctx.fillRect(0, 0, W, H);
+
+    const pad = { top: 10, right: 20, bottom: 10, left: 130 };
+    const plotW = W - pad.left - pad.right;
+    const plotH = H - pad.top - pad.bottom;
+
+    const reasons = detail.top_reasons.slice(0, 5);
+    const maxWeight = Math.max(...reasons.map(r => Math.abs(r.weight || 0)), 0.1);
+    const barH = Math.min(26, plotH / reasons.length - 6);
+
+    const barColors = [DETAIL_COLORS.rose, DETAIL_COLORS.orange, DETAIL_COLORS.amber, DETAIL_COLORS.sky, DETAIL_COLORS.violet];
+
+    reasons.forEach((r, i) => {
+        const y = pad.top + (i / reasons.length) * plotH + (plotH / reasons.length - barH) / 2;
+        const w = (Math.abs(r.weight || 0) / maxWeight) * plotW;
+        const color = barColors[i % barColors.length];
+
+        // Bar
+        ctx.fillStyle = color + "CC";
+        ctx.beginPath();
+        ctx.roundRect(pad.left, y, Math.max(4, w), barH, 4);
+        ctx.fill();
+
+        // Percentage
+        ctx.fillStyle = color;
+        ctx.font = "bold 10px Inter";
+        ctx.textAlign = "left";
+        ctx.fillText(`${((r.weight || 0) * 100).toFixed(0)}%`, pad.left + w + 6, y + barH / 2 + 3);
+
+        // Label
+        const label = (r.reason || "").length > 18 ? (r.reason || "").substring(0, 17) + "…" : (r.reason || "");
+        ctx.fillStyle = DETAIL_COLORS.primary;
+        ctx.font = "10px Inter";
+        ctx.textAlign = "right";
+        ctx.fillText(label, pad.left - 8, y + barH / 2 + 3);
+    });
+}
+
+
+// ── DOMContentLoaded ───────────────────────────────────────
 document.addEventListener("DOMContentLoaded", async () => {
     const pageState = parsePageState();
 
@@ -573,9 +1103,24 @@ document.addEventListener("DOMContentLoaded", async () => {
     setStatus("Đang tải hồ sơ doanh nghiệp...", "info");
 
     try {
-        const detail = await fetchDelinquencyDetail(pageState.taxCode);
+        const [detail, timelineData] = await Promise.all([
+            fetchDelinquencyDetail(pageState.taxCode),
+            fetchPaymentTimeline(pageState.taxCode),
+        ]);
+
         syncDetailWorkspaceLink(pageState, detail?.tax_code || pageState.taxCode);
         renderDetail(detail);
+
+        // Render advanced charts
+        renderDetailRadarChart(detail);
+        renderBulletChart(detail);
+        renderFeatureChart(detail);
+
+        if (timelineData) {
+            renderTimelineChart(timelineData);
+            renderDetailDonut(timelineData);
+            renderSparklineChart(timelineData);
+        }
     } catch (error) {
         console.error("Delinquency detail fetch error:", error);
         setStatus("Không thể tải chi tiết doanh nghiệp. Vui lòng thử lại.", "error");
@@ -583,3 +1128,4 @@ document.addEventListener("DOMContentLoaded", async () => {
         setText("detail-tax-code", pageState.taxCode);
     }
 });
+

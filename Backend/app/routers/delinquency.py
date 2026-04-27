@@ -1558,3 +1558,103 @@ def predict_delinquency_batch(
         "failed": failed,
         "items": items,
     }
+
+
+@router.get("/delinquency/{tax_code}/payment-timeline")
+def get_payment_timeline(
+    tax_code: str,
+    limit: int = Query(default=50, ge=1, le=200),
+    db: Session = Depends(get_db),
+):
+    """
+    Return detailed payment timeline data for a specific company.
+    Used by Timeline / Sparkline / Donut charts on the detail page.
+    """
+    company = _resolve_company_by_tax_code(db, tax_code)
+    if not company:
+        raise HTTPException(status_code=404, detail=f"Không tìm thấy doanh nghiệp MST {tax_code}.")
+
+    resolved_code = company.tax_code
+    cutoff = date.today() - timedelta(days=730)
+
+    payments = (
+        db.query(models.TaxPayment)
+        .filter(
+            models.TaxPayment.tax_code == resolved_code,
+            models.TaxPayment.due_date >= cutoff,
+        )
+        .order_by(models.TaxPayment.due_date.asc())
+        .limit(limit)
+        .all()
+    )
+
+    timeline = []
+    amounts_over_time = []
+    status_counts = {"on_time": 0, "late": 0, "unpaid": 0, "partial": 0}
+    monthly_aggregation = {}
+
+    for p in payments:
+        due = p.due_date
+        actual = p.actual_payment_date
+        amount_due = float(p.amount_due or 0)
+        amount_paid = float(p.amount_paid or 0)
+        penalty = float(p.penalty_amount or 0)
+
+        if actual is None and due < date.today():
+            status = "unpaid"
+            days_late = (date.today() - due).days
+        elif actual is not None and actual > due:
+            status = "late"
+            days_late = (actual - due).days
+        elif actual is not None and amount_paid < amount_due * 0.95:
+            status = "partial"
+            days_late = max(0, (actual - due).days) if actual > due else 0
+        else:
+            status = "on_time"
+            days_late = 0
+
+        status_counts[status] = status_counts.get(status, 0) + 1
+
+        timeline.append({
+            "due_date": str(due) if due else None,
+            "actual_payment_date": str(actual) if actual else None,
+            "amount_due": amount_due,
+            "amount_paid": amount_paid,
+            "penalty_amount": penalty,
+            "tax_period": p.tax_period,
+            "status": status,
+            "days_late": days_late,
+        })
+
+        amounts_over_time.append({
+            "date": str(due),
+            "amount_due": amount_due,
+            "amount_paid": amount_paid,
+        })
+
+        if due:
+            month_key = due.strftime("%Y-%m")
+            if month_key not in monthly_aggregation:
+                monthly_aggregation[month_key] = {"due": 0, "paid": 0, "penalty": 0, "count": 0}
+            monthly_aggregation[month_key]["due"] += amount_due
+            monthly_aggregation[month_key]["paid"] += amount_paid
+            monthly_aggregation[month_key]["penalty"] += penalty
+            monthly_aggregation[month_key]["count"] += 1
+
+    monthly_series = [
+        {"month": k, "total_due": round(v["due"], 0), "total_paid": round(v["paid"], 0),
+         "total_penalty": round(v["penalty"], 0), "payment_count": v["count"]}
+        for k, v in sorted(monthly_aggregation.items())
+    ]
+
+    return {
+        "tax_code": _normalize_tax_code_for_response(resolved_code) or resolved_code,
+        "company_name": company.name,
+        "total_records": len(timeline),
+        "status_counts": status_counts,
+        "timeline": timeline,
+        "amounts_over_time": amounts_over_time,
+        "monthly_series": monthly_series,
+        "generated_at": datetime.utcnow().isoformat() + "Z",
+    }
+
