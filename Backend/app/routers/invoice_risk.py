@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import text
 
 from ..database import get_db
+from ml_engine.model_registry import AuditContext, ModelRegistryService
 from ml_engine.invoice_risk_model import InvoiceRiskScorer
 
 router = APIRouter(prefix="/api/invoice", tags=["Invoice Risk"])
@@ -51,12 +52,55 @@ def _fetch_invoice_context(db: Session, invoice_number: str, as_of_date: date) -
     ).scalar() or 0
 
     linked_invoice_ids: list[str] = []
+    dup_rows = db.execute(
+        text(
+            """
+            SELECT f2.invoice_number
+            FROM invoice_fingerprints f
+            JOIN invoice_fingerprints f2
+              ON f.hash_near_dup = f2.hash_near_dup
+             AND f2.invoice_number <> f.invoice_number
+            WHERE f.invoice_number = :invoice_number
+              AND f.hash_near_dup IS NOT NULL
+            LIMIT 10
+            """
+        ),
+        {"invoice_number": invoice_number},
+    ).fetchall()
+    linked_invoice_ids = [str(r[0]) for r in dup_rows if r and r[0]]
+
+    seller_risk = db.execute(
+        text(
+            """
+            SELECT COALESCE(risk_score, 0)
+            FROM ai_risk_assessments
+            WHERE tax_code = :tax_code
+            ORDER BY created_at DESC
+            LIMIT 1
+            """
+        ),
+        {"tax_code": invoice_row["seller_tax_code"]},
+    ).scalar() or 0
+    buyer_risk = db.execute(
+        text(
+            """
+            SELECT COALESCE(risk_score, 0)
+            FROM ai_risk_assessments
+            WHERE tax_code = :tax_code
+            ORDER BY created_at DESC
+            LIMIT 1
+            """
+        ),
+        {"tax_code": invoice_row["buyer_tax_code"]},
+    ).scalar() or 0
 
     context = {
         "event_count": int(event_count),
         "near_dup_count": int(near_dup_count),
         "same_day_pair_count": int(same_day_pair_count),
         "linked_invoice_ids": linked_invoice_ids,
+        "seller_risk_score": float(seller_risk or 0.0),
+        "buyer_risk_score": float(buyer_risk or 0.0),
     }
     return dict(invoice_row), context
 
@@ -71,6 +115,16 @@ def get_invoice_risk(
     invoice_data, context = _fetch_invoice_context(db, invoice_number, as_of)
     scorer = InvoiceRiskScorer()
     result = scorer.score(invoice_data, context)
+    registry = ModelRegistryService(db)
+    registry.log_inference(
+        model_name="invoice_risk",
+        model_version=result.model_version,
+        entity_type="invoice",
+        entity_id=result.invoice_number,
+        input_features={**invoice_data, **context},
+        outputs={"risk_score": result.risk_score, "risk_level": result.risk_level},
+        ctx=AuditContext(request_id=f"invoice-{invoice_number}-{as_of.isoformat()}"),
+    )
 
     db.execute(
         text(

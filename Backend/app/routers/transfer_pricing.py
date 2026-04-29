@@ -2,6 +2,11 @@ from __future__ import annotations
 
 import json
 from datetime import date
+from pathlib import Path
+from functools import lru_cache
+
+import joblib
+import numpy as np
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import text
@@ -9,6 +14,23 @@ from sqlalchemy import text
 from ..database import get_db
 
 router = APIRouter(prefix="/api/transfer-pricing", tags=["Transfer Pricing"])
+MODEL_DIR = Path(__file__).resolve().parent.parent.parent / "data" / "models"
+
+
+@lru_cache(maxsize=1)
+def _load_transfer_pricing_artifacts():
+    model_path = MODEL_DIR / "transfer_pricing_model.joblib"
+    meta_path = MODEL_DIR / "transfer_pricing_model_meta.json"
+    if not model_path.exists():
+        return None, {}
+    model = joblib.load(model_path)
+    meta = {}
+    if meta_path.exists():
+        try:
+            meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        except Exception:
+            meta = {}
+    return model, meta
 
 
 @router.post("/score")
@@ -22,6 +44,8 @@ def score_mispricing(limit: int = Query(5000, ge=1, le=50000), db: Session = Dep
     ).mappings().all()
 
     inserted = 0
+    model_obj, model_meta = _load_transfer_pricing_artifacts()
+    learned_version = str(model_meta.get("model_version") or "transfer-pricing-ml-v1") if model_obj else None
     for r in rows:
         bucket = f"{r['trade_date'].year}-{r['trade_date'].month:02d}"
         pair = f"VN-{r['counterparty_country']}"
@@ -39,6 +63,29 @@ def score_mispricing(limit: int = Query(5000, ge=1, le=50000), db: Session = Dep
         spread = max(1.0, p90 - p10)
         z_score = (unit_price - p50) / spread
         risk_score = min(100.0, abs(z_score) * 100.0)
+        model_version = "transfer-pricing-baseline-v1"
+        if model_obj is not None:
+            feature_vec = np.asarray(
+                [[
+                    float(unit_price),
+                    float(p10),
+                    float(p50),
+                    float(p90),
+                    float(spread),
+                    float(z_score),
+                ]],
+                dtype=float,
+            )
+            try:
+                if hasattr(model_obj, "predict_proba"):
+                    prob = float(model_obj.predict_proba(feature_vec)[0][1])
+                else:
+                    pred = float(model_obj.predict(feature_vec)[0])
+                    prob = max(0.0, min(1.0, pred))
+                risk_score = min(100.0, max(0.0, prob * 100.0))
+                model_version = learned_version or "transfer-pricing-ml-v1"
+            except Exception:
+                model_version = "transfer-pricing-baseline-v1"
         reasons = []
         if unit_price > p90:
             reasons.append("price_above_p90")
@@ -52,7 +99,7 @@ def score_mispricing(limit: int = Query(5000, ge=1, le=50000), db: Session = Dep
             {
                 "record_id": r["record_id"],
                 "as_of_date": date.today(),
-                "model_version": "transfer-pricing-baseline-v1",
+                "model_version": model_version,
                 "z_score": z_score,
                 "risk_score": risk_score,
                 "reason_codes": json.dumps(reasons),

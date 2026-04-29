@@ -25,9 +25,17 @@ def get_case_queue(
         text(
             f"""
             SELECT q.case_id, q.case_type, q.entity_id, q.status, q.priority, q.sla_due_at,
-                   p.priority_score, p.urgency_level, p.next_steps, p.routing_team, p.reason_codes
+                   p.priority_score, p.confidence, p.urgency_level, p.next_steps, p.routing_team, p.reason_codes, p.cohort_tags,
+                   f.fusion_score, f.risk_band
             FROM case_queue q
             LEFT JOIN case_triage_predictions p ON p.case_id = q.case_id
+            LEFT JOIN LATERAL (
+                SELECT fusion_score, risk_band
+                FROM entity_risk_fusion_predictions
+                WHERE tax_code = q.entity_id
+                ORDER BY as_of_date DESC, created_at DESC
+                LIMIT 1
+            ) f ON TRUE
             {where_sql}
             ORDER BY p.priority_score DESC NULLS LAST, q.created_at DESC
             LIMIT :limit

@@ -15,18 +15,45 @@ Endpoints:
 from __future__ import annotations
 
 from collections import defaultdict
+from functools import lru_cache
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 import re
+import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
+import joblib
+import numpy as np
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from ..database import get_db
+from ml_engine.model_registry import AuditContext, ModelRegistryService
 
 router = APIRouter(prefix="/api/osint", tags=["OSINT & UBO Intelligence"])
 TAX_CODE_PATTERN = re.compile(r"^\d{10}$")
+MODEL_DIR = Path(__file__).resolve().parent.parent.parent / "data" / "models"
+OSINT_FEATURE_NAMES = [
+    "n_dom_subs",
+    "n_rel_types",
+    "max_own_pct",
+    "inv_in_bn",
+    "inv_out_bn",
+    "max_dom_risk",
+    "avg_dom_risk",
+    "juris_risk",
+]
+JURISDICTION_RISK = {
+    "Cayman Islands": 5.0,
+    "British Virgin Islands (BVI)": 5.0,
+    "Panama": 5.0,
+    "Seychelles": 4.0,
+    "Bahamas": 4.0,
+    "Cyprus": 3.0,
+    "Hong Kong": 2.0,
+    "Singapore": 2.0,
+}
 
 
 # ────────────────────────────────────────────────────────────
@@ -101,6 +128,17 @@ class SearchResult(BaseModel):
     match_type: str
 
 
+class OsintReadinessResponse(BaseModel):
+    latest_label_version: Optional[str] = None
+    latest_snapshot_id: Optional[str] = None
+    latest_benchmark_key: Optional[str] = None
+    gold_labels: int = 0
+    silver_labels: int = 0
+    bronze_labels: int = 0
+    snapshot_count: int = 0
+    readiness_gates: Dict[str, Any] = Field(default_factory=dict)
+
+
 # ────────────────────────────────────────────────────────────
 #  Helper: check if offshore_entities table exists
 # ────────────────────────────────────────────────────────────
@@ -146,6 +184,137 @@ def _resolve_graph_tax_code(input_code: str, db: Session) -> str:
         status_code=422,
         detail="tax_code phải gồm đúng 10 chữ số; hoặc cung cấp offshore entity_code hợp lệ đã có mapping proxy.",
     )
+
+
+@lru_cache(maxsize=1)
+def _load_osint_artifacts() -> tuple[Any, dict[str, Any]]:
+    model_path = MODEL_DIR / "osint_risk_model.joblib"
+    config_path = MODEL_DIR / "osint_config.json"
+    if not model_path.exists():
+        return None, {}
+    model = joblib.load(model_path)
+    config: dict[str, Any] = {}
+    if config_path.exists():
+        import json
+
+        with open(config_path, "r", encoding="utf-8") as f:
+            config = json.load(f)
+    return model, config
+
+
+def _resolve_osint_country(tax_code: str, db: Session) -> str:
+    offshore_country = db.execute(
+        text("SELECT country FROM offshore_entities WHERE proxy_tax_code = :tax_code LIMIT 1"),
+        {"tax_code": tax_code},
+    ).scalar()
+    if offshore_country:
+        return str(offshore_country)
+    row = db.execute(
+        text(
+            "SELECT COALESCE(NULLIF(country_inferred, ''), province, 'Unknown') "
+            "FROM companies WHERE tax_code = :tax_code LIMIT 1"
+        ),
+        {"tax_code": tax_code},
+    ).fetchone()
+    return str(row[0] or "Unknown") if row else "Unknown"
+
+
+def _build_osint_feature_payload(tax_code: str, db: Session) -> Optional[Dict[str, float]]:
+    company = db.execute(
+        text(
+            "SELECT tax_code, industry, COALESCE(NULLIF(country_inferred, ''), province, 'Unknown') "
+            "FROM companies WHERE tax_code = :tax_code"
+        ),
+        {"tax_code": tax_code},
+    ).fetchone()
+    if not company:
+        return None
+
+    links = db.execute(
+        text(
+            """
+            SELECT
+                ol.child_tax_code,
+                COALESCE(ol.relationship_type, 'shareholder') AS relationship_type,
+                COALESCE(ol.ownership_percent, 0) AS ownership_percent,
+                COALESCE(c.risk_score, 0) AS risk_score
+            FROM ownership_links ol
+            LEFT JOIN companies c ON c.tax_code = ol.child_tax_code
+            WHERE ol.parent_tax_code = :tax_code
+            """
+        ),
+        {"tax_code": tax_code},
+    ).fetchall()
+
+    if not links and company[1] != "Offshore Entity":
+        return None
+
+    child_codes = [str(row[0]) for row in links if _is_numeric_tax_code(row[0])]
+    invoice_totals = {"inv_in_bn": 0.0, "inv_out_bn": 0.0}
+    if child_codes:
+        placeholders = ", ".join(f":tc_{i}" for i in range(len(child_codes)))
+        params = {f"tc_{i}": code for i, code in enumerate(child_codes)}
+        inv_row = db.execute(
+            text(
+                f"""
+                SELECT
+                    COALESCE(SUM(CASE WHEN buyer_tax_code IN ({placeholders}) THEN amount ELSE 0 END), 0) / 1e9 AS inv_in_bn,
+                    COALESCE(SUM(CASE WHEN seller_tax_code IN ({placeholders}) THEN amount ELSE 0 END), 0) / 1e9 AS inv_out_bn
+                FROM invoices
+                """
+            ),
+            params,
+        ).fetchone()
+        if inv_row:
+            invoice_totals = {
+                "inv_in_bn": float(inv_row[0] or 0.0),
+                "inv_out_bn": float(inv_row[1] or 0.0),
+            }
+
+    risks = [float(row[3] or 0.0) for row in links]
+    country = _resolve_osint_country(tax_code, db)
+    juris_risk = float(JURISDICTION_RISK.get(country, 1.0))
+    return {
+        "n_dom_subs": float(len(child_codes)),
+        "n_rel_types": float(len({str(row[1]) for row in links})),
+        "max_own_pct": float(max((float(row[2] or 0.0) for row in links), default=0.0)),
+        "inv_in_bn": float(invoice_totals["inv_in_bn"]),
+        "inv_out_bn": float(invoice_totals["inv_out_bn"]),
+        "max_dom_risk": float(max(risks) if risks else 0.0),
+        "avg_dom_risk": float(sum(risks) / len(risks) if risks else 0.0),
+        "juris_risk": juris_risk,
+    }
+
+
+def _predict_osint_risk(tax_code: str, db: Session) -> Optional[Dict[str, Any]]:
+    model, config = _load_osint_artifacts()
+    if model is None:
+        return None
+    features = _build_osint_feature_payload(tax_code, db)
+    if not features:
+        return None
+    ordered = [float(features.get(name, 0.0)) for name in OSINT_FEATURE_NAMES]
+    vec = np.asarray(ordered, dtype=float).reshape(1, -1)
+    if hasattr(model, "predict_proba"):
+        prob = float(model.predict_proba(vec)[0][1])
+    else:
+        prob = float(model.predict(vec)[0])
+    score = round(prob * 100.0, 2)
+    registry = ModelRegistryService(db)
+    registry.log_inference(
+        model_name="osint_risk",
+        model_version=str(config.get("model_version") or "osint-classifier-v1"),
+        entity_type="company",
+        entity_id=tax_code,
+        input_features=features,
+        outputs={"risk_score": score},
+        ctx=AuditContext(request_id=f"osint-{uuid.uuid4().hex[:12]}"),
+    )
+    return {
+        "risk_score": score,
+        "features": features,
+        "model_version": str(config.get("model_version") or "osint-classifier-v1"),
+    }
 
 
 # ────────────────────────────────────────────────────────────
@@ -321,19 +490,21 @@ def get_graph_for_tax_code(tax_code: str, depth: int = Query(default=2, ge=1, le
                 or (inferred_country != "" and inferred_country.lower() != "vietnam")
             )
             offshore_display = r[5] if len(r) > 5 else None
+            predicted = _predict_osint_risk(str(r[0]), db) if is_offshore else None
+            resolved_risk = float(predicted["risk_score"]) if predicted else (float(r[4]) if r[4] else None)
             node = OsintNode(
                 id=r[0],
                 label=offshore_display or r[1] or r[0],
                 type="offshore_entity" if is_offshore else "domestic_entity",
                 country=(inferred_country or "Unknown") if is_offshore else "Việt Nam",
-                risk_score=float(r[4]) if r[4] else None,
+                risk_score=resolved_risk,
                 tax_code=r[0],
             )
             nodes.append(node)
             if is_offshore and r[3]:
                 jurisdictions.add(r[3])
-            if r[4] and float(r[4]) > max_risk:
-                max_risk = float(r[4])
+            if resolved_risk and float(resolved_risk) > max_risk:
+                max_risk = float(resolved_risk)
 
     # Deduplicate edges
     edge_set = set()
@@ -364,6 +535,82 @@ def get_graph_for_tax_code(tax_code: str, depth: int = Query(default=2, ge=1, le
         offshore_jurisdictions=sorted(jurisdictions),
         max_risk_score=round(max_risk, 2) if max_risk > 0 else None,
         data_source="postgresql",
+    )
+
+
+@router.get("/readiness", response_model=OsintReadinessResponse)
+def get_osint_readiness(db: Session = Depends(get_db)):
+    label_counts = db.execute(
+        text(
+            """
+            SELECT trust_tier, COUNT(*) AS cnt
+            FROM graph_labels
+            GROUP BY trust_tier
+            """
+        )
+    ).fetchall()
+    latest_label_version = db.execute(
+        text(
+            """
+            SELECT label_version
+            FROM label_versions
+            WHERE label_key = 'osint_graph_supervision'
+            ORDER BY created_at DESC
+            LIMIT 1
+            """
+        )
+    ).scalar()
+    latest_snapshot = db.execute(
+        text(
+            """
+            SELECT snapshot_id
+            FROM graph_snapshots
+            WHERE graph_family = 'osint_heterograph'
+            ORDER BY as_of_timestamp DESC
+            LIMIT 1
+            """
+        )
+    ).scalar()
+    snapshot_count = db.execute(
+        text("SELECT COUNT(*) FROM graph_snapshots WHERE graph_family = 'osint_heterograph'")
+    ).scalar() or 0
+    latest_benchmark = db.execute(
+        text(
+            """
+            SELECT benchmark_key, promotion_gate
+            FROM graph_benchmark_specs
+            WHERE graph_family = 'osint_heterograph'
+            ORDER BY created_at DESC
+            LIMIT 1
+            """
+        )
+    ).fetchone()
+    latest_decision = db.execute(
+        text(
+            """
+            SELECT metric_summary
+            FROM champion_challenger_results
+            WHERE model_name = 'osint_heterograph'
+            ORDER BY created_at DESC
+            LIMIT 1
+            """
+        )
+    ).scalar()
+    counts = {str(row[0]): int(row[1]) for row in label_counts if row[0]}
+    readiness_gates: Dict[str, Any] = {}
+    if latest_benchmark and latest_benchmark[1]:
+        readiness_gates["promotion_gate"] = latest_benchmark[1]
+    if latest_decision:
+        readiness_gates["latest_decision"] = latest_decision
+    return OsintReadinessResponse(
+        latest_label_version=str(latest_label_version) if latest_label_version else None,
+        latest_snapshot_id=str(latest_snapshot) if latest_snapshot else None,
+        latest_benchmark_key=str(latest_benchmark[0]) if latest_benchmark else None,
+        gold_labels=counts.get("gold", 0),
+        silver_labels=counts.get("silver", 0),
+        bronze_labels=counts.get("bronze", 0),
+        snapshot_count=int(snapshot_count),
+        readiness_gates=readiness_gates,
     )
 
 
@@ -477,12 +724,14 @@ def list_high_risk_ubo(
             rel_types = ["shares_ownership"]
         child_raw = r[7] if has_offshore else r[6]
         child_codes = [x for x in (child_raw or []) if _is_numeric_tax_code(x)]
+        predicted = _predict_osint_risk(str(r[1] or r[0]), db)
+        resolved_risk = float(predicted["risk_score"]) if predicted else round(float(r[4] or 0), 2)
         items.append(HighRiskUBOItem(
             offshore_id=r[0],
             proxy_tax_code=r[1] or r[0],
             label=r[2] or r[0],
             country=r[3] or "Unknown",
-            risk_score=round(float(r[4] or 0), 2),
+            risk_score=resolved_risk,
             connected_domestic_count=r[5] or 0,
             relation_types=rel_types[:5],
             top_domestic_tax_codes=child_codes[:5],
@@ -543,12 +792,14 @@ def search_osint(
         country = str(r[4] or "").strip()
         is_offshore = bool(country and country.lower() != "việt nam" and country.lower() != "vietnam") or r[3] == "Offshore Entity"
         match_type = "tax_code" if q.lower() in (r[1] or "").lower() else "label"
+        predicted = _predict_osint_risk(str(r[0]), db) if is_offshore else None
+        resolved_risk = float(predicted["risk_score"]) if predicted else (float(r[5]) if r[5] else None)
         results.append(SearchResult(
             node=OsintNode(
                 id=r[1], label=r[2] or r[1],
                 type="offshore_entity" if is_offshore else "domestic_entity",
                 country=country if is_offshore else "Việt Nam",
-                risk_score=float(r[5]) if r[5] else None,
+                risk_score=resolved_risk,
                 tax_code=r[0],
             ),
             connections=r[6] or 0,

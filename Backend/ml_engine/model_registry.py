@@ -5,6 +5,7 @@ import json
 import time
 from dataclasses import dataclass
 from typing import Any, Dict, Optional
+from uuid import uuid4
 
 from sqlalchemy.orm import Session
 from sqlalchemy import text
@@ -62,7 +63,7 @@ class ModelRegistryService:
             text(
                 "INSERT INTO model_registry "
                 "(model_name, model_version, artifact_path, feature_set_id, train_data_hash, code_hash, metrics_json, gates_json, status) "
-                "VALUES (:model_name, :model_version, :artifact_path, :feature_set_id, :train_data_hash, :code_hash, :metrics_json::jsonb, :gates_json::jsonb, :status) "
+                "VALUES (:model_name, :model_version, :artifact_path, :feature_set_id, :train_data_hash, :code_hash, CAST(:metrics_json AS jsonb), CAST(:gates_json AS jsonb), :status) "
                 "ON CONFLICT (model_name, model_version) DO UPDATE SET "
                 "artifact_path = EXCLUDED.artifact_path, "
                 "feature_set_id = COALESCE(EXCLUDED.feature_set_id, model_registry.feature_set_id), "
@@ -82,6 +83,232 @@ class ModelRegistryService:
                 "metrics_json": metrics_json,
                 "gates_json": gates_json,
                 "status": status,
+            },
+        )
+        self.db.commit()
+
+    def ensure_experiment(
+        self,
+        *,
+        experiment_key: str,
+        model_name: str,
+        objective: str = "",
+        owner: str = "system",
+        status: str = "active",
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> int:
+        row = self.db.execute(
+            text("SELECT id FROM ml_experiments WHERE experiment_key = :experiment_key"),
+            {"experiment_key": experiment_key},
+        ).fetchone()
+        if row:
+            self.db.execute(
+                text(
+                    "UPDATE ml_experiments "
+                    "SET model_name = :model_name, objective = :objective, owner = :owner, status = :status, "
+                    "metadata_json = CAST(:metadata_json AS jsonb), updated_at = CURRENT_TIMESTAMP "
+                    "WHERE id = :id"
+                ),
+                {
+                    "id": row[0],
+                    "model_name": model_name,
+                    "objective": objective or None,
+                    "owner": owner or None,
+                    "status": status,
+                    "metadata_json": json.dumps(metadata or {}, default=str),
+                },
+            )
+            self.db.commit()
+            return int(row[0])
+
+        inserted = self.db.execute(
+            text(
+                "INSERT INTO ml_experiments (experiment_key, model_name, objective, owner, status, metadata_json) "
+                "VALUES (:experiment_key, :model_name, :objective, :owner, :status, CAST(:metadata_json AS jsonb)) "
+                "RETURNING id"
+            ),
+            {
+                "experiment_key": experiment_key,
+                "model_name": model_name,
+                "objective": objective or None,
+                "owner": owner or None,
+                "status": status,
+                "metadata_json": json.dumps(metadata or {}, default=str),
+            },
+        ).fetchone()
+        self.db.commit()
+        return int(inserted[0])
+
+    def register_dataset_version(
+        self,
+        *,
+        dataset_key: str,
+        dataset_version: str,
+        entity_type: str = "",
+        row_count: Optional[int] = None,
+        source_tables: Optional[list[str]] = None,
+        filters: Optional[Dict[str, Any]] = None,
+        data_hash: str = "",
+        created_by: str = "system",
+    ) -> int:
+        row = self.db.execute(
+            text(
+                "SELECT id FROM dataset_versions WHERE dataset_key = :dataset_key AND dataset_version = :dataset_version"
+            ),
+            {"dataset_key": dataset_key, "dataset_version": dataset_version},
+        ).fetchone()
+        if row:
+            return int(row[0])
+        inserted = self.db.execute(
+            text(
+                "INSERT INTO dataset_versions "
+                "(dataset_key, dataset_version, entity_type, row_count, source_tables_json, filters_json, data_hash, created_by) "
+                "VALUES (:dataset_key, :dataset_version, :entity_type, :row_count, CAST(:source_tables_json AS jsonb), "
+                "CAST(:filters_json AS jsonb), :data_hash, :created_by) RETURNING id"
+            ),
+            {
+                "dataset_key": dataset_key,
+                "dataset_version": dataset_version,
+                "entity_type": entity_type or None,
+                "row_count": row_count,
+                "source_tables_json": json.dumps(source_tables or [], default=str),
+                "filters_json": json.dumps(filters or {}, default=str),
+                "data_hash": data_hash or None,
+                "created_by": created_by or None,
+            },
+        ).fetchone()
+        self.db.commit()
+        return int(inserted[0])
+
+    def register_label_version(
+        self,
+        *,
+        label_key: str,
+        label_version: str,
+        entity_type: str = "",
+        label_source: str = "",
+        positive_count: Optional[int] = None,
+        negative_count: Optional[int] = None,
+        label_hash: str = "",
+        notes: str = "",
+    ) -> int:
+        row = self.db.execute(
+            text("SELECT id FROM label_versions WHERE label_key = :label_key AND label_version = :label_version"),
+            {"label_key": label_key, "label_version": label_version},
+        ).fetchone()
+        if row:
+            return int(row[0])
+        inserted = self.db.execute(
+            text(
+                "INSERT INTO label_versions "
+                "(label_key, label_version, entity_type, label_source, positive_count, negative_count, label_hash, notes) "
+                "VALUES (:label_key, :label_version, :entity_type, :label_source, :positive_count, :negative_count, :label_hash, :notes) "
+                "RETURNING id"
+            ),
+            {
+                "label_key": label_key,
+                "label_version": label_version,
+                "entity_type": entity_type or None,
+                "label_source": label_source or None,
+                "positive_count": positive_count,
+                "negative_count": negative_count,
+                "label_hash": label_hash or None,
+                "notes": notes or None,
+            },
+        ).fetchone()
+        self.db.commit()
+        return int(inserted[0])
+
+    def start_training_run(
+        self,
+        *,
+        model_name: str,
+        experiment_id: Optional[int] = None,
+        model_version: str = "",
+        dataset_version_id: Optional[int] = None,
+        label_version_id: Optional[int] = None,
+        feature_set_id: Optional[int] = None,
+        seed: Optional[int] = None,
+        code_hash: str = "",
+        hyperparams: Optional[Dict[str, Any]] = None,
+        run_id: Optional[str] = None,
+    ) -> str:
+        resolved_run_id = run_id or f"{model_name}-{uuid4().hex[:12]}"
+        self.db.execute(
+            text(
+                "INSERT INTO ml_training_runs "
+                "(run_id, experiment_id, model_name, model_version, dataset_version_id, label_version_id, feature_set_id, "
+                "status, seed, code_hash, hyperparams_json) "
+                "VALUES (:run_id, :experiment_id, :model_name, :model_version, :dataset_version_id, :label_version_id, "
+                ":feature_set_id, 'running', :seed, :code_hash, CAST(:hyperparams_json AS jsonb))"
+            ),
+            {
+                "run_id": resolved_run_id,
+                "experiment_id": experiment_id,
+                "model_name": model_name,
+                "model_version": model_version or None,
+                "dataset_version_id": dataset_version_id,
+                "label_version_id": label_version_id,
+                "feature_set_id": feature_set_id,
+                "seed": seed,
+                "code_hash": code_hash or None,
+                "hyperparams_json": json.dumps(hyperparams or {}, default=str),
+            },
+        )
+        self.db.commit()
+        return resolved_run_id
+
+    def complete_training_run(
+        self,
+        *,
+        run_id: str,
+        status: str = "completed",
+        metrics: Optional[Dict[str, Any]] = None,
+        artifacts: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        self.db.execute(
+            text(
+                "UPDATE ml_training_runs "
+                "SET status = :status, metrics_json = CAST(:metrics_json AS jsonb), "
+                "artifacts_json = CAST(:artifacts_json AS jsonb), completed_at = CURRENT_TIMESTAMP "
+                "WHERE run_id = :run_id"
+            ),
+            {
+                "run_id": run_id,
+                "status": status,
+                "metrics_json": json.dumps(metrics or {}, default=str),
+                "artifacts_json": json.dumps(artifacts or {}, default=str),
+            },
+        )
+        self.db.commit()
+
+    def register_rollout(
+        self,
+        *,
+        model_name: str,
+        model_version: str,
+        environment: str = "staging",
+        rollout_type: str = "shadow",
+        status: str = "planned",
+        approved_by: str = "",
+        notes: str = "",
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        self.db.execute(
+            text(
+                "INSERT INTO deployment_rollouts "
+                "(model_name, model_version, environment, rollout_type, status, approved_by, rollout_notes, rollout_metadata) "
+                "VALUES (:model_name, :model_version, :environment, :rollout_type, :status, :approved_by, :rollout_notes, CAST(:rollout_metadata AS jsonb))"
+            ),
+            {
+                "model_name": model_name,
+                "model_version": model_version,
+                "environment": environment,
+                "rollout_type": rollout_type,
+                "status": status,
+                "approved_by": approved_by or None,
+                "rollout_notes": notes or None,
+                "rollout_metadata": json.dumps(metadata or {}, default=str),
             },
         )
         self.db.commit()
@@ -110,7 +337,7 @@ class ModelRegistryService:
                 "input_feature_hash, output_hash, outputs_json, explanation_ref, latency_ms) "
                 "VALUES "
                 "(:model_name, :model_version, :request_id, :actor_badge_id, :actor_user_id, :entity_type, :entity_id, :as_of_date, "
-                ":input_feature_hash, :output_hash, :outputs_json::jsonb, :explanation_ref, :latency_ms)"
+                ":input_feature_hash, :output_hash, CAST(:outputs_json AS jsonb), :explanation_ref, :latency_ms)"
             ),
             {
                 "model_name": model_name,

@@ -1,0 +1,7 @@
+{"case_id":"vat_refund_risk_2","message":"Hoàn thuế VAT: điều kiện hoàn thuế và dấu hiệu gian lận hoàn thuế cần kiểm tra?","expected_intent":"vat_refund_risk","min_hits":2}
+{"case_id":"invoice_risk_2","message":"Hóa đơn trùng (duplicate invoice) và mua bán hóa đơn: dấu hiệu rủi ro hóa đơn là gì?","expected_intent":"invoice_risk","min_hits":2}
+{"case_id":"delinquency_2","message":"Nợ đọng thuế: dự báo nợ 90 ngày và biện pháp thu nợ/cưỡng chế nợ áp dụng ra sao?","expected_intent":"delinquency","min_hits":2}
+{"case_id":"osint_ownership_2","message":"OSINT UBO: phát hiện chủ sở hữu hưởng lợi và sở hữu offshore/proxy company/phoenix company như thế nào?","expected_intent":"osint_ownership","min_hits":2}
+{"case_id":"transfer_pricing_2","message":"Chuyển giá (transfer pricing) trong giao dịch liên kết: hồ sơ xác định giá và so sánh giá thị trường?","expected_intent":"transfer_pricing","min_hits":2}
+{"case_id":"audit_selection_2","message":"Thanh tra kiểm tra: xếp hạng hồ sơ và shortlist thanh tra theo rủi ro khi nguồn lực hạn chế?","expected_intent":"audit_selection","min_hits":2}
+{"case_id":"general_tax_query_2","message":"Thủ tục thuế cơ bản: kê khai thuế và nộp tờ khai VAT theo quý cho doanh nghiệp nhỏ?","expected_intent":"general_tax_query","min_hits":1}

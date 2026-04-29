@@ -42,6 +42,14 @@ FEATURE_NAMES = [
     "avg_dom_risk",
     "juris_risk",
 ]
+POSITIVE_GRAPH_LABELS = {
+    "ubo_risk_confirmed",
+    "related_party_abuse_confirmed",
+    "shell_network_confirmed",
+    "offshore_structure_reviewed",
+    "edge_suspicious_confirmed",
+    "subgraph_case_confirmed",
+}
 OSINT_ACCEPTANCE_AUC_MIN = 0.60
 OSINT_ACCEPTANCE_PR_AUC_MIN = 0.35
 OSINT_MIN_TRAINING_SAMPLES = int(os.environ.get("OSINT_MIN_REQUIRED_SAMPLES", "10000"))
@@ -198,7 +206,72 @@ def build_features(offshore_rows, link_rows, invoice_rows):
         
     return np.array(features), np.array(labels), tax_codes
 
-def train_model(db_url: str, seed: int = 42, min_samples: int = OSINT_MIN_TRAINING_SAMPLES):
+
+def fetch_graph_labels(db_url: str):
+    import psycopg2
+    from psycopg2.extras import RealDictCursor
+
+    conn = psycopg2.connect(db_url)
+    cur = conn.cursor(cursor_factory=RealDictCursor)
+    cur.execute(
+        """
+        SELECT entity_id, label_name, label_value, trust_tier, confidence
+        FROM graph_labels
+        WHERE entity_type = 'company'
+        """
+    )
+    rows = cur.fetchall()
+    cur.close()
+    conn.close()
+    return rows
+
+
+def align_graph_supervision(features: np.ndarray, pseudo_labels: np.ndarray, tax_codes: list[str], graph_label_rows) -> tuple[np.ndarray, np.ndarray, dict]:
+    if not graph_label_rows:
+        return features, pseudo_labels, {
+            "label_mode": "pseudo_only",
+            "gold_count": 0,
+            "silver_count": 0,
+            "bronze_count": 0,
+        }
+
+    label_by_tax_code: dict[str, tuple[int, float, str]] = {}
+    trust_rank = {"gold": 3, "silver": 2, "bronze": 1}
+    trust_counts = {"gold": 0, "silver": 0, "bronze": 0}
+    for row in graph_label_rows:
+        entity_id = str(row.get("entity_id") or "")
+        if entity_id.startswith("company:"):
+            entity_id = entity_id.split(":", 1)[1]
+        label_name = str(row.get("label_name") or "")
+        label_value = str(row.get("label_value") or "positive")
+        trust_tier = str(row.get("trust_tier") or "bronze").lower()
+        score = float(row.get("confidence") or 0.5)
+        label = 0 if label_value == "negative" else int(label_name in POSITIVE_GRAPH_LABELS)
+        existing = label_by_tax_code.get(entity_id)
+        if existing is None or trust_rank.get(trust_tier, 0) > trust_rank.get(existing[2], 0):
+            label_by_tax_code[entity_id] = (label, score, trust_tier)
+        if trust_tier in trust_counts:
+            trust_counts[trust_tier] += 1
+
+    aligned = pseudo_labels.copy()
+    supervised_rows = 0
+    for idx, tax_code in enumerate(tax_codes):
+        resolved = label_by_tax_code.get(tax_code)
+        if resolved is None:
+            continue
+        aligned[idx] = resolved[0]
+        supervised_rows += 1
+
+    meta = {
+        "label_mode": "graph_supervision_blend",
+        "supervised_rows": int(supervised_rows),
+        "gold_count": int(trust_counts["gold"]),
+        "silver_count": int(trust_counts["silver"]),
+        "bronze_count": int(trust_counts["bronze"]),
+    }
+    return features, aligned, meta
+
+def train_model(db_url: str, seed: int = 42, min_samples: int = OSINT_MIN_TRAINING_SAMPLES, use_graph_labels: bool = True):
     print("=" * 60)
     print("  OSINT OFFSHORE RISK MODEL TRAINING")
     print("=" * 60)
@@ -223,8 +296,16 @@ def train_model(db_url: str, seed: int = 42, min_samples: int = OSINT_MIN_TRAINI
     
     print("\n[2/4] Engineering graph & financial features...")
     X, y, tax_codes = build_features(offshore_rows, link_rows, invoice_rows)
+    label_meta = {"label_mode": "pseudo_only", "gold_count": 0, "silver_count": 0, "bronze_count": 0}
+    if use_graph_labels:
+        try:
+            graph_label_rows = fetch_graph_labels(db_url)
+            X, y, label_meta = align_graph_supervision(X, y, tax_codes, graph_label_rows)
+        except Exception as exc:
+            print(f"      [WARN] graph_labels unavailable, continue with pseudo labels only: {exc}")
     print(f"      Feature Matrix: {X.shape}")
     print(f"      High Risk Label Distribution: {int(y.sum())} / {len(y)}")
+    print(f"      Label Mode: {label_meta['label_mode']}")
 
     required_samples = max(1, int(min_samples))
     if len(y) < required_samples:
@@ -293,6 +374,7 @@ def train_model(db_url: str, seed: int = 42, min_samples: int = OSINT_MIN_TRAINI
         "model_version": MODEL_VERSION,
         "model_type": model_type,
         "features": feature_names,
+        "label_meta": label_meta,
     }
     with open(MODEL_DIR / "osint_config.json", "w") as f:
         json.dump(config, f, indent=2)
@@ -332,7 +414,8 @@ def train_model(db_url: str, seed: int = 42, min_samples: int = OSINT_MIN_TRAINI
             "high_risk_ratio": round(float(y.sum() / len(y)), 4),
             "train_size": len(X_train),
             "test_size": len(X_test),
-        }
+        },
+        "label_meta": label_meta,
     }
     with open(MODEL_DIR / "osint_quality_report.json", "w") as f:
         json.dump(quality, f, indent=2)
@@ -358,10 +441,12 @@ if __name__ == "__main__":
     parser.add_argument("--db-url", default="default")
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--min-samples", type=int, default=OSINT_MIN_TRAINING_SAMPLES)
+    parser.add_argument("--use-graph-labels", action="store_true")
     args = parser.parse_args()
     
     train_model(
         args.db_url,
         seed=args.seed,
         min_samples=max(1, int(args.min_samples)),
+        use_graph_labels=bool(args.use_graph_labels),
     )

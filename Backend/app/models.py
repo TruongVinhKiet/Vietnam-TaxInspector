@@ -306,6 +306,88 @@ class ModelRegistry(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
+class MLExperiment(Base):
+    __tablename__ = "ml_experiments"
+
+    id = Column(Integer, primary_key=True, index=True)
+    experiment_key = Column(String(120), nullable=False, unique=True, index=True)
+    model_name = Column(String(80), nullable=False, index=True)
+    objective = Column(Text, nullable=True)
+    owner = Column(String(80), nullable=True)
+    status = Column(String(20), nullable=False, default="draft")
+    metadata_json = Column(JSON, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class DatasetVersion(Base):
+    __tablename__ = "dataset_versions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    dataset_key = Column(String(120), nullable=False, index=True)
+    dataset_version = Column(String(80), nullable=False, index=True)
+    entity_type = Column(String(30), nullable=True, index=True)
+    row_count = Column(Integer, nullable=True)
+    source_tables_json = Column(JSON, nullable=True)
+    filters_json = Column(JSON, nullable=True)
+    data_hash = Column(String(64), nullable=True, index=True)
+    created_by = Column(String(80), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class LabelVersion(Base):
+    __tablename__ = "label_versions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    label_key = Column(String(120), nullable=False, index=True)
+    label_version = Column(String(80), nullable=False, index=True)
+    entity_type = Column(String(30), nullable=True, index=True)
+    label_source = Column(String(80), nullable=True)
+    positive_count = Column(Integer, nullable=True)
+    negative_count = Column(Integer, nullable=True)
+    label_hash = Column(String(64), nullable=True, index=True)
+    notes = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class MLTrainingRun(Base):
+    __tablename__ = "ml_training_runs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    run_id = Column(String(120), nullable=False, unique=True, index=True)
+    experiment_id = Column(Integer, ForeignKey("ml_experiments.id", ondelete="SET NULL"), nullable=True, index=True)
+    model_name = Column(String(80), nullable=False, index=True)
+    model_version = Column(String(80), nullable=True, index=True)
+    dataset_version_id = Column(Integer, ForeignKey("dataset_versions.id", ondelete="SET NULL"), nullable=True, index=True)
+    label_version_id = Column(Integer, ForeignKey("label_versions.id", ondelete="SET NULL"), nullable=True, index=True)
+    feature_set_id = Column(Integer, ForeignKey("feature_sets.id", ondelete="SET NULL"), nullable=True, index=True)
+    status = Column(String(20), nullable=False, default="running")
+    seed = Column(Integer, nullable=True)
+    code_hash = Column(String(64), nullable=True)
+    hyperparams_json = Column(JSON, nullable=True)
+    metrics_json = Column(JSON, nullable=True)
+    artifacts_json = Column(JSON, nullable=True)
+    started_at = Column(DateTime(timezone=True), server_default=func.now())
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class DeploymentRollout(Base):
+    __tablename__ = "deployment_rollouts"
+
+    id = Column(Integer, primary_key=True, index=True)
+    model_name = Column(String(80), nullable=False, index=True)
+    model_version = Column(String(80), nullable=False, index=True)
+    environment = Column(String(30), nullable=False, default="staging")
+    rollout_type = Column(String(30), nullable=False, default="shadow")
+    status = Column(String(20), nullable=False, default="planned")
+    approved_by = Column(String(80), nullable=True)
+    rollout_notes = Column(Text, nullable=True)
+    rollout_metadata = Column(JSON, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
 class InferenceAuditLog(Base):
     __tablename__ = "inference_audit_logs"
 
@@ -554,6 +636,7 @@ class AuditSelectionPrediction(Base):
     expected_recovery = Column(Numeric(18, 2), nullable=True)
     expected_effort = Column(Float, nullable=True)
     priority_score = Column(Float, nullable=True)
+    fusion_score = Column(Float, nullable=True)
     reason_codes = Column(JSON, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
@@ -594,7 +677,24 @@ class NBAPrediction(Base):
     uplift_pp = Column(Float, nullable=True)
     expected_collection = Column(Numeric(18, 2), nullable=True)
     confidence = Column(String(20), nullable=True)
+    uncertainty_score = Column(Float, nullable=True)
+    ranked_actions = Column(JSON, nullable=True)
     reason_codes = Column(JSON, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class EntityRiskFusionPrediction(Base):
+    __tablename__ = "entity_risk_fusion_predictions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    tax_code = Column(String(20), ForeignKey("companies.tax_code", ondelete="CASCADE"), nullable=False, index=True)
+    as_of_date = Column(Date, nullable=False, index=True)
+    model_version = Column(String(80), nullable=True)
+    fusion_score = Column(Float, nullable=True)
+    risk_band = Column(String(20), nullable=True)
+    confidence = Column(Float, nullable=True)
+    component_scores = Column(JSON, nullable=True)
+    driver_summary = Column(JSON, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
@@ -629,10 +729,517 @@ class CaseTriagePrediction(Base):
     as_of_date = Column(Date, nullable=False, index=True)
     model_version = Column(String(80), nullable=True)
     priority_score = Column(Float, nullable=True)
+    confidence = Column(Float, nullable=True)
     urgency_level = Column(String(20), nullable=True)
     next_steps = Column(JSON, nullable=True)
     routing_team = Column(String(80), nullable=True)
     reason_codes = Column(JSON, nullable=True)
+    cohort_tags = Column(JSON, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class EvaluationSlice(Base):
+    __tablename__ = "evaluation_slices"
+
+    id = Column(Integer, primary_key=True, index=True)
+    model_name = Column(String(80), nullable=False, index=True)
+    model_version = Column(String(80), nullable=True, index=True)
+    slice_name = Column(String(80), nullable=False, index=True)
+    slice_value = Column(String(120), nullable=False, index=True)
+    metric_name = Column(String(80), nullable=False, index=True)
+    metric_value = Column(Float, nullable=True)
+    sample_size = Column(Integer, nullable=True)
+    window_start = Column(DateTime(timezone=True), nullable=True)
+    window_end = Column(DateTime(timezone=True), nullable=True)
+    details = Column(JSON, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class ChampionChallengerResult(Base):
+    __tablename__ = "champion_challenger_results"
+
+    id = Column(Integer, primary_key=True, index=True)
+    model_name = Column(String(80), nullable=False, index=True)
+    champion_version = Column(String(80), nullable=True)
+    challenger_version = Column(String(80), nullable=True)
+    decision = Column(String(30), nullable=True)
+    metric_summary = Column(JSON, nullable=True)
+    notes = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class CalibrationBin(Base):
+    __tablename__ = "calibration_bins"
+
+    id = Column(Integer, primary_key=True, index=True)
+    model_name = Column(String(80), nullable=False, index=True)
+    model_version = Column(String(80), nullable=True, index=True)
+    bin_label = Column(String(40), nullable=False)
+    lower_bound = Column(Float, nullable=True)
+    upper_bound = Column(Float, nullable=True)
+    predicted_mean = Column(Float, nullable=True)
+    observed_rate = Column(Float, nullable=True)
+    sample_size = Column(Integer, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class FeatureValidationRule(Base):
+    __tablename__ = "feature_validation_rules"
+
+    id = Column(Integer, primary_key=True, index=True)
+    feature_set_id = Column(Integer, ForeignKey("feature_sets.id", ondelete="CASCADE"), nullable=True, index=True)
+    feature_name = Column(String(120), nullable=False, index=True)
+    rule_type = Column(String(40), nullable=False)
+    rule_config = Column(JSON, nullable=True)
+    severity = Column(String(20), nullable=False, default="warning")
+    enabled = Column(Boolean, nullable=False, default=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class GraphNode(Base):
+    __tablename__ = "graph_nodes"
+
+    id = Column(Integer, primary_key=True, index=True)
+    node_id = Column(String(120), nullable=False, unique=True, index=True)
+    node_type = Column(String(40), nullable=False, index=True)
+    native_table = Column(String(80), nullable=True)
+    native_key = Column(String(120), nullable=True, index=True)
+    display_name = Column(String(255), nullable=True)
+    status = Column(String(30), nullable=True)
+    risk_score = Column(Float, nullable=True)
+    country_code = Column(String(40), nullable=True)
+    attributes_json = Column(JSON, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class GraphEdge(Base):
+    __tablename__ = "graph_edges"
+
+    id = Column(Integer, primary_key=True, index=True)
+    edge_id = Column(String(120), nullable=False, unique=True, index=True)
+    src_node_id = Column(String(120), nullable=False, index=True)
+    dst_node_id = Column(String(120), nullable=False, index=True)
+    edge_type = Column(String(40), nullable=False, index=True)
+    directed = Column(Boolean, nullable=False, default=True)
+    weight = Column(Float, nullable=True)
+    confidence = Column(Float, nullable=True)
+    valid_from = Column(DateTime(timezone=True), nullable=True)
+    valid_to = Column(DateTime(timezone=True), nullable=True)
+    observed_at = Column(DateTime(timezone=True), nullable=True)
+    attributes_json = Column(JSON, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class GraphEdgeEvidence(Base):
+    __tablename__ = "graph_edge_evidence"
+
+    id = Column(Integer, primary_key=True, index=True)
+    edge_id = Column(String(120), nullable=False, index=True)
+    source_type = Column(String(80), nullable=True)
+    source_ref = Column(String(160), nullable=True)
+    source_url = Column(String(400), nullable=True)
+    observed_at = Column(DateTime(timezone=True), nullable=True)
+    ingested_at = Column(DateTime(timezone=True), server_default=func.now())
+    extractor_version = Column(String(80), nullable=True)
+    confidence = Column(Float, nullable=True)
+    raw_payload_json = Column(JSON, nullable=True)
+
+
+class GraphSnapshot(Base):
+    __tablename__ = "graph_snapshots"
+
+    id = Column(Integer, primary_key=True, index=True)
+    snapshot_id = Column(String(120), nullable=False, unique=True, index=True)
+    graph_family = Column(String(80), nullable=False, index=True)
+    as_of_timestamp = Column(DateTime(timezone=True), nullable=False, index=True)
+    extraction_policy_json = Column(JSON, nullable=True)
+    seed_set_json = Column(JSON, nullable=True)
+    source_tables_json = Column(JSON, nullable=True)
+    resolution_ruleset_version = Column(String(80), nullable=True)
+    lineage_hash = Column(String(64), nullable=True, index=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class GraphSnapshotNode(Base):
+    __tablename__ = "graph_snapshot_nodes"
+
+    id = Column(Integer, primary_key=True, index=True)
+    snapshot_id = Column(String(120), nullable=False, index=True)
+    node_id = Column(String(120), nullable=False, index=True)
+    node_type = Column(String(40), nullable=False, index=True)
+    feature_payload = Column(JSON, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class GraphSnapshotEdge(Base):
+    __tablename__ = "graph_snapshot_edges"
+
+    id = Column(Integer, primary_key=True, index=True)
+    snapshot_id = Column(String(120), nullable=False, index=True)
+    edge_id = Column(String(120), nullable=False, index=True)
+    edge_type = Column(String(40), nullable=False, index=True)
+    src_node_id = Column(String(120), nullable=False, index=True)
+    dst_node_id = Column(String(120), nullable=False, index=True)
+    attributes_json = Column(JSON, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class GraphNodeVersion(Base):
+    __tablename__ = "graph_node_versions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    node_id = Column(String(120), nullable=False, index=True)
+    valid_from = Column(DateTime(timezone=True), nullable=False, index=True)
+    valid_to = Column(DateTime(timezone=True), nullable=True, index=True)
+    attributes_json = Column(JSON, nullable=True)
+    source_hash = Column(String(64), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class GraphLabel(Base):
+    __tablename__ = "graph_labels"
+
+    id = Column(Integer, primary_key=True, index=True)
+    entity_type = Column(String(30), nullable=False, index=True)
+    entity_id = Column(String(120), nullable=False, index=True)
+    label_name = Column(String(80), nullable=False, index=True)
+    label_value = Column(String(40), nullable=False)
+    trust_tier = Column(String(20), nullable=False, index=True)
+    label_source = Column(String(80), nullable=True)
+    annotator = Column(String(120), nullable=True)
+    confidence = Column(Float, nullable=True)
+    valid_from = Column(DateTime(timezone=True), nullable=True)
+    valid_to = Column(DateTime(timezone=True), nullable=True)
+    evidence_json = Column(JSON, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class GraphBenchmarkSpec(Base):
+    __tablename__ = "graph_benchmark_specs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    benchmark_key = Column(String(120), nullable=False, unique=True, index=True)
+    graph_family = Column(String(80), nullable=False, index=True)
+    baseline_models = Column(JSON, nullable=True)
+    split_strategy = Column(JSON, nullable=True)
+    metric_contract = Column(JSON, nullable=True)
+    slice_contract = Column(JSON, nullable=True)
+    promotion_gate = Column(JSON, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class KnowledgeDocument(Base):
+    __tablename__ = "knowledge_documents"
+
+    id = Column(Integer, primary_key=True, index=True)
+    document_key = Column(String(120), nullable=False, unique=True, index=True)
+    title = Column(String(400), nullable=False)
+    doc_type = Column(String(80), nullable=False, index=True)
+    authority = Column(String(200), nullable=True)
+    language_code = Column(String(10), nullable=False, default="vi")
+    effective_from = Column(Date, nullable=True)
+    effective_to = Column(Date, nullable=True)
+    status = Column(String(30), nullable=False, default="active")
+    source_uri = Column(String(500), nullable=True)
+    metadata_json = Column(JSON, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class KnowledgeDocumentVersion(Base):
+    __tablename__ = "knowledge_document_versions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    document_id = Column(Integer, ForeignKey("knowledge_documents.id", ondelete="CASCADE"), nullable=False, index=True)
+    version_tag = Column(String(80), nullable=False)
+    content_hash = Column(String(64), nullable=True)
+    raw_text = Column(Text, nullable=True)
+    parsed_json = Column(JSON, nullable=True)
+    ingestion_notes = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class KnowledgeChunk(Base):
+    __tablename__ = "knowledge_chunks"
+
+    id = Column(Integer, primary_key=True, index=True)
+    version_id = Column(Integer, ForeignKey("knowledge_document_versions.id", ondelete="CASCADE"), nullable=False, index=True)
+    chunk_key = Column(String(120), nullable=False, unique=True, index=True)
+    chunk_index = Column(Integer, nullable=False)
+    heading = Column(String(300), nullable=True)
+    chunk_text = Column(Text, nullable=False)
+    token_count = Column(Integer, nullable=True)
+    metadata_json = Column(JSON, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class KnowledgeCitation(Base):
+    __tablename__ = "knowledge_citations"
+
+    id = Column(Integer, primary_key=True, index=True)
+    chunk_id = Column(Integer, ForeignKey("knowledge_chunks.id", ondelete="CASCADE"), nullable=False, index=True)
+    citation_key = Column(String(140), nullable=False, unique=True, index=True)
+    legal_reference = Column(String(300), nullable=True)
+    citation_text = Column(Text, nullable=True)
+    confidence = Column(Float, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class KnowledgeChunkEmbedding(Base):
+    __tablename__ = "knowledge_chunk_embeddings"
+
+    id = Column(Integer, primary_key=True, index=True)
+    chunk_id = Column(Integer, ForeignKey("knowledge_chunks.id", ondelete="CASCADE"), nullable=False, unique=True, index=True)
+    embedding_model = Column(String(80), nullable=False)
+    embedding_dim = Column(Integer, nullable=False)
+    embedding_json = Column(JSON, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class RetrievalLog(Base):
+    __tablename__ = "retrieval_logs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    request_id = Column(String(120), nullable=True, index=True)
+    session_id = Column(String(120), nullable=True, index=True)
+    query_text = Column(Text, nullable=False)
+    query_hash = Column(String(64), nullable=True)
+    intent = Column(String(80), nullable=True, index=True)
+    entity_scope = Column(JSON, nullable=True)
+    retrieved_chunks = Column(JSON, nullable=True)
+    retrieval_scores = Column(JSON, nullable=True)
+    top_k = Column(Integer, nullable=False, default=5)
+    latency_ms = Column(Float, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class AgentSession(Base):
+    __tablename__ = "agent_sessions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    session_id = Column(String(120), nullable=False, unique=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    channel = Column(String(40), nullable=False, default="chat")
+    status = Column(String(30), nullable=False, default="active")
+    started_at = Column(DateTime(timezone=True), server_default=func.now())
+    ended_at = Column(DateTime(timezone=True), nullable=True)
+    metadata_json = Column(JSON, nullable=True)
+
+
+class AgentTurn(Base):
+    __tablename__ = "agent_turns"
+
+    id = Column(Integer, primary_key=True, index=True)
+    session_id = Column(String(120), ForeignKey("agent_sessions.session_id", ondelete="CASCADE"), nullable=False, index=True)
+    turn_index = Column(Integer, nullable=False)
+    role = Column(String(20), nullable=False)
+    message_text = Column(Text, nullable=False)
+    normalized_intent = Column(String(80), nullable=True, index=True)
+    confidence = Column(Float, nullable=True)
+    citations_json = Column(JSON, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class AgentToolCall(Base):
+    __tablename__ = "agent_tool_calls"
+
+    id = Column(Integer, primary_key=True, index=True)
+    session_id = Column(String(120), ForeignKey("agent_sessions.session_id", ondelete="CASCADE"), nullable=False, index=True)
+    turn_id = Column(Integer, ForeignKey("agent_turns.id", ondelete="SET NULL"), nullable=True, index=True)
+    tool_name = Column(String(120), nullable=False, index=True)
+    tool_input = Column(JSON, nullable=True)
+    tool_output = Column(JSON, nullable=True)
+    status = Column(String(20), nullable=False, default="ok")
+    latency_ms = Column(Float, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class PolicyRule(Base):
+    __tablename__ = "policy_rules"
+
+    id = Column(Integer, primary_key=True, index=True)
+    rule_key = Column(String(120), nullable=False, unique=True, index=True)
+    rule_name = Column(String(200), nullable=False)
+    rule_type = Column(String(80), nullable=False, index=True)
+    severity = Column(String(20), nullable=False, default="warning")
+    enabled = Column(Boolean, nullable=False, default=True)
+    config_json = Column(JSON, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class PolicyExecutionLog(Base):
+    __tablename__ = "policy_execution_logs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    session_id = Column(String(120), nullable=True, index=True)
+    turn_id = Column(Integer, ForeignKey("agent_turns.id", ondelete="SET NULL"), nullable=True, index=True)
+    rule_key = Column(String(120), nullable=True, index=True)
+    decision = Column(String(40), nullable=False)
+    reason = Column(Text, nullable=True)
+    score = Column(Float, nullable=True)
+    payload_json = Column(JSON, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class AgentDecisionTrace(Base):
+    __tablename__ = "agent_decision_traces"
+
+    id = Column(Integer, primary_key=True, index=True)
+    session_id = Column(String(120), ForeignKey("agent_sessions.session_id", ondelete="CASCADE"), nullable=False, index=True)
+    turn_id = Column(Integer, ForeignKey("agent_turns.id", ondelete="SET NULL"), nullable=True, index=True)
+    intent = Column(String(80), nullable=True, index=True)
+    selected_track = Column(String(80), nullable=True, index=True)
+    confidence = Column(Float, nullable=True)
+    abstained = Column(Boolean, nullable=False, default=False)
+    escalation_required = Column(Boolean, nullable=False, default=False)
+    evidence_json = Column(JSON, nullable=True)
+    answer_text = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class AgentFeedbackEvent(Base):
+    __tablename__ = "agent_feedback_events"
+
+    id = Column(Integer, primary_key=True, index=True)
+    session_id = Column(String(120), ForeignKey("agent_sessions.session_id", ondelete="CASCADE"), nullable=False, index=True)
+    turn_id = Column(Integer, ForeignKey("agent_turns.id", ondelete="SET NULL"), nullable=True, index=True)
+    feedback_type = Column(String(60), nullable=False, index=True)
+    rating = Column(Float, nullable=True)
+    notes = Column(Text, nullable=True)
+    actor = Column(String(80), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class AgentEvalSuite(Base):
+    __tablename__ = "agent_eval_suites"
+
+    id = Column(Integer, primary_key=True, index=True)
+    suite_key = Column(String(120), nullable=False, unique=True, index=True)
+    description = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class AgentEvalRun(Base):
+    __tablename__ = "agent_eval_runs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    suite_id = Column(Integer, ForeignKey("agent_eval_suites.id", ondelete="CASCADE"), nullable=False, index=True)
+    run_key = Column(String(120), nullable=False, unique=True, index=True)
+    model_version = Column(String(80), nullable=True, index=True)
+    metrics_json = Column(JSON, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class PromptRegistry(Base):
+    __tablename__ = "prompt_registry"
+
+    id = Column(Integer, primary_key=True, index=True)
+    prompt_key = Column(String(120), nullable=False, unique=True, index=True)
+    description = Column(Text, nullable=True)
+    owner = Column(String(80), nullable=True)
+    current_version = Column(String(80), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class PromptVersion(Base):
+    __tablename__ = "prompt_versions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    prompt_id = Column(Integer, ForeignKey("prompt_registry.id", ondelete="CASCADE"), nullable=False, index=True)
+    version_tag = Column(String(80), nullable=False, index=True)
+    template_text = Column(Text, nullable=False)
+    variables_json = Column(JSON, nullable=False, default={})
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class PromptRollout(Base):
+    __tablename__ = "prompt_rollouts"
+
+    id = Column(Integer, primary_key=True, index=True)
+    prompt_key = Column(String(120), nullable=False, index=True)
+    version_tag = Column(String(80), nullable=False)
+    environment = Column(String(40), nullable=False, default="staging")
+    traffic_pct = Column(Float, nullable=False, default=1.0)
+    status = Column(String(30), nullable=False, default="planned")
+    notes = Column(Text, nullable=True)
+    metadata_json = Column(JSON, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class PolicyRuleVersion(Base):
+    __tablename__ = "policy_rule_versions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    rule_key = Column(String(120), nullable=False, index=True)
+    version_tag = Column(String(80), nullable=False, index=True)
+    config_json = Column(JSON, nullable=False, default={})
+    changed_by = Column(String(80), nullable=True)
+    approved_by = Column(String(80), nullable=True)
+    effective_from = Column(DateTime(timezone=True), server_default=func.now())
+    effective_to = Column(DateTime(timezone=True), nullable=True)
+    change_reason = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class ToolExecutionOutcome(Base):
+    __tablename__ = "tool_execution_outcomes"
+
+    id = Column(Integer, primary_key=True, index=True)
+    tool_call_id = Column(Integer, ForeignKey("agent_tool_calls.id", ondelete="CASCADE"), nullable=False, index=True)
+    outcome_type = Column(String(40), nullable=False, index=True)
+    error_class = Column(String(120), nullable=True)
+    retry_count = Column(Integer, nullable=False, default=0)
+    side_effect_level = Column(String(30), nullable=False, default="none")
+    metadata_json = Column(JSON, nullable=True)
+    finalized_at = Column(DateTime(timezone=True), server_default=func.now())
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class AdjudicationCase(Base):
+    __tablename__ = "adjudication_cases"
+
+    id = Column(Integer, primary_key=True, index=True)
+    entity_type = Column(String(40), nullable=False, index=True)
+    entity_id = Column(String(120), nullable=False, index=True)
+    model_name = Column(String(80), nullable=True, index=True)
+    model_version = Column(String(80), nullable=True, index=True)
+    model_label = Column(String(80), nullable=True)
+    human_label = Column(String(80), nullable=True)
+    final_label = Column(String(80), nullable=True)
+    status = Column(String(30), nullable=False, default="open", index=True)
+    resolver_user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    dispute_reason = Column(Text, nullable=True)
+    resolution_notes = Column(Text, nullable=True)
+    resolved_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class RedTeamScenario(Base):
+    __tablename__ = "redteam_scenarios"
+
+    id = Column(Integer, primary_key=True, index=True)
+    scenario_key = Column(String(120), nullable=False, unique=True, index=True)
+    taxonomy = Column(String(80), nullable=False, index=True)
+    prompt_text = Column(Text, nullable=False)
+    expected_guardrail = Column(String(120), nullable=True)
+    severity = Column(String(20), nullable=False, default="medium")
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class RedTeamRunResult(Base):
+    __tablename__ = "redteam_run_results"
+
+    id = Column(Integer, primary_key=True, index=True)
+    run_key = Column(String(120), nullable=False, index=True)
+    scenario_id = Column(Integer, ForeignKey("redteam_scenarios.id", ondelete="CASCADE"), nullable=False, index=True)
+    model_name = Column(String(80), nullable=False, index=True)
+    model_version = Column(String(80), nullable=True, index=True)
+    outcome = Column(String(40), nullable=False, index=True)
+    severity = Column(String(20), nullable=True)
+    trace_json = Column(JSON, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 

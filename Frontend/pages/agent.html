@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Trợ lý AI Đa Năng - TaxInspector</title>
+    <!-- Tailwind CSS (via CDN for consistency with existing project) -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="../assets/css/agent.css">
+</head>
+<body class="bg-slate-50 text-slate-800 font-sans h-screen flex flex-col overflow-hidden m-0 p-0">
+
+    <!-- Top Navigation -->
+    <header class="h-16 bg-white/80 backdrop-blur-md border-b border-slate-200 flex items-center justify-between px-6 z-10 sticky top-0 shadow-sm flex-shrink-0">
+        <div class="flex items-center gap-4">
+            <button id="backToDashBtn" class="w-10 h-10 rounded-full hover:bg-slate-100 flex items-center justify-center text-slate-600 transition-colors" title="Quay lại Dashboard">
+                <i class="fa-solid fa-arrow-left text-lg"></i>
+            </button>
+            <div class="flex items-center gap-3">
+                <div class="w-10 h-10 rounded-full overflow-hidden border-2 border-sky-100 shadow-sm relative">
+                    <img src="../assets/img/ai_avatar.png" alt="AI Agent Avatar" class="w-full h-full object-cover">
+                    <!-- Online indicator -->
+                    <div class="absolute bottom-0 right-0 w-3 h-3 bg-green-500 rounded-full border-2 border-white"></div>
+                </div>
+                <div>
+                    <h1 class="text-sm font-bold text-slate-800">Trợ lý Phân tích Thuế AI</h1>
+                    <div class="text-xs text-green-600 font-medium flex items-center gap-1">
+                        <span class="relative flex h-2 w-2">
+                          <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
+                          <span class="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span>
+                        </span>
+                        Hệ thống Multi-Agent đang trực
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Agent Status Indicators & Settings -->
+        <div class="flex items-center gap-3 text-xs font-semibold text-slate-500">
+            <div id="status-legal" class="px-3 py-1.5 rounded-full bg-slate-100 border border-slate-200 flex items-center gap-2 transition-colors">
+                <i class="fa-solid fa-scale-balanced"></i> Pháp lý
+            </div>
+            <div id="status-analytics" class="px-3 py-1.5 rounded-full bg-slate-100 border border-slate-200 flex items-center gap-2 transition-colors">
+                <i class="fa-solid fa-chart-line"></i> Phân tích
+            </div>
+            <div id="status-investigation" class="px-3 py-1.5 rounded-full bg-slate-100 border border-slate-200 flex items-center gap-2 transition-colors hidden md:flex">
+                <i class="fa-solid fa-magnifying-glass"></i> Không gian Mạng
+            </div>
+            <button id="themeSettingsBtn" class="ml-2 w-9 h-9 rounded-full bg-slate-100 hover:bg-slate-200 flex items-center justify-center text-slate-600 transition-colors" title="Trang phục AI">
+                <i class="fa-solid fa-shirt"></i>
+            </button>
+        </div>
+    </header>
+
+    <!-- Main Chat Workspace -->
+    <main class="flex-1 flex overflow-hidden relative">
+        <div class="flex-1 max-w-7xl mx-auto w-full flex flex-col pt-4">
+            
+            <!-- Chat Feed -->
+            <div id="chatFeed" class="flex-1 overflow-y-auto px-4 pb-32 space-y-6 scroll-smooth">
+                <!-- Welcome Message -->
+                <div class="flex flex-col items-center justify-center h-full text-center space-y-4 opacity-50 transition-opacity" id="emptyState">
+                    <img src="../assets/img/ai_avatar.png" id="emptyStateAvatar" alt="AI Agent" class="w-32 h-32 rounded-full shadow-xl opacity-80 mix-blend-multiply">
+                    <h2 class="text-2xl font-bold text-slate-700">Xin chào! Tôi có thể giúp gì cho ngài?</h2>
+                    <p class="text-slate-500 max-w-md">Tôi là Hệ thống Multi-Agent của TaxInspector. Tôi có thể phân tích báo cáo rủi ro, dò tìm mạng lưới gian lận, và đối chiếu cơ sở pháp lý.</p>
+                </div>
+            </div>
+            
+        </div>
+        
+        <!-- Background Audio Visualizer Overlay (hidden mostly, active during mic voice) -->
+        <div id="audioVisualizer" class="pointer-events-none absolute inset-0 flex items-center justify-center opacity-0 transition-opacity duration-300 z-0">
+            <!-- Render dynamic waves here -->
+            <div class="flex items-center gap-2">
+                <div class="wave wave-1"></div>
+                <div class="wave wave-2"></div>
+                <div class="wave wave-3"></div>
+                <div class="wave wave-4"></div>
+                <div class="wave wave-5"></div>
+            </div>
+        </div>
+    </main>
+
+    <!-- Input Bar Fixed at Bottom -->
+    <div class="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-slate-50 via-slate-50 to-transparent p-6 z-20">
+        <div class="max-w-4xl mx-auto relative rounded-2xl bg-white shadow-[0_8px_30px_rgb(0,0,0,0.08)] border border-slate-200 flex items-end p-2 transition-shadow focus-within:shadow-[0_8px_40px_rgba(14,165,233,0.15)] focus-within:border-sky-300">
+            <button id="attachmentBtn" class="p-3 text-slate-400 hover:text-sky-600 transition-colors" title="Đính kèm tài liệu">
+                <i class="fa-solid fa-paperclip text-lg"></i>
+            </button>
+            
+            <textarea id="chatInput" rows="1" placeholder="Nhập yêu cầu phân tích thuế hoặc MST doanh nghiệp..." class="flex-1 max-h-32 min-h-[48px] bg-transparent border-none focus:ring-0 resize-none py-3 px-2 text-slate-700 placeholder-slate-400 leading-relaxed"></textarea>
+            
+            <div class="flex items-center gap-2 p-1">
+                <button id="micBtn" class="w-12 h-12 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-600 flex items-center justify-center transition-all relative">
+                    <i class="fa-solid fa-microphone text-lg"></i>
+                    <!-- Mic recording pulse -->
+                    <div class="absolute inset-0 rounded-full border-2 border-red-500 scale-150 opacity-0 transition-opacity pointer-events-none" id="micPulse"></div>
+                </button>
+                <button id="sendBtn" class="w-12 h-12 rounded-xl bg-[#0F172A] hover:bg-slate-800 text-white flex items-center justify-center shadow-md transition-transform hover:scale-105 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed">
+                    <i class="fa-solid fa-paper-plane"></i>
+                </button>
+            </div>
+        </div>
+        <div class="text-center mt-2">
+            <span class="text-[11px] text-slate-400">Agent có thể mắc lỗi. Vui lòng kiểm chứng lại các điều khoản luật quan trọng.</span>
+        </div>
+    </div>
+
+    <!-- Wardrobe Theme Modal -->
+    <div id="wardrobeModal" class="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-[100] hidden flex items-center justify-center opacity-0 transition-opacity duration-300">
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-2xl overflow-hidden transform scale-95 transition-transform duration-300" id="wardrobeModalContent">
+            <div class="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
+                <div>
+                    <h3 class="text-lg font-bold text-slate-800">Tủ đồ Trợ lý AI</h3>
+                    <p class="text-sm text-slate-500">Thay đổi phong cách hiển thị của trợ lý.</p>
+                </div>
+                <button id="closeWardrobeBtn" class="text-slate-400 hover:text-slate-700 transition-colors w-8 h-8 flex items-center justify-center rounded-full hover:bg-slate-100">
+                    <i class="fa-solid fa-xmark"></i>
+                </button>
+            </div>
+            <div class="p-6">
+                <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+                    <!-- Option 1 -->
+                    <div class="theme-option cursor-pointer group" data-theme="ai_avatar.png">
+                        <div class="rounded-xl overflow-hidden border-2 border-transparent group-hover:border-sky-400 transition-all aspect-square relative shadow-sm">
+                            <img src="../assets/img/ai_avatar.png" alt="Công sở" class="w-full h-full object-cover">
+                            <div class="absolute inset-0 bg-black/20 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                                <i class="fa-solid fa-check text-white text-2xl hidden checkmark"></i>
+                            </div>
+                        </div>
+                        <p class="text-center text-sm font-semibold text-slate-700 mt-2">Pháp lý (Gốc)</p>
+                    </div>
+                    <!-- Option 2 -->
+                    <div class="theme-option cursor-pointer group" data-theme="avatar_satin.png">
+                        <div class="rounded-xl overflow-hidden border-2 border-transparent group-hover:border-sky-400 transition-all aspect-square relative shadow-sm">
+                            <img src="../assets/img/avatar_satin.png" alt="Satin" class="w-full h-full object-cover">
+                            <div class="absolute inset-0 bg-black/20 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                                <i class="fa-solid fa-check text-white text-2xl hidden checkmark"></i>
+                            </div>
+                        </div>
+                        <p class="text-center text-sm font-semibold text-slate-700 mt-2">Lụa Satin</p>
+                    </div>
+                    <!-- Option 3 -->
+                    <div class="theme-option cursor-pointer group" data-theme="avatar_qipao.png">
+                        <div class="rounded-xl overflow-hidden border-2 border-transparent group-hover:border-sky-400 transition-all aspect-square relative shadow-sm">
+                            <img src="../assets/img/avatar_qipao.png" alt="Sườn xám" class="w-full h-full object-cover">
+                            <div class="absolute inset-0 bg-black/20 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                                <i class="fa-solid fa-check text-white text-2xl hidden checkmark"></i>
+                            </div>
+                        </div>
+                        <p class="text-center text-sm font-semibold text-slate-700 mt-2">Sườn xám</p>
+                    </div>
+                    <!-- Option 4 -->
+                    <div class="theme-option cursor-pointer group" data-theme="avatar_maid.png">
+                        <div class="rounded-xl overflow-hidden border-2 border-transparent group-hover:border-sky-400 transition-all aspect-square relative shadow-sm">
+                            <img src="../assets/img/avatar_maid.png" alt="Hầu gái" class="w-full h-full object-cover">
+                            <div class="absolute inset-0 bg-black/20 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                                <i class="fa-solid fa-check text-white text-2xl hidden checkmark"></i>
+                            </div>
+                        </div>
+                        <p class="text-center text-sm font-semibold text-slate-700 mt-2">Hầu gái</p>
+                    </div>
+                </div>
+            </div>
+            <div class="px-6 py-4 bg-slate-50 border-t border-slate-100 text-right">
+                <button id="applyThemeBtn" class="px-6 py-2 bg-[#0F172A] hover:bg-slate-800 text-white rounded-lg font-medium transition-colors shadow-sm disabled:opacity-50 disabled:cursor-not-allowed">Lưu Trang Phục</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="../js/agent_ui.js" type="module"></script>
+</body>
+</html>

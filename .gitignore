@@ -108,6 +108,7 @@ Database/*.sqlite
 
 # Frontend
 Frontend/node_modules/
+Frontend/assets/
 
 # IDEs
 .vscode/

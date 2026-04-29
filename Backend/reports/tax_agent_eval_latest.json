@@ -1,0 +1,104 @@
+{
+  "records": [
+    {
+      "case_id": "vat_refund_risk_2",
+      "expected_intent": "vat_refund_risk",
+      "intent": "vat_refund_risk",
+      "intent_confidence": 0.95,
+      "hits": 3,
+      "min_hits": 2,
+      "abstained": false,
+      "escalation_required": false,
+      "retrieval_latency_ms": 7.439,
+      "top_chunk_key": "kb_vat_basics:v1:0"
+    },
+    {
+      "case_id": "invoice_risk_2",
+      "expected_intent": "invoice_risk",
+      "intent": "invoice_risk",
+      "intent_confidence": 0.95,
+      "hits": 3,
+      "min_hits": 2,
+      "abstained": false,
+      "escalation_required": false,
+      "retrieval_latency_ms": 1.748,
+      "top_chunk_key": "kb_vat_basics:v1:0"
+    },
+    {
+      "case_id": "delinquency_2",
+      "expected_intent": "delinquency",
+      "intent": "delinquency",
+      "intent_confidence": 0.95,
+      "hits": 3,
+      "min_hits": 2,
+      "abstained": false,
+      "escalation_required": false,
+      "retrieval_latency_ms": 1.308,
+      "top_chunk_key": "kb_collections_basics:v1:0"
+    },
+    {
+      "case_id": "osint_ownership_2",
+      "expected_intent": "osint_ownership",
+      "intent": "osint_ownership",
+      "intent_confidence": 0.95,
+      "hits": 3,
+      "min_hits": 2,
+      "abstained": false,
+      "escalation_required": false,
+      "retrieval_latency_ms": 1.264,
+      "top_chunk_key": "kb_vat_basics:v1:0"
+    },
+    {
+      "case_id": "transfer_pricing_2",
+      "expected_intent": "transfer_pricing",
+      "intent": "transfer_pricing",
+      "intent_confidence": 0.95,
+      "hits": 3,
+      "min_hits": 2,
+      "abstained": false,
+      "escalation_required": false,
+      "retrieval_latency_ms": 1.909,
+      "top_chunk_key": "kb_transfer_pricing_basics:v1:0"
+    },
+    {
+      "case_id": "audit_selection_2",
+      "expected_intent": "audit_selection",
+      "intent": "audit_selection",
+      "intent_confidence": 0.95,
+      "hits": 3,
+      "min_hits": 2,
+      "abstained": false,
+      "escalation_required": false,
+      "retrieval_latency_ms": 2.579,
+      "top_chunk_key": "kb_vat_basics:v1:0"
+    },
+    {
+      "case_id": "general_tax_query_2",
+      "expected_intent": "general_tax_query",
+      "intent": "general_tax_query",
+      "intent_confidence": 0.95,
+      "hits": 3,
+      "min_hits": 1,
+      "abstained": false,
+      "escalation_required": false,
+      "retrieval_latency_ms": 1.247,
+      "top_chunk_key": "kb_vat_basics:v1:0"
+    }
+  ],
+  "metrics": {
+    "offline.intent_accuracy": 1.0,
+    "offline.abstain_rate": 0.0,
+    "offline.escalation_rate": 0.0,
+    "offline.retrieval_hit_rate": 1.0,
+    "offline.citation_rate": 1.0,
+    "offline.retrieval_latency_p95_ms": 5.981,
+    "offline.sample_size": 7,
+    "online.sample_size": 49,
+    "online.retrieval_hit_rate_ge2": 0.8571,
+    "online.retrieval_latency_p95_ms": 10.295,
+    "suite_key": "tax_agent_core_v1",
+    "run_key": "tax_agent_core_v1-20260428154428",
+    "model_version": "tax-agent-v1",
+    "generated_at": "2026-04-28T15:44:30Z"
+  }
+}

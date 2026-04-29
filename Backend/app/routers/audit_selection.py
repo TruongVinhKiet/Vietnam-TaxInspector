@@ -17,9 +17,17 @@ def get_audit_shortlist(
 ):
     rows = db.execute(
         text(
-            "SELECT tax_code, expected_recovery, expected_effort, priority_score, prob_recovery "
-            "FROM audit_selection_predictions "
-            "ORDER BY priority_score DESC NULLS LAST LIMIT :limit"
+            "SELECT a.tax_code, a.expected_recovery, a.expected_effort, a.priority_score, a.prob_recovery, "
+            "a.fusion_score, f.risk_band, f.confidence "
+            "FROM audit_selection_predictions a "
+            "LEFT JOIN LATERAL ("
+            "    SELECT risk_band, confidence "
+            "    FROM entity_risk_fusion_predictions "
+            "    WHERE tax_code = a.tax_code "
+            "    ORDER BY as_of_date DESC, created_at DESC "
+            "    LIMIT 1"
+            ") f ON TRUE "
+            "ORDER BY a.priority_score DESC NULLS LAST LIMIT :limit"
         ),
         {"limit": limit},
     ).mappings().all()
