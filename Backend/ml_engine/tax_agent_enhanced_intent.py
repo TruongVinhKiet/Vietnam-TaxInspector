@@ -124,6 +124,40 @@ INTENT_DEFINITIONS: dict[str, dict[str, Any]] = {
         ],
         "keywords": ["thanh tra", "audit", "kiểm tra", "xếp hạng hồ sơ", "lựa chọn"],
     },
+    "top_n_query": {
+        "description": "Truy vấn top N doanh nghiệp theo tiêu chí rủi ro",
+        "exemplars": [
+            "cho tôi 10 doanh nghiệp rủi ro cao nhất",
+            "top 5 công ty có điểm gian lận cao nhất",
+            "danh sách 20 doanh nghiệp nợ thuế nhiều nhất",
+            "liệt kê 15 doanh nghiệp cần thanh tra gấp",
+            "xếp hạng doanh nghiệp theo mức rủi ro",
+            "những doanh nghiệp nào có rủi ro cao nhất",
+        ],
+        "keywords": ["top", "danh sách", "liệt kê", "cao nhất", "nhiều nhất", "xếp hạng", "bao nhiêu doanh nghiệp"],
+    },
+    "company_name_lookup": {
+        "description": "Tra cứu doanh nghiệp theo tên công ty",
+        "exemplars": [
+            "phân tích công ty TNHH ABC",
+            "thông tin doanh nghiệp Vinamilk",
+            "kiểm tra công ty cổ phần XYZ",
+            "tìm doanh nghiệp tên là ABC",
+            "cho tôi thông tin về công ty Hòa Phát",
+        ],
+        "keywords": ["công ty", "doanh nghiệp", "CT TNHH", "CT CP", "tìm", "tên là"],
+    },
+    "batch_analysis": {
+        "description": "Phân tích lô dữ liệu từ file CSV hoặc danh sách",
+        "exemplars": [
+            "phân tích rủi ro danh sách tôi gửi",
+            "chấm điểm gian lận file này",
+            "đánh giá rủi ro cho file CSV",
+            "phân tích lô doanh nghiệp từ file",
+            "xử lý file dữ liệu tôi upload",
+        ],
+        "keywords": ["file", "csv", "danh sách", "lô", "batch", "upload", "gửi file"],
+    },
     "general_tax_query": {
         "description": "Câu hỏi chung về thuế, quy định, thủ tục",
         "exemplars": [
@@ -430,17 +464,43 @@ class EnhancedIntentClassifier:
 
         # Company name patterns (common Vietnamese company prefixes)
         company_patterns = [
-            r"(?:công ty|CT)\s+(?:TNHH|CP|cổ phần|trách nhiệm)\s+([A-ZĐÀ-Ỹa-zà-ỹ\s]{3,30})",
-            r"(?:DN|doanh nghiệp)\s+([A-ZĐÀ-Ỹa-zà-ỹ\s]{3,30})",
+            r"(?:công ty|CT)\s+(?:TNHH|CP|cổ phần|trách nhiệm)\s+([A-ZĐÀ-Ỹa-zà-ỹ\s]{3,40})",
+            r"(?:DN|doanh nghiệp)\s+([A-ZĐÀ-Ỹa-zà-ỹ\s]{3,40})",
+            r"(?:công ty|CT)\s+([A-ZĐÀ-Ỹ][A-ZĐÀ-Ỹa-zà-ỹ\s]{2,40})",
+            r"(?:về|của|tên là|tên)\s+([A-ZĐÀ-Ỹ][A-ZĐÀ-Ỹa-zà-ỹ\s]{2,30}?)(?:\s*$|\s*\?)",
         ]
         for pattern in company_patterns:
             for match in re.finditer(pattern, query, re.IGNORECASE):
-                entities.append({
-                    "type": "company_name",
-                    "value": match.group(1).strip() if match.lastindex else match.group(0).strip(),
-                    "start": match.start(),
-                    "end": match.end(),
-                })
+                name_val = (match.group(1).strip() if match.lastindex else match.group(0).strip())
+                # Filter out common false positives
+                if name_val.lower() not in ("thuế", "rủi ro", "gian lận", "nợ", "phân tích"):
+                    entities.append({
+                        "type": "company_name",
+                        "value": name_val,
+                        "start": match.start(),
+                        "end": match.end(),
+                    })
+                    break  # take first match only
+
+        # Quantity extraction: "top 10", "cho tôi 5", "liệt kê 20"
+        quantity_patterns = [
+            r"(?:top|cho tôi|liệt kê|lấy|xem)\s+(\d{1,3})\b",
+            r"(\d{1,3})\s+(?:doanh nghiệp|công ty|DN|CT|hồ sơ)",
+        ]
+        for pattern in quantity_patterns:
+            for match in re.finditer(pattern, query, re.IGNORECASE):
+                val = int(match.group(1))
+                if 1 <= val <= 200:
+                    entities.append({
+                        "type": "quantity",
+                        "value": str(val),
+                        "start": match.start(),
+                        "end": match.end(),
+                    })
+                    break
+            else:
+                continue
+            break
 
         # Legal document references
         doc_patterns = [

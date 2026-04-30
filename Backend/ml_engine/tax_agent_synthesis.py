@@ -100,6 +100,18 @@ class TaxAgentSynthesizer:
             "summary_prefix": "Đánh giá ưu tiên thanh tra",
             "section_header": "Xếp hạng rủi ro thanh tra",
         },
+        "top_n_query": {
+            "summary_prefix": "Danh sách doanh nghiệp rủi ro",
+            "section_header": "Kết quả xếp hạng rủi ro",
+        },
+        "company_name_lookup": {
+            "summary_prefix": "Kết quả tra cứu doanh nghiệp",
+            "section_header": "Thông tin doanh nghiệp tìm thấy",
+        },
+        "batch_analysis": {
+            "summary_prefix": "Kết quả phân tích lô",
+            "section_header": "Tổng hợp phân tích batch",
+        },
         "general_tax_query": {
             "summary_prefix": "Tra cứu quy định thuế",
             "section_header": "Căn cứ pháp lý",

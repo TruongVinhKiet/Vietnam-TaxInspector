@@ -23,10 +23,11 @@ import json
 import re
 import time
 import uuid
+from enum import Enum
 from typing import Any
 
 import numpy as np
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import text
@@ -61,14 +62,28 @@ INTENT_RULES = {
 
 
 # ═══════════════════════════════════════════════════════════════════════
+#  Model Modes (Claude-style analysis mode selector)
+# ═══════════════════════════════════════════════════════════════════════
+
+class ModelMode(str, Enum):
+    """Analysis mode selector — each mode activates a different tool/signal profile."""
+    FRAUD = "fraud"              # Gian lận thuế (XGBoost + GNN + VAE)
+    VAT = "vat"                  # Hoàn thuế VAT + Invoice Risk
+    DELINQUENCY = "delinquency"  # Dự báo nợ động (Transformer + Delinquency)
+    MACRO = "macro"              # Mô phỏng vĩ mô (Macro Hypothesis)
+    FULL = "full"                # Toàn diện (all tools)
+
+
+# ═══════════════════════════════════════════════════════════════════════
 #  Request / Response Models
 # ═══════════════════════════════════════════════════════════════════════
 
 class ChatRequest(BaseModel):
     session_id: str | None = None
     user_id: int | None = None
-    message: str = Field(..., min_length=4, max_length=6000)
+    message: str = Field(..., min_length=1, max_length=12000)
     top_k: int = Field(5, ge=1, le=20)
+    model_mode: ModelMode = ModelMode.FULL
 
 
 class ChatResponse(BaseModel):
@@ -116,6 +131,10 @@ class ChatResponseV2(BaseModel):
     # Traces
     policy_traces: list[dict[str, Any]]
     tool_results: dict[str, dict[str, Any]]
+    # Visualization data for frontend charts
+    visualization_data: dict[str, Any] = {}
+    # Model mode used for this response
+    model_mode: str = "full"
 
 
 class AgentStatus(BaseModel):
@@ -587,8 +606,115 @@ def chat_tax_agent_v2(payload: ChatRequest, db: Session = Depends(get_db)):
         message=payload.message,
         user_id=payload.user_id,
         top_k=payload.top_k,
+        model_mode=payload.model_mode.value,
     )
 
+    return _build_v2_response(orch_response, model_mode=payload.model_mode.value)
+
+
+@router.post("/chat/v2/with-file")
+async def chat_with_file(
+    message: str = Form(..., min_length=1, max_length=12000),
+    session_id: str = Form(None),
+    model_mode: str = Form("full"),
+    user_id: int = Form(None),
+    file: UploadFile = File(None),
+    db: Session = Depends(get_db),
+):
+    """
+    V2 chat endpoint with optional CSV file attachment.
+    If a CSV file is attached, triggers inline batch analysis and merges results.
+    """
+    session_id = session_id or f"sess-{uuid.uuid4().hex[:10]}"
+    resolved_mode = model_mode if model_mode in ("fraud", "vat", "delinquency", "macro", "full") else "full"
+
+    from ml_engine.tax_agent_orchestrator import get_orchestrator
+
+    orchestrator = get_orchestrator()
+
+    # If file is attached, handle batch analysis inline
+    csv_results = None
+    if file and file.filename and file.filename.lower().endswith(".csv"):
+        content = await file.read()
+        file_size_mb = len(content) / (1024 * 1024)
+        if file_size_mb > 100:
+            raise HTTPException(status_code=400, detail="File quá lớn (tối đa 100MB cho chat inline)")
+        csv_results = {
+            "filename": file.filename,
+            "content": content,
+            "size_mb": round(file_size_mb, 2),
+        }
+
+    orch_response = orchestrator.process(
+        db,
+        session_id=session_id,
+        message=message,
+        user_id=user_id,
+        top_k=5,
+        model_mode=resolved_mode,
+        csv_attachment=csv_results,
+    )
+
+    return _build_v2_response(orch_response, model_mode=resolved_mode)
+
+
+# ═══════════════════════════════════════════════════════════════════════
+#  V2 Streaming Endpoint (SSE — Server-Sent Events)
+# ═══════════════════════════════════════════════════════════════════════
+
+@router.post("/chat/v2/stream")
+def chat_tax_agent_v2_stream(payload: ChatRequest, db: Session = Depends(get_db)):
+    """
+    V2 chat endpoint with SSE streaming.
+    Yields real-time events as the orchestrator processes each pipeline step.
+    
+    Event types:
+    - thinking:    Step progress (intent classification, planning, etc.)
+    - tool_start:  Tool execution started
+    - tool_done:   Tool execution completed
+    - sub_agent:   Sub-agent status update
+    - text_chunk:  Partial answer text (for typewriter effect)
+    - viz_data:    Visualization data for charts
+    - done:        Final complete response
+    """
+    import json as _json
+
+    session_id = payload.session_id or f"sess-{uuid.uuid4().hex[:10]}"
+
+    from ml_engine.tax_agent_orchestrator import get_orchestrator
+
+    orchestrator = get_orchestrator()
+
+    def event_generator():
+        try:
+            for event in orchestrator.process_streaming(
+                db,
+                session_id=session_id,
+                message=payload.message,
+                user_id=payload.user_id,
+                top_k=payload.top_k,
+                model_mode=payload.model_mode.value,
+            ):
+                event_type = event.get("event", "message")
+                event_data = _json.dumps(event.get("data", {}), ensure_ascii=False, default=str)
+                yield f"event: {event_type}\ndata: {event_data}\n\n"
+        except Exception as exc:
+            error_data = _json.dumps({"error": str(exc)}, ensure_ascii=False)
+            yield f"event: error\ndata: {error_data}\n\n"
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+def _build_v2_response(orch_response, *, model_mode: str = "full") -> dict:
+    """Build ChatResponseV2-compatible dict from OrchestratorResponse."""
     return ChatResponseV2(
         session_id=orch_response.session_id,
         intent=orch_response.intent,
@@ -613,6 +739,8 @@ def chat_tax_agent_v2(payload: ChatRequest, db: Session = Depends(get_db)):
         synthesis_tier=orch_response.synthesis_tier,
         policy_traces=orch_response.policy_traces,
         tool_results=orch_response.tool_results,
+        visualization_data=orch_response.visualization_data,
+        model_mode=model_mode,
     )
 
 

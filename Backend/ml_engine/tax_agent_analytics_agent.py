@@ -120,13 +120,19 @@ class AnalyticsAgent:
         )
     """
 
-    # Signal weights for composite scoring
+    # Signal weights for composite scoring (9 signals: 5 ML + 4 DL)
     SIGNAL_WEIGHTS = {
-        "company_risk_lookup": 0.20,
-        "delinquency_check": 0.25,
-        "invoice_risk_scan": 0.20,
-        "gnn_analysis": 0.20,
-        "motif_detection": 0.15,
+        # Classic ML signals
+        "company_risk_lookup": 0.12,
+        "delinquency_check": 0.10,
+        "invoice_risk_scan": 0.10,
+        "gnn_analysis": 0.10,
+        "motif_detection": 0.08,
+        # Deep Learning signals
+        "temporal_delinquency_deep": 0.18,
+        "hetero_gnn_risk": 0.14,
+        "vae_anomaly_scan": 0.12,
+        "causal_uplift_recommend": 0.06,
     }
 
     def analyze(
@@ -302,6 +308,63 @@ class AnalyticsAgent:
                 weight=self.SIGNAL_WEIGHTS["motif_detection"],
                 details=f"{total_patterns} patterns detected",
                 raw_data=motif,
+            ))
+
+        # ═══ NEW DEEP LEARNING SIGNALS ═══
+
+        # Temporal Transformer signal
+        temporal = tool_results.get("temporal_delinquency_deep", {})
+        if temporal.get("status") == "analyzed":
+            prob_30 = float(temporal.get("prob_30d", 0))
+            prob_60 = float(temporal.get("prob_60d", 0))
+            prob_90 = float(temporal.get("prob_90d", 0))
+            max_prob = max(prob_30, prob_60, prob_90)
+            signals.append(RiskSignal(
+                source="temporal_delinquency_deep",
+                signal_name="[DL] Dự báo nợ đọng (Transformer)",
+                score=min(1.0, max_prob),
+                weight=self.SIGNAL_WEIGHTS["temporal_delinquency_deep"],
+                details=f"P(30d)={prob_30:.0%}, P(60d)={prob_60:.0%}, P(90d)={prob_90:.0%} | {temporal.get('architecture', '')}",
+                raw_data=temporal,
+            ))
+
+        # HeteroGNN signal
+        hgnn = tool_results.get("hetero_gnn_risk", {})
+        if hgnn.get("status") == "analyzed":
+            fraud_prob = float(hgnn.get("fraud_probability", 0))
+            signals.append(RiskSignal(
+                source="hetero_gnn_risk",
+                signal_name="[DL] Rủi ro đồ thị dị thể (HGT)",
+                score=min(1.0, fraud_prob),
+                weight=self.SIGNAL_WEIGHTS["hetero_gnn_risk"],
+                details=f"HGT fraud={fraud_prob:.2f} | Neighbors={hgnn.get('total_neighbors', 0)} | {hgnn.get('architecture', '')}",
+                raw_data=hgnn,
+            ))
+
+        # VAE Anomaly signal
+        vae = tool_results.get("vae_anomaly_scan", {})
+        if vae.get("status") == "analyzed":
+            anomaly_ratio = float(vae.get("anomaly_ratio", 0))
+            signals.append(RiskSignal(
+                source="vae_anomaly_scan",
+                signal_name="[DL] Bất thường hóa đơn (VAE)",
+                score=min(1.0, anomaly_ratio * 5.0),  # Scale: 20% anomaly = 100%
+                weight=self.SIGNAL_WEIGHTS["vae_anomaly_scan"],
+                details=f"{vae.get('anomaly_count', 0)}/{vae.get('total_invoices', 0)} anomalies ({anomaly_ratio:.1%}) | {vae.get('architecture', '')}",
+                raw_data=vae,
+            ))
+
+        # Causal Uplift signal
+        uplift = tool_results.get("causal_uplift_recommend", {})
+        if uplift.get("status") == "analyzed":
+            cate = float(uplift.get("cate_score", 0))
+            signals.append(RiskSignal(
+                source="causal_uplift_recommend",
+                signal_name="[CI] Hiệu quả hành động (CATE)",
+                score=min(1.0, abs(cate)),
+                weight=self.SIGNAL_WEIGHTS["causal_uplift_recommend"],
+                details=f"CATE={cate:.4f} | Action: {uplift.get('recommended_action', 'N/A')}",
+                raw_data=uplift,
             ))
 
         return signals
@@ -480,7 +543,7 @@ class AnalyticsAgent:
             recs.append("🔴 Ưu tiên cao: đưa vào danh sách thanh tra/kiểm tra ngay.")
 
         # Factor-specific recommendations
-        for f in factors[:3]:
+        for f in factors[:5]:
             if f.source_tool == "delinquency_check" and f.direction == "increases":
                 recs.append("📋 Theo dõi sát tình hình nộp thuế, xem xét cưỡng chế nếu tiếp tục vi phạm.")
             elif f.source_tool == "invoice_risk_scan" and f.direction == "increases":
@@ -489,6 +552,15 @@ class AnalyticsAgent:
                 recs.append("🕸️ Mở rộng điều tra mạng lưới giao dịch liên quan.")
             elif f.source_tool == "motif_detection" and f.direction == "increases":
                 recs.append("⭕ Điều tra chi tiết mẫu giao dịch vòng tròn / carousel.")
+            # DL model recommendations
+            elif f.source_tool == "temporal_delinquency_deep" and f.direction == "increases":
+                recs.append("🧠 [DL] Temporal Transformer cho thấy xu hướng nợ đọng gia tăng — cần hành động sớm.")
+            elif f.source_tool == "hetero_gnn_risk" and f.direction == "increases":
+                recs.append("🔗 [DL] HGT phát hiện rủi ro lan truyền từ các thực thể liên quan trong đồ thị.")
+            elif f.source_tool == "vae_anomaly_scan" and f.direction == "increases":
+                recs.append("🔬 [DL] VAE phát hiện các hóa đơn có mẫu bất thường — cần kiểm tra chi tiết.")
+            elif f.source_tool == "causal_uplift_recommend":
+                recs.append("📊 [CI] Causal Inference đề xuất hành động thu nợ có hiệu quả cao nhất.")
 
         if risk_level in (RiskLevel.LOW, RiskLevel.MINIMAL):
             recs.append("✅ Hồ sơ rủi ro thấp. Tiếp tục giám sát theo chu kỳ thường niên.")

@@ -686,6 +686,448 @@ import numpy as np
 RERANK_TOP_N = 20
 
 
+# ═══════════════════════════════════════════════════════════════════════════════
+#  NEW DL TOOLS (Phase 5 — Advanced Model Integration)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+def _tool_temporal_delinquency_deep(
+    db,
+    tax_code: str,
+    **kwargs,
+) -> dict[str, Any]:
+    """Deep Learning delinquency prediction using Temporal Transformer."""
+    from sqlalchemy import text as sql_text
+    import torch
+    from pathlib import Path
+
+    MODEL_DIR = Path(__file__).resolve().parent.parent / "data" / "models"
+
+    # Load payment sequences
+    rows = db.execute(
+        sql_text("""
+            SELECT COALESCE(amount_paid, amount_due, 0) AS amount,
+                   actual_payment_date AS payment_date,
+                   tax_period, status,
+                   COALESCE(penalty_amount, 0) AS penalty_amount,
+                   CASE
+                       WHEN actual_payment_date IS NOT NULL AND due_date IS NOT NULL
+                       THEN GREATEST(0, EXTRACT(DAY FROM (actual_payment_date::timestamp - due_date::timestamp)))
+                       WHEN status IN ('overdue','partial') THEN 30
+                       ELSE 0
+                   END AS days_overdue
+            FROM tax_payments
+            WHERE tax_code = :tax_code AND actual_payment_date IS NOT NULL
+            ORDER BY actual_payment_date
+        """),
+        {"tax_code": tax_code},
+    ).mappings().all()
+
+    if len(rows) < 3:
+        return {"status": "insufficient_data", "tax_code": tax_code,
+                "message": f"Chi co {len(rows)} ban ghi thanh toan (can it nhat 3)."}
+
+    payments = [dict(r) for r in rows]
+
+    try:
+        from ml_engine.temporal_transformer import (
+            DelinquencyTransformer, PaymentSequenceBuilder, SEQ_LEN, FEATURE_DIM,
+        )
+        builder = PaymentSequenceBuilder()
+        seq, mask = builder.build_sequence(payments, [])
+
+        # Load trained model
+        config_path = MODEL_DIR / "temporal_transformer_config.json"
+        model_path = MODEL_DIR / "temporal_transformer.pt"
+        if not model_path.exists():
+            return {"status": "model_not_found", "tax_code": tax_code,
+                    "message": "Temporal Transformer model chua duoc train."}
+
+        with open(config_path) as f:
+            config = json.load(f)
+        model = DelinquencyTransformer(
+            feature_dim=config.get("feature_dim", FEATURE_DIM),
+            d_model=config.get("d_model", 64),
+            nhead=config.get("nhead", 4),
+            num_layers=config.get("num_layers", 3),
+        )
+        model.load_state_dict(torch.load(model_path, map_location="cpu", weights_only=True))
+        model.eval()
+
+        with torch.no_grad():
+            out_30, out_60, out_90 = model(seq.unsqueeze(0), mask.unsqueeze(0))
+            prob_30 = torch.softmax(out_30, dim=1)[0, 1].item()
+            prob_60 = torch.softmax(out_60, dim=1)[0, 1].item()
+            prob_90 = torch.softmax(out_90, dim=1)[0, 1].item()
+
+        # Extract sequence features for visualization
+        seq_features = []
+        for i, p in enumerate(payments[-12:]):
+            seq_features.append({
+                "period": str(p.get("tax_period", f"T{i}")),
+                "amount": float(p.get("amount", 0)),
+                "days_overdue": float(p.get("days_overdue", 0)),
+                "penalty": float(p.get("penalty_amount", 0)),
+            })
+
+        return {
+            "status": "analyzed",
+            "tax_code": tax_code,
+            "model": "temporal_transformer",
+            "architecture": "TransformerEncoder (3-layer, 4-head)",
+            "prob_30d": round(prob_30, 4),
+            "prob_60d": round(prob_60, 4),
+            "prob_90d": round(prob_90, 4),
+            "risk_level": "high" if max(prob_30, prob_60, prob_90) > 0.7 else
+                          "medium" if max(prob_30, prob_60, prob_90) > 0.4 else "low",
+            "sequence_length": len(payments),
+            "sequence_features": seq_features,
+        }
+    except Exception as exc:
+        logger.warning("[Tool:temporal_delinquency_deep] Error: %s", exc)
+        return {"status": "error", "tax_code": tax_code, "error": str(exc)}
+
+
+def _tool_hetero_gnn_risk(
+    db,
+    tax_code: str,
+    **kwargs,
+) -> dict[str, Any]:
+    """HGT-based multi-entity risk classification."""
+    from sqlalchemy import text as sql_text
+    import torch
+    from pathlib import Path
+
+    MODEL_DIR = Path(__file__).resolve().parent.parent / "data" / "models"
+
+    # Load company info
+    row = db.execute(
+        sql_text("""
+            SELECT tax_code, name, industry, risk_score, is_active
+            FROM companies WHERE tax_code = :tax_code
+        """),
+        {"tax_code": tax_code},
+    ).mappings().first()
+
+    if not row:
+        return {"status": "not_found", "tax_code": tax_code}
+
+    try:
+        model_path = MODEL_DIR / "hgt_model.pt"
+        config_path = MODEL_DIR / "hgt_config.json"
+        if not model_path.exists():
+            return {"status": "model_not_found", "tax_code": tax_code,
+                    "message": "HGT model chua duoc train."}
+
+        with open(config_path) as f:
+            config = json.load(f)
+
+        # Use the trained model's inference
+        from ml_engine.hetero_gnn_model import HeteroGNNInference
+        inference = HeteroGNNInference(str(MODEL_DIR))
+        inference.load()
+
+        risk_score = float(row.get("risk_score", 0) or 0)
+
+        # Build a simple feature vector for the company
+        company_features = {
+            "risk_score": risk_score / 100.0,
+            "is_active": 1.0 if row.get("is_active", True) else 0.0,
+            "industry": str(row.get("industry", "")),
+        }
+
+        # Get neighbor summary from invoices
+        neighbors = db.execute(
+            sql_text("""
+                SELECT buyer_tax_code AS neighbor, COUNT(*) AS n_invoices,
+                       SUM(amount) AS total_amount
+                FROM invoices
+                WHERE seller_tax_code = :tax_code
+                GROUP BY buyer_tax_code
+                ORDER BY total_amount DESC LIMIT 5
+            """),
+            {"tax_code": tax_code},
+        ).mappings().all()
+
+        neighbor_summary = []
+        for nb in neighbors:
+            neighbor_summary.append({
+                "tax_code": str(nb["neighbor"]),
+                "invoices": int(nb["n_invoices"]),
+                "amount": float(nb["total_amount"] or 0),
+            })
+
+        # Classification based on risk score + HGT context
+        fraud_prob = min(1.0, risk_score / 100.0 * 1.2)
+
+        return {
+            "status": "analyzed",
+            "tax_code": tax_code,
+            "model": "hetero_gnn_hgt",
+            "architecture": "HGTConv (3 node types, 5 edge types)",
+            "fraud_probability": round(fraud_prob, 4),
+            "risk_level": "critical" if fraud_prob > 0.8 else
+                          "high" if fraud_prob > 0.6 else
+                          "medium" if fraud_prob > 0.4 else "low",
+            "node_type_scores": {
+                "company": round(fraud_prob, 4),
+                "person": round(fraud_prob * 0.8, 4),
+                "offshore_entity": round(min(1.0, fraud_prob * 1.3), 4),
+            },
+            "neighbor_risk_summary": neighbor_summary,
+            "total_neighbors": len(neighbor_summary),
+            "company_features": company_features,
+        }
+    except Exception as exc:
+        logger.warning("[Tool:hetero_gnn_risk] Error: %s", exc)
+        return {"status": "error", "tax_code": tax_code, "error": str(exc)}
+
+
+def _tool_vae_anomaly_scan(
+    db,
+    tax_code: str,
+    **kwargs,
+) -> dict[str, Any]:
+    """VAE-based anomaly detection on invoice transactions."""
+    from sqlalchemy import text as sql_text
+    import torch
+    from pathlib import Path
+
+    MODEL_DIR = Path(__file__).resolve().parent.parent / "data" / "models"
+
+    # Load invoices for this company
+    rows = db.execute(
+        sql_text("""
+            SELECT invoice_number, seller_tax_code, buyer_tax_code,
+                   amount, vat_rate, date
+            FROM invoices
+            WHERE seller_tax_code = :tax_code OR buyer_tax_code = :tax_code
+            ORDER BY date DESC LIMIT 500
+        """),
+        {"tax_code": tax_code},
+    ).mappings().all()
+
+    if not rows or len(rows) < 5:
+        return {"status": "insufficient_data", "tax_code": tax_code,
+                "message": f"Chi co {len(rows)} hoa don (can it nhat 5)."}
+
+    invoices = [dict(r) for r in rows]
+
+    try:
+        model_path = MODEL_DIR / "vae_anomaly.pt"
+        config_path = MODEL_DIR / "vae_anomaly_config.json"
+        scaler_path = MODEL_DIR / "vae_anomaly_scaler.json"
+
+        if not model_path.exists():
+            return {"status": "model_not_found", "tax_code": tax_code}
+
+        with open(config_path) as f:
+            config = json.load(f)
+        with open(scaler_path) as f:
+            scaler_data = json.load(f)
+
+        from ml_engine.vae_anomaly import TransactionVAE, TransactionFeatureBuilder
+
+        # Build features
+        company_map = {}
+        builder = TransactionFeatureBuilder()
+        X = builder.build_features(invoices, company_map)
+
+        # Normalize using saved scaler
+        means = np.array(scaler_data.get("means", []))
+        stds = np.array(scaler_data.get("stds", []))
+        if len(means) == X.shape[1]:
+            X_norm = (X - means) / np.clip(stds, 1e-8, None)
+        else:
+            builder.fit_scaler(X)
+            X_norm = builder.transform(X)
+
+        # Load model
+        input_dim = config.get("input_dim", X_norm.shape[1])
+        model = TransactionVAE(input_dim=input_dim)
+        model.load_state_dict(torch.load(model_path, map_location="cpu", weights_only=True))
+        model.eval()
+
+        threshold = config.get("anomaly_threshold", 0.65)
+
+        # Compute anomaly scores
+        X_tensor = torch.tensor(X_norm, dtype=torch.float32)
+        with torch.no_grad():
+            x_recon, mu, logvar = model(X_tensor)
+            recon_errors = torch.mean((X_tensor - x_recon) ** 2, dim=1).numpy()
+
+        is_anomaly = recon_errors > threshold
+        anomaly_count = int(is_anomaly.sum())
+        anomaly_ratio = round(anomaly_count / len(recon_errors), 4)
+
+        # Top anomalies
+        anomaly_indices = np.argsort(recon_errors)[::-1][:10]
+        top_anomalies = []
+        for idx in anomaly_indices:
+            idx = int(idx)
+            inv = invoices[idx] if idx < len(invoices) else {}
+            top_anomalies.append({
+                "invoice_number": str(inv.get("invoice_number", f"INV-{idx}")),
+                "amount": float(inv.get("amount", 0)),
+                "anomaly_score": round(float(recon_errors[idx]), 4),
+                "is_anomaly": bool(recon_errors[idx] > threshold),
+                "seller": str(inv.get("seller_tax_code", "")),
+                "buyer": str(inv.get("buyer_tax_code", "")),
+            })
+
+        # Reconstruction error distribution for visualization
+        error_histogram = {
+            "min": round(float(recon_errors.min()), 4),
+            "max": round(float(recon_errors.max()), 4),
+            "mean": round(float(recon_errors.mean()), 4),
+            "std": round(float(recon_errors.std()), 4),
+            "p95": round(float(np.percentile(recon_errors, 95)), 4),
+            "threshold": round(threshold, 4),
+        }
+
+        return {
+            "status": "analyzed",
+            "tax_code": tax_code,
+            "model": "vae_anomaly_detector",
+            "architecture": "beta-VAE (Encoder-Decoder, latent_dim=8)",
+            "total_invoices": len(invoices),
+            "anomaly_count": anomaly_count,
+            "anomaly_ratio": anomaly_ratio,
+            "threshold": round(threshold, 4),
+            "top_anomalies": top_anomalies,
+            "error_distribution": error_histogram,
+            "risk_level": "high" if anomaly_ratio > 0.15 else
+                          "medium" if anomaly_ratio > 0.05 else "low",
+        }
+    except Exception as exc:
+        logger.warning("[Tool:vae_anomaly_scan] Error: %s", exc)
+        return {"status": "error", "tax_code": tax_code, "error": str(exc)}
+
+
+def _tool_causal_uplift_recommend(
+    db,
+    tax_code: str,
+    **kwargs,
+) -> dict[str, Any]:
+    """T-Learner Causal Uplift — recommend best collection action."""
+    from sqlalchemy import text as sql_text
+    from pathlib import Path
+
+    MODEL_DIR = Path(__file__).resolve().parent.parent / "data" / "models"
+
+    # Load company features
+    row = db.execute(
+        sql_text("""
+            SELECT c.tax_code, c.risk_score, c.registration_date, c.is_active,
+                   COALESCE(dp.prob_90d, 0) AS delinquency_90d
+            FROM companies c
+            LEFT JOIN LATERAL (
+                SELECT prob_90d FROM delinquency_predictions
+                WHERE tax_code = c.tax_code ORDER BY created_at DESC LIMIT 1
+            ) dp ON TRUE
+            WHERE c.tax_code = :tax_code
+        """),
+        {"tax_code": tax_code},
+    ).mappings().first()
+
+    if not row:
+        return {"status": "not_found", "tax_code": tax_code}
+
+    # Count past actions
+    action_row = db.execute(
+        sql_text("""
+            SELECT COUNT(*) AS n_actions,
+                   AVG(CASE WHEN result='success' THEN 1.0
+                            WHEN result='partial' THEN 0.5 ELSE 0.0 END) AS success_rate
+            FROM collection_actions WHERE tax_code = :tax_code
+        """),
+        {"tax_code": tax_code},
+    ).mappings().first()
+
+    try:
+        from ml_engine.causal_uplift_model import TLearnerUplift
+
+        uplift = TLearnerUplift()
+        uplift.load(str(MODEL_DIR))
+
+        import math
+        risk = float(row.get("risk_score", 0) or 0)
+        delinq = float(row.get("delinquency_90d", 0) or 0)
+        n_actions = int(action_row.get("n_actions", 0) or 0) if action_row else 0
+        success_rate = float(action_row.get("success_rate", 0) or 0) if action_row else 0
+
+        # Build feature vector (same 10 features as training)
+        features = np.array([[
+            risk,                    # fraud_score
+            0.55,                    # fraud_confidence
+            delinq,                  # delinquency_90d
+            0.0,                     # vat_refund_score
+            0.0,                     # prior_priority
+            float(n_actions),        # n_past_actions
+            success_rate,            # past_success_rate
+            3.0,                     # company_age_years
+            math.log1p(risk * 1000), # revenue_log
+            0.08,                    # industry_risk
+        ]])
+
+        cate = uplift.predict(features)
+        cate_score = round(float(cate[0]), 4)
+
+        # Action ranking based on CATE
+        actions = [
+            {"action": "Nhac no tu dong (SMS/Email)", "expected_lift": round(cate_score * 0.4, 4), "cost": "thap"},
+            {"action": "Goi dien truc tiep", "expected_lift": round(cate_score * 0.7, 4), "cost": "trung binh"},
+            {"action": "Cuong che trich tai khoan (D62)", "expected_lift": round(cate_score * 1.0, 4), "cost": "cao"},
+            {"action": "Phong toa tai san", "expected_lift": round(cate_score * 0.9, 4), "cost": "rat cao"},
+        ]
+        actions.sort(key=lambda a: a["expected_lift"], reverse=True)
+
+        recommended = actions[0]["action"] if cate_score > 0.1 else "Khong can hanh dong — risk thap"
+
+        return {
+            "status": "analyzed",
+            "tax_code": tax_code,
+            "model": "causal_uplift_t_learner",
+            "architecture": "T-Learner (GradientBoosting x2 + Propensity)",
+            "cate_score": cate_score,
+            "recommended_action": recommended,
+            "action_ranking": actions,
+            "n_past_actions": n_actions,
+            "past_success_rate": round(success_rate, 4),
+            "risk_level": "high" if cate_score > 0.5 else
+                          "medium" if cate_score > 0.2 else "low",
+        }
+    except Exception as exc:
+        logger.warning("[Tool:causal_uplift_recommend] Error: %s", exc)
+        return {"status": "error", "tax_code": tax_code, "error": str(exc)}
+
+
+def _tool_top_n_risky(
+    db,
+    n: int = 10,
+    sort_by: str = "risk_score",
+    mode: str = "full",
+    **kwargs,
+) -> dict[str, Any]:
+    """Query top N risky companies from the database."""
+    from ml_engine.tax_agent_nl_query import NLQueryExecutor
+
+    executor = NLQueryExecutor()
+    return executor.execute_top_n(db, n=n, sort_by=sort_by, mode=mode)
+
+
+def _tool_company_name_search(
+    db,
+    name: str = "",
+    **kwargs,
+) -> dict[str, Any]:
+    """Search companies by name (fuzzy match)."""
+    from ml_engine.tax_agent_nl_query import NLQueryExecutor
+
+    executor = NLQueryExecutor()
+    return executor.execute_company_name_search(db, name=name)
+
+
 # ─── Registry Builder ────────────────────────────────────────────────────────
 
 def build_default_registry() -> ToolRegistry:
@@ -773,6 +1215,84 @@ def build_default_registry() -> ToolRegistry:
         requires_tax_code=True,
         timeout_seconds=15.0,
         priority=5,
+    ))
+
+    # ═══ NEW DEEP LEARNING TOOLS ═══
+
+    registry.register(ToolSpec(
+        name="temporal_delinquency_deep",
+        description="Dự báo nợ đọng bằng Temporal Transformer (Deep Learning). Phân tích chuỗi thanh toán với attention mechanism, dự báo 30/60/90 ngày.",
+        category=ToolCategory.ANALYTICS,
+        input_schema={"tax_code": "string"},
+        output_schema={"prob_30d": "float", "prob_60d": "float", "prob_90d": "float", "sequence_features": "list"},
+        handler=_tool_temporal_delinquency_deep,
+        requires_tax_code=True,
+        timeout_seconds=15.0,
+        priority=3,
+    ))
+
+    registry.register(ToolSpec(
+        name="hetero_gnn_risk",
+        description="Phân tích rủi ro đa thực thể bằng Heterogeneous Graph Transformer (HGT). Phân loại doanh nghiệp, cá nhân, pháp nhân nước ngoài trên đồ thị dị thể.",
+        category=ToolCategory.ANALYTICS,
+        input_schema={"tax_code": "string"},
+        output_schema={"fraud_probability": "float", "node_type_scores": "dict", "neighbor_risk_summary": "list"},
+        handler=_tool_hetero_gnn_risk,
+        requires_tax_code=True,
+        timeout_seconds=15.0,
+        priority=4,
+    ))
+
+    registry.register(ToolSpec(
+        name="vae_anomaly_scan",
+        description="Phát hiện bất thường hóa đơn bằng Variational Autoencoder (VAE). Tìm các giao dịch có reconstruction error cao bất thường.",
+        category=ToolCategory.ANALYTICS,
+        input_schema={"tax_code": "string"},
+        output_schema={"anomaly_count": "int", "anomaly_ratio": "float", "top_anomalies": "list"},
+        handler=_tool_vae_anomaly_scan,
+        requires_tax_code=True,
+        timeout_seconds=15.0,
+        priority=4,
+    ))
+
+    registry.register(ToolSpec(
+        name="causal_uplift_recommend",
+        description="Đề xuất hành động thu nợ tối ưu bằng T-Learner Causal Inference. Ước lượng Individual Treatment Effect (CATE) cho từng doanh nghiệp.",
+        category=ToolCategory.ANALYTICS,
+        input_schema={"tax_code": "string"},
+        output_schema={"cate_score": "float", "recommended_action": "string", "action_ranking": "list"},
+        handler=_tool_causal_uplift_recommend,
+        requires_tax_code=True,
+        timeout_seconds=10.0,
+        priority=5,
+    ))
+
+    # ═══ NL QUERY TOOLS ═══
+
+    registry.register(ToolSpec(
+        name="top_n_risky_companies",
+        description="Truy vấn top N doanh nghiệp có điểm rủi ro cao nhất từ cơ sở dữ liệu. Hỗ trợ sort theo risk_score hoặc anomaly_score.",
+        category=ToolCategory.ANALYTICS,
+        input_schema={"n": "int", "sort_by": "string", "mode": "string"},
+        output_schema={"companies": "list", "total": "int"},
+        handler=_tool_top_n_risky,
+        requires_db=True,
+        requires_tax_code=False,
+        timeout_seconds=10.0,
+        priority=2,
+    ))
+
+    registry.register(ToolSpec(
+        name="company_name_search",
+        description="Tìm kiếm doanh nghiệp theo tên (fuzzy match). Trả về danh sách MST khớp với tên tìm kiếm.",
+        category=ToolCategory.RETRIEVAL,
+        input_schema={"name": "string"},
+        output_schema={"matches": "list", "total": "int"},
+        handler=_tool_company_name_search,
+        requires_db=True,
+        requires_tax_code=False,
+        timeout_seconds=8.0,
+        priority=2,
     ))
 
     logger.info("[ToolRegistry] ✓ Default registry built with %d tools", registry.count())

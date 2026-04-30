@@ -148,6 +148,15 @@ class TaxAgentPlanner:
             "knowledge_search", "company_risk_lookup", "delinquency_check",
             "invoice_risk_scan",
         ],
+        "top_n_query": [
+            "knowledge_search",
+        ],
+        "company_name_lookup": [
+            "knowledge_search", "company_risk_lookup",
+        ],
+        "batch_analysis": [
+            "knowledge_search",
+        ],
         "general_tax_query": [
             "knowledge_search",
         ],
@@ -172,6 +181,7 @@ class TaxAgentPlanner:
         tax_code: str | None = None,
         tax_period: str | None = None,
         context_intents: list[str] | None = None,
+        model_mode: str = "full",
     ) -> ExecutionPlan:
         """
         Generate an execution plan for the given query.
