@@ -925,3 +925,114 @@ def list_agent_tools():
         }
     except Exception as exc:
         return {"tools": [], "total": 0, "error": str(exc)}
+
+
+# ═══════════════════════════════════════════════════════════════════════
+#  FEEDBACK ENDPOINTS (Gap 5: Adaptive Feedback Loop)
+# ═══════════════════════════════════════════════════════════════════════
+
+class FeedbackRequest(BaseModel):
+    session_id: str
+    turn_id: int
+    feedback_type: str = Field(..., description="positive | negative | correction")
+    intent: str = ""
+    confidence: float = 0.0
+    correction_text: str | None = None
+    suggested_intent: str | None = None
+
+
+@router.post("/feedback")
+def submit_feedback(req: FeedbackRequest, db: Session = Depends(get_db)):
+    """Record user feedback (thumbs up/down) on an agent response."""
+    try:
+        from ml_engine.tax_agent_feedback import get_feedback_collector
+
+        collector = get_feedback_collector()
+        record = collector.record_feedback(
+            session_id=req.session_id,
+            turn_id=req.turn_id,
+            feedback_type=req.feedback_type,
+            intent=req.intent,
+            confidence=req.confidence,
+            correction_text=req.correction_text,
+            suggested_intent=req.suggested_intent,
+        )
+        # Persist to DB
+        collector.record_feedback_to_db(db, record)
+
+        return {"status": "recorded", "feedback_type": req.feedback_type}
+    except Exception as exc:
+        return {"status": "error", "error": str(exc)}
+
+
+@router.get("/feedback/stats")
+def feedback_statistics(window_hours: int = 24):
+    """Get aggregated feedback statistics."""
+    try:
+        from ml_engine.tax_agent_feedback import get_feedback_collector
+
+        collector = get_feedback_collector()
+        return collector.get_statistics(window_hours=window_hours)
+    except Exception as exc:
+        return {"error": str(exc)}
+
+
+@router.get("/feedback/drift")
+def feedback_drift(window_hours: int = 48):
+    """Detect model performance drift from feedback trends."""
+    try:
+        from ml_engine.tax_agent_feedback import get_feedback_collector
+
+        collector = get_feedback_collector()
+        return collector.compute_drift(window_hours=window_hours)
+    except Exception as exc:
+        return {"error": str(exc)}
+
+
+@router.get("/feedback/active-learning")
+def active_learning_candidates(
+    confidence_threshold: float = 0.5,
+    limit: int = 20,
+    db: Session = Depends(get_db),
+):
+    """Get uncertain predictions for active learning review."""
+    try:
+        from ml_engine.tax_agent_feedback import get_feedback_collector
+
+        collector = get_feedback_collector()
+        return {
+            "candidates": collector.get_uncertain_predictions(
+                db=db, confidence_threshold=confidence_threshold, limit=limit,
+            ),
+        }
+    except Exception as exc:
+        return {"candidates": [], "error": str(exc)}
+
+
+# ═══════════════════════════════════════════════════════════════════════
+#  TELEMETRY ENDPOINTS (Gap 7: Real-time Telemetry Dashboard)
+# ═══════════════════════════════════════════════════════════════════════
+
+@router.get("/telemetry/dashboard")
+def telemetry_dashboard(window_minutes: int = 60):
+    """Get real-time agent telemetry dashboard data."""
+    try:
+        from ml_engine.tax_agent_telemetry import get_telemetry
+
+        telemetry = get_telemetry()
+        return telemetry.get_dashboard(window_minutes=window_minutes)
+    except Exception as exc:
+        return {"error": str(exc)}
+
+
+@router.get("/telemetry/drift")
+def telemetry_drift(window_hours: int = 24):
+    """Detect intent distribution drift."""
+    try:
+        from ml_engine.tax_agent_telemetry import get_telemetry
+
+        telemetry = get_telemetry()
+        return telemetry.get_intent_drift(window_hours=window_hours)
+    except Exception as exc:
+        return {"error": str(exc)}
+

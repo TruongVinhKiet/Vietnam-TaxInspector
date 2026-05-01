@@ -327,6 +327,34 @@ class TaxAgentOrchestrator:
         context = self._memory.build_context(session_id, turn_index, message)
         latency_breakdown["context"] = (time.perf_counter() - t0) * 1000.0
 
+        # ─── Step 1.5: Conversation Intelligence ─────────────────────────
+        conv_intel_result = None
+        try:
+            from ml_engine.tax_agent_conversation_intelligence import ConversationIntelligence
+            conv_intel = ConversationIntelligence()
+            conv_intel_result = conv_intel.process(
+                message=message,
+                active_tax_code=context.active_tax_code,
+                recent_turns=context.recent_turns,
+                active_entities=context.active_entities,
+                intent_history=context.active_intent_history,
+            )
+            if conv_intel_result.resolved_message != message:
+                message = conv_intel_result.resolved_message
+                yield {"event": "thinking", "data": {
+                    "step": "conv_intel", "detail": f"Đã giải quyết ngữ cảnh: {message[:60]}...",
+                }}
+            if conv_intel_result.is_ambiguous and conv_intel_result.clarification_prompt:
+                # Return clarification instead of running full pipeline
+                yield {"event": "text_chunk", "data": {"chunk": conv_intel_result.clarification_prompt}}
+                yield {"event": "done", "data": {
+                    "session_id": session_id, "answer": conv_intel_result.clarification_prompt,
+                    "intent": "clarification", "is_ambiguous": True,
+                }}
+                return
+        except Exception as exc:
+            logger.debug("[Orchestrator:stream] ConvIntel error: %s", exc)
+
         # ─── Step 2: Intent Classification ──────────────────────────────
         yield {"event": "thinking", "data": {"step": "intent", "detail": "Đang phân loại ý định..."}}
         t0 = time.perf_counter()
@@ -560,6 +588,27 @@ class TaxAgentOrchestrator:
         answer = self._synthesizer.format_response_text(synthesis_result)
         answer = self._enrich_with_sub_agents(answer, sub_agent_analysis)
         latency_breakdown["synthesis"] = (time.perf_counter() - t0) * 1000.0
+
+        # ─── Step 5.5: ReAct Self-Reflection ─────────────────────────────
+        react_reflections = []
+        try:
+            from ml_engine.tax_agent_react import ReActEngine
+            react = ReActEngine()
+            planned_tool_names = [s.tool_name for s in plan.steps]
+            reflection = react.reflect(
+                tool_results=all_tool_results,
+                planned_tools=planned_tool_names,
+                intent=intent,
+                iteration=0,
+                sub_agent_analysis=sub_agent_analysis,
+            )
+            react_reflections.append(reflection.to_dict())
+            if reflection.observations:
+                yield {"event": "thinking", "data": {
+                    "step": "react", "detail": reflection.summary,
+                }}
+        except Exception as exc:
+            logger.debug("[Orchestrator:stream] ReAct error: %s", exc)
 
         # Stream answer text in chunks
         chunk_size = 80
