@@ -37,6 +37,7 @@ import traceback
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from enum import Enum
+from pathlib import Path
 from typing import Any, Callable, Optional
 
 logger = logging.getLogger(__name__)
@@ -1128,6 +1129,125 @@ def _tool_company_name_search(
     return executor.execute_company_name_search(db, name=name)
 
 
+def _tool_nlp_red_flag_scan(
+    db,
+    tax_code: str,
+    **kwargs,
+) -> dict[str, Any]:
+    """NLP Red Flag Detector tool for analyzing invoice descriptions."""
+    from ml_engine.nlp_red_flag_detector import NLPRedFlagDetector
+    from sqlalchemy import text as sql_text
+
+    query = sql_text("""
+        SELECT goods_category FROM invoices
+        WHERE seller_tax_code = :tax_code AND goods_category IS NOT NULL
+        LIMIT 100
+    """)
+    rows = db.execute(query, {"tax_code": tax_code}).mappings().all()
+    descriptions = [r["goods_category"] for r in rows]
+
+    if not descriptions:
+        return {"status": "insufficient_data", "tax_code": tax_code, "message": "Không tìm thấy dữ liệu hóa đơn."}
+
+    detector = NLPRedFlagDetector()
+    results = detector.batch_analyze(descriptions)
+
+    high_risk_count = sum(1 for r in results if r["risk_score"] > 0.6)
+    return {
+        "status": "analyzed",
+        "tax_code": tax_code,
+        "total_analyzed": len(descriptions),
+        "high_risk_count": high_risk_count,
+        "top_flags": [r for r in results if r["risk_score"] > 0.6][:5]
+    }
+
+
+def _tool_revenue_forecast(
+    db,
+    tax_code: str,
+    **kwargs,
+) -> dict[str, Any]:
+    """Revenue Forecasting tool for predicting next quarter revenue."""
+    from ml_engine.revenue_forecast_model import RevenueForecastModel
+    from sqlalchemy import text as sql_text
+
+    query = sql_text("""
+        SELECT quarter, COALESCE(revenue, 0) as revenue
+        FROM tax_returns
+        WHERE tax_code = :tax_code AND revenue > 0
+        ORDER BY tax_year, quarter
+    """)
+    rows = db.execute(query, {"tax_code": tax_code}).mappings().all()
+
+    if len(rows) < 4:
+        return {"status": "insufficient_data", "tax_code": tax_code, "message": "Cần ít nhất 4 quý doanh thu để dự báo."}
+
+    values = [float(r["revenue"]) for r in rows]
+    model = RevenueForecastModel()
+    forecast = model.forecast_series(values, steps=1)
+
+    return {
+        "status": "analyzed",
+        "tax_code": tax_code,
+        "historical_periods": len(values),
+        "last_revenue": values[-1],
+        "forecast_next_quarter": forecast[0] if forecast else 0
+    }
+
+
+def _tool_entity_resolution_check(
+    db,
+    tax_code: str,
+    **kwargs,
+) -> dict[str, Any]:
+    """Entity Resolution tool to find duplicate companies."""
+    from ml_engine.entity_resolution_model import EntityResolutionModel
+    from sqlalchemy import text as sql_text
+
+    query = sql_text("""
+        SELECT tax_code, legal_name, address, representative_name
+        FROM entity_identities
+        WHERE tax_code = :tax_code
+    """)
+    row = db.execute(query, {"tax_code": tax_code}).mappings().first()
+
+    if not row:
+        return {"status": "not_found", "tax_code": tax_code, "message": "Không tìm thấy thông tin thực thể."}
+
+    model = EntityResolutionModel()
+    duplicates = model.find_duplicates(dict(row), db)
+
+    return {
+        "status": "analyzed",
+        "tax_code": tax_code,
+        "entity_name": row["legal_name"],
+        "duplicates_found": len(duplicates),
+        "top_matches": duplicates[:5]
+    }
+
+
+def _tool_ocr_document_process(
+    db,
+    file_path: str,
+    **kwargs,
+) -> dict[str, Any]:
+    """OCR Document Process tool."""
+    from ml_engine.document_ocr_engine import DocumentOCREngine
+
+    if not file_path or not Path(file_path).exists():
+        return {"status": "error", "message": f"File không tồn tại: {file_path}"}
+
+    engine = DocumentOCREngine()
+    result = engine.process_document(file_path)
+
+    return {
+        "status": "analyzed",
+        "file_path": file_path,
+        "extracted_data": result.get("extracted_fields", {}),
+        "confidence": result.get("confidence", 0.0)
+    }
+
+
 # ─── Registry Builder ────────────────────────────────────────────────────────
 
 def build_default_registry() -> ToolRegistry:
@@ -1293,6 +1413,57 @@ def build_default_registry() -> ToolRegistry:
         requires_tax_code=False,
         timeout_seconds=8.0,
         priority=2,
+    ))
+
+    # ═══ NEW PHASE DL TOOLS ═══
+
+    registry.register(ToolSpec(
+        name="nlp_red_flag_scan",
+        description="Phân tích ngữ nghĩa mô tả hàng hóa hóa đơn để phát hiện rủi ro gian lận, trốn thuế bằng mô hình NLP.",
+        category=ToolCategory.ANALYTICS,
+        input_schema={"tax_code": "string"},
+        output_schema={"total_analyzed": "int", "high_risk_count": "int", "top_flags": "list"},
+        handler=_tool_nlp_red_flag_scan,
+        requires_tax_code=True,
+        timeout_seconds=15.0,
+        priority=4,
+    ))
+
+    registry.register(ToolSpec(
+        name="revenue_forecast",
+        description="Dự báo doanh thu quý tới bằng mô hình LightGBM/ARIMA. Phát hiện biến động doanh thu bất thường có khả năng dẫn đến nợ đọng.",
+        category=ToolCategory.FORECASTING,
+        input_schema={"tax_code": "string"},
+        output_schema={"forecast_next_quarter": "float", "historical_periods": "int"},
+        handler=_tool_revenue_forecast,
+        requires_tax_code=True,
+        timeout_seconds=10.0,
+        priority=4,
+    ))
+
+    registry.register(ToolSpec(
+        name="entity_resolution_check",
+        description="Phân tích trùng lặp thực thể (Entity Resolution). Phát hiện doanh nghiệp phượng hoàng, cá nhân lập nhiều công ty bằng Siamese Bi-Encoder.",
+        category=ToolCategory.INVESTIGATION,
+        input_schema={"tax_code": "string"},
+        output_schema={"duplicates_found": "int", "top_matches": "list"},
+        handler=_tool_entity_resolution_check,
+        requires_tax_code=True,
+        timeout_seconds=15.0,
+        priority=5,
+    ))
+
+    registry.register(ToolSpec(
+        name="ocr_document_process",
+        description="Trích xuất tự động thông tin từ ảnh/PDF hóa đơn chứng từ bằng PaddleOCR.",
+        category=ToolCategory.ANALYTICS,
+        input_schema={"file_path": "string"},
+        output_schema={"extracted_data": "dict", "confidence": "float"},
+        handler=_tool_ocr_document_process,
+        requires_db=False,
+        requires_tax_code=False,
+        timeout_seconds=30.0,
+        priority=3,
     ))
 
     logger.info("[ToolRegistry] ✓ Default registry built with %d tools", registry.count())

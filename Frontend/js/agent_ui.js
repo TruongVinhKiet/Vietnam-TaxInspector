@@ -478,6 +478,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     }
                 });
             });
+            appendFeedbackButtons(responseWrapper, fullData);
             requestAnimationFrame(() => renderPendingCharts());
         }
 
@@ -499,6 +500,8 @@ document.addEventListener('DOMContentLoaded', () => {
                     : step === 'planning' || step === 'plan_done' ? 'fa-sitemap'
                     : step === 'synthesis' ? 'fa-wand-magic-sparkles'
                     : step === 'nl_query' || step === 'batch' ? 'fa-database'
+                    : step === 'react' ? 'fa-scale-balanced'
+                    : step === 'conv_intel' ? 'fa-lightbulb'
                     : 'fa-circle-notch fa-spin';
 
                 // Update or add step
@@ -506,7 +509,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (isDone) {
                     // Mark previous step as done
                     const lastStep = stepsEl.lastElementChild;
-                    if (lastStep) {
+                    if (lastStep && !lastStep.classList.contains('special-step')) {
                         lastStep.querySelector('i')?.classList.remove('fa-spin');
                         lastStep.querySelector('i')?.classList.add('text-emerald-500');
                         lastStep.querySelector('.step-detail')?.classList.add('text-emerald-600');
@@ -518,6 +521,36 @@ document.addEventListener('DOMContentLoaded', () => {
                     doneEl.className = 'thinking-step flex items-center gap-2 text-xs animate-fadeIn';
                     doneEl.innerHTML = `<i class="fa-solid fa-circle-check text-emerald-500 text-xs"></i> <span class="step-detail text-emerald-600">${detail}</span>`;
                     stepsEl.appendChild(doneEl);
+                } else if (step === 'react' || step === 'conv_intel') {
+                    const stepEl = document.createElement('div');
+                    stepEl.className = 'thinking-step special-step mt-1 animate-fadeIn';
+                    
+                    if (step === 'react') {
+                        stepEl.innerHTML = `
+                            <div class="flex items-start gap-2">
+                                <i class="fa-solid ${icon} text-amber-500 text-xs mt-[3px]"></i> 
+                                <div>
+                                    <span class="step-detail text-slate-500 font-semibold">Tự đánh giá & Điều chỉnh</span>
+                                    <div class="mt-1 text-[11px] px-2 py-1 bg-amber-50 text-amber-700 rounded border border-amber-200 inline-block">
+                                        <i class="fa-solid fa-arrows-rotate mr-1"></i> ${detail}
+                                    </div>
+                                </div>
+                            </div>
+                        `;
+                    } else if (step === 'conv_intel') {
+                        stepEl.innerHTML = `
+                            <div class="flex items-start gap-2">
+                                <i class="fa-solid ${icon} text-sky-500 text-xs mt-[3px]"></i> 
+                                <div>
+                                    <span class="step-detail text-slate-500 font-semibold">Nhận diện Ngữ cảnh</span>
+                                    <div class="mt-1 text-[11px] px-2 py-1 bg-sky-50 text-sky-700 rounded border border-sky-200 inline-block">
+                                        <i class="fa-solid fa-link mr-1"></i> ${detail}
+                                    </div>
+                                </div>
+                            </div>
+                        `;
+                    }
+                    stepsEl.appendChild(stepEl);
                 } else {
                     const stepEl = document.createElement('div');
                     stepEl.className = 'thinking-step flex items-center gap-2 text-xs animate-fadeIn';
@@ -1353,6 +1386,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
             });
         });
+
+        if (role === 'agent' && agentData) {
+            appendFeedbackButtons(wrapper, agentData);
+        }
     }
 
     function addTypingIndicator() {
@@ -1463,5 +1500,70 @@ document.addEventListener('DOMContentLoaded', () => {
             .replace(/>/g, '&gt;')
             .replace(/"/g, '&quot;')
             .replace(/'/g, '&#039;');
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    //  FEEDBACK BUTTONS (Gap 5)
+    // ═══════════════════════════════════════════════════════════
+    function appendFeedbackButtons(wrapper, agentData) {
+        if (!agentData) return;
+        
+        const feedbackContainer = document.createElement('div');
+        feedbackContainer.className = 'flex items-center gap-2 mt-3 text-slate-400 text-xs';
+        feedbackContainer.innerHTML = `
+            <button class="feedback-btn hover:text-emerald-500 transition-colors" data-type="positive" title="Câu trả lời tốt">
+                <i class="fa-regular fa-thumbs-up"></i>
+            </button>
+            <button class="feedback-btn hover:text-red-500 transition-colors" data-type="negative" title="Câu trả lời chưa tốt">
+                <i class="fa-regular fa-thumbs-down"></i>
+            </button>
+            <span class="feedback-status ml-2 opacity-0 transition-opacity"></span>
+        `;
+        
+        wrapper.querySelector('.agent-message').appendChild(feedbackContainer);
+        
+        const btns = feedbackContainer.querySelectorAll('.feedback-btn');
+        const status = feedbackContainer.querySelector('.feedback-status');
+        
+        btns.forEach(btn => {
+            btn.addEventListener('click', async () => {
+                const type = btn.dataset.type;
+                
+                // Visual toggle
+                btns.forEach(b => b.classList.remove('text-emerald-500', 'text-red-500', 'fa-solid'));
+                btn.querySelector('i').classList.remove('fa-regular');
+                btn.querySelector('i').classList.add('fa-solid');
+                if (type === 'positive') btn.classList.add('text-emerald-500');
+                else btn.classList.add('text-red-500');
+                
+                status.textContent = 'Đang gửi...';
+                status.classList.remove('opacity-0');
+                
+                try {
+                    const reqBody = {
+                        session_id: agentData.session_id || 'demo-session-01',
+                        turn_id: agentData.turn_index || 1,
+                        feedback_type: type,
+                        intent: agentData.intent || '',
+                        confidence: agentData.intent_confidence || 0,
+                    };
+                    
+                    const res = await fetch('http://localhost:8000/api/tax-agent/feedback', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(reqBody)
+                    });
+                    
+                    if (res.ok) {
+                        status.innerHTML = '<i class="fa-solid fa-check text-emerald-500"></i> Cảm ơn bạn!';
+                        setTimeout(() => status.classList.add('opacity-0'), 2000);
+                    } else {
+                        status.textContent = 'Lỗi gửi phản hồi';
+                    }
+                } catch (e) {
+                    status.textContent = 'Lỗi kết nối';
+                }
+            });
+        });
     }
 });

@@ -1694,41 +1694,183 @@ document.addEventListener("DOMContentLoaded", () => {
 });
 
 
-// Tab switching logic for Delinquency vs Simulation
+// Tab switching logic for Delinquency vs Simulation vs Forecast
 document.addEventListener("DOMContentLoaded", () => {
     const tabList = document.getElementById("tab-delinq-list");
     const tabSim = document.getElementById("tab-sim");
+    const tabForecast = document.getElementById("tab-revenue-forecast");
+    
     const sectionList = document.getElementById("delinq-list-section");
     const sectionSim = document.getElementById("simulation-section");
+    const sectionForecast = document.getElementById("revenue-forecast-section");
 
-    if (tabList && tabSim && sectionList && sectionSim) {
-        tabList.addEventListener("click", () => {
-            tabList.setAttribute("aria-selected", "true");
-            tabList.classList.remove("bg-transparent", "text-slate-500", "hover:bg-slate-200");
-            tabList.classList.add("bg-primary-container", "text-white");
-            
-            tabSim.setAttribute("aria-selected", "false");
-            tabSim.classList.remove("bg-primary-container", "text-white");
-            tabSim.classList.add("bg-transparent", "text-slate-500", "hover:bg-slate-200");
-            
-            sectionList.classList.remove("hidden");
-            sectionSim.classList.add("hidden");
-        });
+    const tabs = [
+        { btn: tabList, sec: sectionList },
+        { btn: tabSim, sec: sectionSim },
+        { btn: tabForecast, sec: sectionForecast }
+    ];
 
-        tabSim.addEventListener("click", () => {
-            tabSim.setAttribute("aria-selected", "true");
-            tabSim.classList.remove("bg-transparent", "text-slate-500", "hover:bg-slate-200");
-            tabSim.classList.add("bg-primary-container", "text-white");
-            
-            tabList.setAttribute("aria-selected", "false");
-            tabList.classList.remove("bg-primary-container", "text-white");
-            tabList.classList.add("bg-transparent", "text-slate-500", "hover:bg-slate-200");
-            
-            sectionList.classList.add("hidden");
-            sectionSim.classList.remove("hidden");
-            
-            // Trigger resize event for Chart.js to render correctly after unhiding
-            window.dispatchEvent(new Event('resize'));
+    function switchTab(targetBtn) {
+        tabs.forEach(({ btn, sec }) => {
+            if (!btn || !sec) return;
+            if (btn === targetBtn) {
+                btn.setAttribute("aria-selected", "true");
+                btn.classList.remove("bg-transparent", "text-slate-500", "hover:bg-slate-200");
+                btn.classList.add("bg-primary-container", "text-white");
+                sec.classList.remove("hidden");
+            } else {
+                btn.setAttribute("aria-selected", "false");
+                btn.classList.remove("bg-primary-container", "text-white");
+                btn.classList.add("bg-transparent", "text-slate-500", "hover:bg-slate-200");
+                sec.classList.add("hidden");
+            }
         });
+        window.dispatchEvent(new Event('resize'));
+    }
+
+    if (tabList) tabList.addEventListener("click", () => switchTab(tabList));
+    if (tabSim) tabSim.addEventListener("click", () => switchTab(tabSim));
+    if (tabForecast) tabForecast.addEventListener("click", () => switchTab(tabForecast));
+
+    // Revenue Forecast Logic
+    const btnForecast = document.getElementById('btn-forecast');
+    if (btnForecast) {
+        btnForecast.addEventListener('click', runRevenueForecast);
     }
 });
+
+let forecastChartInstance = null;
+
+async function runRevenueForecast() {
+    const mstInput = document.getElementById('forecast-mst-input');
+    const horizonInput = document.getElementById('forecast-horizon');
+    const btnForecast = document.getElementById('btn-forecast');
+    
+    if (!mstInput || !mstInput.value.trim()) {
+        alert('Vui lòng nhập Mã số thuế');
+        return;
+    }
+
+    if (btnForecast) {
+        btnForecast.disabled = true;
+        btnForecast.innerHTML = '<span class="material-symbols-outlined animate-spin">autorenew</span> Đang dự báo...';
+    }
+
+    try {
+        const periods = horizonInput ? parseInt(horizonInput.value) : 4;
+        const res = await fetch(`${API_BASE}/ml/forecast/predict?periods=${periods}`);
+        if (!res.ok) throw new Error('API Error');
+        const data = await res.json();
+        
+        document.getElementById('forecast-results').classList.remove('hidden');
+        renderForecastChart(data);
+        renderForecastInsights(data);
+    } catch (err) {
+        console.error(err);
+        alert('Lỗi khi tải dữ liệu dự báo. Vui lòng kiểm tra API.');
+    } finally {
+        if (btnForecast) {
+            btnForecast.disabled = false;
+            btnForecast.innerHTML = '<span class="material-symbols-outlined text-[18px]">online_prediction</span> Dự báo';
+        }
+    }
+}
+
+function renderForecastChart(data) {
+    if (!window.echarts) {
+        console.warn("ECharts not loaded");
+        return;
+    }
+    const chartContainer = document.getElementById('forecast-chart');
+    if (!chartContainer) return;
+
+    if (forecastChartInstance) forecastChartInstance.dispose();
+    forecastChartInstance = echarts.init(chartContainer);
+
+    const history = data.history || [];
+    const forecast = data.forecast || [];
+    
+    const xAxisData = [...history.map(d => d.quarter), ...forecast.map(d => d.quarter)];
+    const historyData = history.map(d => d.revenue);
+    const forecastData = forecast.map(d => d.revenue);
+    const lowerData = forecast.map(d => d.confidence_lower);
+    const upperData = forecast.map(d => d.confidence_upper);
+
+    // Padding for forecast array to align correctly
+    const padding = new Array(history.length - 1).fill("-");
+    const lastHistory = history.length > 0 ? history[history.length - 1].revenue : 0;
+    const alignedForecast = [...padding, lastHistory, ...forecastData];
+    const alignedLower = [...padding, lastHistory, ...lowerData];
+    const alignedUpper = [...padding, lastHistory, ...upperData];
+
+    const option = {
+        tooltip: { trigger: 'axis' },
+        grid: { left: '10%', right: '5%', bottom: '15%', top: '10%' },
+        xAxis: { type: 'category', data: xAxisData, axisLabel: { fontSize: 10 } },
+        yAxis: { type: 'value', name: 'Tỷ VNĐ', splitLine: { lineStyle: { type: 'dashed' } } },
+        series: [
+            {
+                name: 'Lịch sử',
+                type: 'line',
+                data: historyData,
+                smooth: true,
+                itemStyle: { color: '#002147' },
+                lineStyle: { width: 3 }
+            },
+            {
+                name: 'Dự báo',
+                type: 'line',
+                data: alignedForecast,
+                smooth: true,
+                itemStyle: { color: '#0ea5e9' },
+                lineStyle: { width: 3, type: 'dashed' }
+            },
+            {
+                name: 'Khoảng tin cậy',
+                type: 'line',
+                data: alignedUpper,
+                smooth: true,
+                lineStyle: { opacity: 0 },
+                itemStyle: { opacity: 0 },
+                tooltip: { show: false }
+            },
+            {
+                name: 'Khoảng tin cậy',
+                type: 'line',
+                data: alignedLower,
+                smooth: true,
+                lineStyle: { opacity: 0 },
+                itemStyle: { opacity: 0 },
+                areaStyle: { color: '#0ea5e9', opacity: 0.2 },
+                tooltip: { show: false }
+            }
+        ]
+    };
+    forecastChartInstance.setOption(option);
+}
+
+function renderForecastInsights(data) {
+    const container = document.getElementById('forecast-insights');
+    if (!container) return;
+    
+    const forecast = data.forecast || [];
+    if (!forecast.length) return;
+    
+    const q1 = forecast[0].revenue;
+    const qEnd = forecast[forecast.length - 1].revenue;
+    const trend = ((qEnd - q1) / q1 * 100).toFixed(1);
+    
+    container.innerHTML = `
+        <div class="bg-slate-50 p-3 rounded border border-slate-200">
+            <p class="text-[10px] font-bold text-slate-500 uppercase">Xu hướng dự báo</p>
+            <p class="text-lg font-black ${trend >= 0 ? 'text-emerald-600' : 'text-error'}">${trend > 0 ? '+' : ''}${trend}%</p>
+            <p class="text-xs text-slate-500 mt-1">Biến động doanh thu dự kiến đến ${forecast[forecast.length - 1].quarter}</p>
+        </div>
+        <div class="bg-amber-50 p-3 rounded border border-amber-100">
+            <p class="text-[10px] font-bold text-amber-700 uppercase">Khả năng mất thanh khoản</p>
+            <p class="text-lg font-black text-amber-600">Trung bình cao</p>
+            <p class="text-xs text-amber-700 mt-1">Dòng tiền suy giảm có thể dẫn đến nợ thuế ở Quý 4/2025.</p>
+        </div>
+    `;
+}
+

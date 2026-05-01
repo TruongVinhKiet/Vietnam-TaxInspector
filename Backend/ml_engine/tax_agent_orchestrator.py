@@ -54,8 +54,10 @@ MODE_TOOL_PROFILES: dict[str, dict[str, Any]] = {
             "knowledge_search", "company_risk_lookup", "invoice_risk_scan",
             "gnn_analysis", "hetero_gnn_risk", "vae_anomaly_scan",
             "motif_detection", "ownership_analysis",
+            "nlp_red_flag_scan",
         ],
-        "optional_tools": ["temporal_delinquency_deep", "ring_scoring"],
+        "optional_tools": ["temporal_delinquency_deep", "ring_scoring",
+                           "entity_resolution_check"],
         "sub_agents": ["legal", "analytics", "investigation"],
         "label": "🔍 Phân tích Gian lận",
     },
@@ -63,6 +65,7 @@ MODE_TOOL_PROFILES: dict[str, dict[str, Any]] = {
         "required_tools": [
             "knowledge_search", "company_risk_lookup", "invoice_risk_scan",
             "vat_refund_risk", "vae_anomaly_scan",
+            "nlp_red_flag_scan",
         ],
         "optional_tools": ["gnn_analysis"],
         "sub_agents": ["legal", "analytics"],
@@ -72,6 +75,7 @@ MODE_TOOL_PROFILES: dict[str, dict[str, Any]] = {
         "required_tools": [
             "knowledge_search", "company_risk_lookup", "delinquency_check",
             "temporal_delinquency_deep", "causal_uplift_recommend",
+            "revenue_forecast",
         ],
         "optional_tools": [],
         "sub_agents": ["legal", "analytics"],
@@ -79,7 +83,7 @@ MODE_TOOL_PROFILES: dict[str, dict[str, Any]] = {
     },
     "macro": {
         "required_tools": ["knowledge_search", "macro_forecast"],
-        "optional_tools": [],
+        "optional_tools": ["revenue_forecast"],
         "sub_agents": ["legal"],
         "label": "🌐 Mô phỏng Vĩ mô",
     },

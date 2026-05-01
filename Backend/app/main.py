@@ -34,6 +34,7 @@ from .routers import (
     collections,
     case_triage,
     tax_agent,
+    ml_api,
 )
 from .security import limiter, SecurityHeadersMiddleware, rate_limit_exceeded_handler
 
@@ -1262,6 +1263,7 @@ app.include_router(audit_selection.router)
 app.include_router(collections.router)
 app.include_router(case_triage.router)
 app.include_router(tax_agent.router)
+app.include_router(ml_api.router)
 
 
 @app.get("/", tags=["Health"])

@@ -604,6 +604,10 @@
                 <span class="material-symbols-outlined">account_circle</span>
                 <span class="text-sm">Tài khoản</span>
             </a>
+            <a class="nav-item text-slate-400 hover:text-white transition-colors hover:bg-white/5 flex items-center gap-3 px-4 py-3 scale-95 active:scale-90 transition-transform rounded-lg" href="ml_workspace.html" style="display:none" data-page="ml_workspace.html" data-title="ML Models Hub">
+                <span class="material-symbols-outlined">memory</span>
+                <span class="text-sm">ML Models Hub</span>
+            </a>
         </nav>
         <div class="mt-auto px-6 pt-6 border-t border-white/5">
             <div class="flex items-center gap-3 p-2 rounded-lg bg-white/5">
@@ -725,6 +729,10 @@
                 <button id="workbench-tab-osint" class="workbench-tab" role="tab" aria-selected="false" aria-controls="osint-section" tabindex="-1" data-mode="osint" aria-label="Chuyển sang bảng tình báo offshore">
                     <span class="material-symbols-outlined text-[14px]">travel_explore</span>
                     Tình báo Offshore/UBO
+                </button>
+                <button id="workbench-tab-entity" class="workbench-tab" role="tab" aria-selected="false" aria-controls="entity-section" tabindex="-1" data-mode="entity" aria-label="Chuyển sang bảng Entity Resolution">
+                    <span class="material-symbols-outlined text-[14px]">group_remove</span>
+                    Entity Resolution
                 </button>
             </div>
             <p id="workbench-shortcut-hint" class="mt-2 text-[10px] font-semibold text-slate-500 tracking-wide">
@@ -1178,6 +1186,46 @@
 </div>
 
 
+        </div>
+
+        <!-- Entity Resolution Section -->
+        <div id="entity-section" class="px-10 pb-10 flex-1 flex-col mt-4 hidden" style="display: none;">
+            <div class="bg-surface-container-lowest p-8 rounded-2xl shadow-[0_20px_40px_rgba(0,33,71,0.06)] mb-8">
+                <h3 class="text-lg font-bold text-primary-container mb-4 flex items-center gap-2">
+                    <span class="material-symbols-outlined">group_remove</span>
+                    Gỡ rối Thực thể (Entity Resolution - DBSCAN/RecordLinkage)
+                </h3>
+                <p class="text-sm text-slate-500 mb-6">Mô hình AI phát hiện các công ty có chung chủ sở hữu, địa chỉ ảo hoặc thông tin liên lạc trùng lặp để tìm ra nhóm công ty liên kết ẩn.</p>
+                
+                <div class="flex gap-4 mb-6">
+                    <input type="text" id="entity-mst-input" placeholder="Nhập Mã số thuế để phân tích liên kết..." class="flex-1 bg-surface-container border border-outline-variant/20 rounded-lg px-4 py-3 text-sm focus:ring-1 focus:ring-primary-container">
+                    <button id="btn-resolve-entity" type="button" class="bg-primary px-8 py-3 rounded-lg text-white text-xs font-black uppercase tracking-widest flex items-center gap-2 hover:bg-primary-container transition-all">
+                        <span class="material-symbols-outlined text-[18px]">search</span> So khớp
+                    </button>
+                </div>
+
+                <div id="entity-results" class="hidden">
+                    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+                        <div class="bg-surface-container-low p-6 rounded-xl border border-outline-variant/10">
+                            <h4 class="text-sm font-bold text-primary-container mb-4">Các thực thể trùng lặp/liên kết phát hiện được</h4>
+                            <div id="entity-matches-list" class="space-y-3">
+                                <!-- JS populated -->
+                            </div>
+                        </div>
+                        <div class="bg-surface-container-low p-6 rounded-xl border border-outline-variant/10">
+                            <h4 class="text-sm font-bold text-primary-container mb-4">Chi tiết điểm tương đồng (Jaro-Winkler)</h4>
+                            <div class="space-y-4" id="entity-scores-list">
+                                <!-- JS populated -->
+                            </div>
+                            <div class="mt-6 pt-6 border-t border-outline-variant/20">
+                                <button id="btn-merge-entities" class="w-full bg-emerald-600 text-white py-2 rounded-lg text-xs font-bold uppercase tracking-wider hover:bg-emerald-700 transition-colors">
+                                    Hợp nhất trong Mạng lưới VAT
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
         </div>
 
     </main>

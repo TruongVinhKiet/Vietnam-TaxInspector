@@ -294,6 +294,10 @@
 <span class="material-symbols-outlined">account_circle</span>
 <span class="text-sm">Tài khoản</span>
 </a>
+<a class="nav-item text-slate-400 hover:text-white transition-colors hover:bg-white/5 flex items-center gap-3 px-4 py-3 scale-95 active:scale-90 transition-transform rounded-lg" href="ml_workspace.html" style="display:none" data-page="ml_workspace.html" data-title="ML Models Hub">
+<span class="material-symbols-outlined">memory</span>
+<span class="text-sm">ML Models Hub</span>
+</a>
 </nav>
 <div class="mt-auto px-6 pt-6 border-t border-white/5">
 <div class="flex items-center gap-3 p-2 rounded-lg bg-white/5">
@@ -359,6 +363,14 @@ Danh mục CSDL
 <button class="tab-btn px-6 py-2.5 rounded-lg text-xs font-bold uppercase tracking-widest flex items-center gap-2" id="tab-batch-btn" type="button">
 <span class="material-symbols-outlined text-[18px]">batch_prediction</span>
 Phân tích Lô (CSV)
+</button>
+<button class="tab-btn px-6 py-2.5 rounded-lg text-xs font-bold uppercase tracking-widest flex items-center gap-2" id="tab-nlp-btn" type="button">
+<span class="material-symbols-outlined text-[18px]">document_scanner</span>
+NLP Hóa Đơn
+</button>
+<button class="tab-btn px-6 py-2.5 rounded-lg text-xs font-bold uppercase tracking-widest flex items-center gap-2" id="tab-ocr-btn" type="button">
+<span class="material-symbols-outlined text-[18px]">center_focus_strong</span>
+OCR Chứng Từ
 </button>
 </div>
 
@@ -1108,6 +1120,94 @@ Danh sách Doanh nghiệp theo Điểm Rủi ro
 </div>
 </div>
 </div>
+
+<!-- ================================================ -->
+<!-- TAB 4: NLP RED FLAG SCAN                         -->
+<!-- ================================================ -->
+<div class="tab-content" id="tab-nlp">
+    <div class="bg-surface-container-lowest p-8 rounded-2xl border border-outline-variant/10 mb-8">
+        <h3 class="text-lg font-bold text-primary-container mb-4 flex items-center gap-2">
+            <span class="material-symbols-outlined">document_scanner</span>
+            Phân tích Ngữ nghĩa Hóa đơn (NLP Red Flags)
+        </h3>
+        <p class="text-sm text-slate-500 mb-6">Mô hình BERT/DistilBERT phân tích mô tả hàng hóa trên hóa đơn để tự động phát hiện các cụm từ đáng ngờ, rủi ro rửa tiền hoặc trốn thuế.</p>
+        
+        <div class="flex gap-4 mb-6">
+            <input type="text" id="nlp-mst-input" placeholder="Nhập Mã số thuế để quét hóa đơn..." class="flex-1 bg-surface-container border border-outline-variant/20 rounded-lg px-4 py-3 text-sm focus:ring-1 focus:ring-primary-container">
+            <button id="btn-scan-nlp" type="button" class="bg-primary px-8 py-3 rounded-lg text-white text-xs font-black uppercase tracking-widest flex items-center gap-2 hover:bg-primary-container transition-all">
+                <span class="material-symbols-outlined text-[18px]">radar</span> Quét NLP
+            </button>
+        </div>
+
+        <div id="nlp-results" class="hidden">
+            <div class="grid grid-cols-3 gap-6 mb-8">
+                <div class="bg-surface-container-low p-5 rounded-xl border border-outline-variant/10">
+                    <p class="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Tổng hóa đơn</p>
+                    <p class="text-3xl font-black text-primary-container" id="nlp-total">0</p>
+                </div>
+                <div class="bg-red-50 p-5 rounded-xl border border-red-100">
+                    <p class="text-[10px] font-black text-red-400 uppercase tracking-widest mb-1">Cảnh báo rủi ro</p>
+                    <p class="text-3xl font-black text-red-600" id="nlp-high-risk">0</p>
+                </div>
+                <div class="bg-surface-container-low p-5 rounded-xl border border-outline-variant/10">
+                    <p class="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Tỷ lệ rủi ro</p>
+                    <p class="text-3xl font-black text-amber-600" id="nlp-ratio">0%</p>
+                </div>
+            </div>
+
+            <h4 class="text-sm font-bold text-primary-container mb-4">Các phát hiện đáng chú ý:</h4>
+            <div id="nlp-flags-list" class="space-y-3">
+                <!-- JS populated -->
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ================================================ -->
+<!-- TAB 5: OCR DOCUMENT PROCESS                      -->
+<!-- ================================================ -->
+<div class="tab-content" id="tab-ocr">
+    <div class="bg-surface-container-lowest p-8 rounded-2xl border border-outline-variant/10 mb-8">
+        <h3 class="text-lg font-bold text-primary-container mb-4 flex items-center gap-2">
+            <span class="material-symbols-outlined">center_focus_strong</span>
+            Trích xuất Chứng từ Tự động (PaddleOCR)
+        </h3>
+        <p class="text-sm text-slate-500 mb-6">Tải lên ảnh hoặc PDF hóa đơn, chứng từ. Hệ thống AI OCR sẽ tự động đọc nội dung và đối chiếu chéo với dữ liệu khai báo.</p>
+        
+        <div id="ocr-upload-zone" class="drop-zone bg-surface-container-lowest p-12 rounded-2xl text-center border border-outline-variant/10 mb-6 cursor-pointer hover:bg-slate-50 transition-colors">
+            <input type="file" id="ocr-file-input" accept="image/*,.pdf" class="hidden">
+            <span class="material-symbols-outlined text-6xl text-slate-300 mb-4 block">upload_file</span>
+            <p class="text-lg font-bold text-primary-container mb-2">Tải ảnh/PDF hóa đơn lên</p>
+            <p class="text-sm text-slate-400">Hỗ trợ JPG, PNG, PDF tối đa 10MB</p>
+        </div>
+
+        <div id="ocr-progress" class="hidden mb-6 flex items-center gap-3 bg-blue-50 p-4 rounded-xl border border-blue-100">
+            <span class="material-symbols-outlined text-blue-500 animate-spin">autorenew</span>
+            <span class="text-sm font-medium text-blue-700">Đang nhận diện ký tự (OCR) bằng PaddleOCR...</span>
+        </div>
+
+        <div id="ocr-results" class="hidden grid grid-cols-12 gap-6">
+            <div class="col-span-12 lg:col-span-5">
+                <div class="bg-surface-container-low rounded-xl border border-outline-variant/10 p-2 h-full min-h-[400px] flex items-center justify-center overflow-hidden">
+                    <img id="ocr-preview-img" src="" alt="Preview" class="max-w-full max-h-[500px] object-contain rounded">
+                </div>
+            </div>
+            <div class="col-span-12 lg:col-span-7 bg-surface-container-low p-6 rounded-xl border border-outline-variant/10">
+                <div class="flex justify-between items-start mb-6">
+                    <h4 class="text-sm font-bold text-primary-container">Dữ liệu trích xuất</h4>
+                    <span id="ocr-confidence" class="px-2 py-1 bg-emerald-100 text-emerald-700 rounded text-xs font-bold">Độ tin cậy: --%</span>
+                </div>
+                <div class="grid grid-cols-2 gap-4" id="ocr-fields">
+                    <!-- JS populated -->
+                </div>
+                <div class="mt-6 pt-6 border-t border-outline-variant/10">
+                    <button class="w-full bg-slate-900 text-white py-2 rounded-lg text-xs font-bold uppercase tracking-wider hover:bg-slate-800 transition-colors">
+                        Đưa vào CSDL Phân tích
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
 </div>
 
 </div></main>

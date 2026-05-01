@@ -213,6 +213,10 @@
 <span class="material-symbols-outlined">account_circle</span>
 <span class="text-sm">Tài khoản</span>
 </a>
+<a class="nav-item text-slate-400 hover:text-white transition-colors hover:bg-white/5 flex items-center gap-3 px-4 py-3 scale-95 active:scale-90 transition-transform rounded-lg" href="ml_workspace.html" style="display:none" data-page="ml_workspace.html" data-title="ML Models Hub">
+<span class="material-symbols-outlined">memory</span>
+<span class="text-sm">ML Models Hub</span>
+</a>
 </nav>
 <div class="mt-auto px-6 pt-6 border-t border-white/5">
 <div class="flex items-center gap-3 p-2 rounded-lg bg-white/5">
@@ -292,8 +296,9 @@
 </div>
 
 <div id="delinq-workbench-tabs" role="tablist" class="max-w-6xl mx-auto bg-surface-container-low rounded-xl border border-outline-variant/20 px-2 py-2 flex items-center gap-1.5 mb-6">
-    <button id="tab-delinq-list" class="workbench-tab px-4 py-2 bg-primary-container text-white rounded-lg text-xs font-bold transition-all" role="tab" aria-selected="true">Danh sách Dự báo</button>
-    <button id="tab-sim" class="workbench-tab px-4 py-2 bg-transparent text-slate-500 rounded-lg text-xs font-bold hover:bg-slate-200 transition-all" role="tab" aria-selected="false">Mô phỏng Kịch bản Vĩ mô</button>
+    <button id="tab-delinq-list" class="workbench-tab px-4 py-2 bg-primary-container text-white rounded-lg text-xs font-bold transition-all" role="tab" aria-selected="true" data-target="delinq-list-section">Danh sách Dự báo</button>
+    <button id="tab-sim" class="workbench-tab px-4 py-2 bg-transparent text-slate-500 rounded-lg text-xs font-bold hover:bg-slate-200 transition-all" role="tab" aria-selected="false" data-target="simulation-section">Mô phỏng Kịch bản Vĩ mô</button>
+    <button id="tab-revenue-forecast" class="workbench-tab px-4 py-2 bg-transparent text-slate-500 rounded-lg text-xs font-bold hover:bg-slate-200 transition-all" role="tab" aria-selected="false" data-target="revenue-forecast-section">Dự báo Doanh thu AI</button>
 </div>
 
 <div id="delinq-list-section">
@@ -746,6 +751,49 @@ Historical-vs-Scenario
 
 </div>
 
+<div id="revenue-forecast-section" class="hidden max-w-6xl mx-auto mb-10">
+    <div class="bg-surface-container-lowest p-8 rounded-2xl shadow-[0_20px_40px_rgba(0,33,71,0.06)] mb-8">
+        <h3 class="text-lg font-bold text-primary-container mb-4 flex items-center gap-2">
+            <span class="material-symbols-outlined">trending_up</span>
+            Dự báo Doanh thu Doanh nghiệp bằng Chuỗi thời gian (N-BEATS/TFT)
+        </h3>
+        <p class="text-sm text-slate-500 mb-6">Nhập Mã số thuế để dự báo doanh thu trong 4 quý tới, phục vụ dự đoán dòng tiền và khả năng nợ thuế.</p>
+        
+        <div class="flex gap-4 mb-6">
+            <input type="text" id="forecast-mst-input" placeholder="Nhập Mã số thuế..." class="flex-1 bg-surface-container border border-outline-variant/20 rounded-lg px-4 py-3 text-sm focus:ring-1 focus:ring-primary-container">
+            <select id="forecast-horizon" class="bg-surface-container border border-outline-variant/20 rounded-lg px-4 py-3 text-sm focus:ring-1 focus:ring-primary-container">
+                <option value="4">4 quý tới</option>
+                <option value="8">8 quý tới</option>
+            </select>
+            <button id="btn-forecast" type="button" class="bg-primary px-8 py-3 rounded-lg text-white text-xs font-black uppercase tracking-widest flex items-center gap-2 hover:bg-primary-container transition-all">
+                <span class="material-symbols-outlined text-[18px]">online_prediction</span> Dự báo
+            </button>
+        </div>
+
+        <div id="forecast-results" class="hidden">
+            <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
+                <div class="col-span-1 lg:col-span-2 bg-surface-container-low p-6 rounded-xl border border-outline-variant/10">
+                    <h4 class="text-sm font-bold text-primary-container mb-4">Biểu đồ Dự báo Doanh thu (Tỷ VNĐ)</h4>
+                    <div id="forecast-chart" style="height: 300px; width: 100%;"></div>
+                </div>
+                <div class="col-span-1">
+                    <div class="bg-surface-container-low p-6 rounded-xl border border-outline-variant/10 h-full">
+                        <h4 class="text-sm font-bold text-primary-container mb-4">Phân tích rủi ro dòng tiền</h4>
+                        <div id="forecast-insights" class="space-y-4">
+                            <!-- JS populated -->
+                        </div>
+                        <div class="mt-6 pt-6 border-t border-outline-variant/20">
+                            <button id="btn-create-intervention" class="w-full bg-slate-900 text-white py-2 rounded-lg text-xs font-bold uppercase tracking-wider hover:bg-slate-800 transition-colors">
+                                Lên lịch Can thiệp Nợ
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
 <div id="delinq-filter-modal" class="fixed inset-0 z-[90] hidden" aria-hidden="true">
 <div class="absolute inset-0 bg-slate-900/45 backdrop-blur-[1px]" data-filter-modal-close></div>
 <div class="relative z-10 flex min-h-full items-end sm:items-center justify-center p-3 sm:p-6">
@@ -882,6 +930,7 @@ window.addEventListener('pageshow', function() {
     }
 });
 </script>
+<script src="https://cdn.jsdelivr.net/npm/echarts/dist/echarts.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <script src="../js/simulation.js?v=5.2"></script>
 <script type="module" src="../js/agent_widget.js"></script>

@@ -131,22 +131,26 @@ class TaxAgentPlanner:
     INTENT_TOOL_MAP: dict[str, list[str]] = {
         "vat_refund_risk": [
             "knowledge_search", "company_risk_lookup", "invoice_risk_scan",
+            "nlp_red_flag_scan",
         ],
         "invoice_risk": [
             "knowledge_search", "invoice_risk_scan", "motif_detection",
+            "nlp_red_flag_scan",
         ],
         "delinquency": [
             "knowledge_search", "company_risk_lookup", "delinquency_check",
+            "revenue_forecast",
         ],
         "osint_ownership": [
             "knowledge_search", "ownership_analysis", "company_risk_lookup", "gnn_analysis",
+            "entity_resolution_check",
         ],
         "transfer_pricing": [
             "knowledge_search", "company_risk_lookup", "invoice_risk_scan",
         ],
         "audit_selection": [
             "knowledge_search", "company_risk_lookup", "delinquency_check",
-            "invoice_risk_scan",
+            "invoice_risk_scan", "nlp_red_flag_scan",
         ],
         "top_n_query": [
             "knowledge_search",
@@ -428,6 +432,45 @@ class TaxAgentPlanner:
             ))
             step_id += 1
 
+        # ═══ NEW ML TOOLS ═══
+
+        if "nlp_red_flag_scan" in tools and tax_code:
+            steps.append(SubTask(
+                step_id=step_id,
+                step_type=PlanStep.SCAN_INVOICES,
+                tool_name="nlp_red_flag_scan",
+                tool_inputs={"tax_code": tax_code},
+                description=f"Phân tích NLP mô tả hóa đơn DN {tax_code}",
+                depends_on=[],
+                priority=4,
+            ))
+            step_id += 1
+
+        if "revenue_forecast" in tools and tax_code:
+            steps.append(SubTask(
+                step_id=step_id,
+                step_type=PlanStep.CHECK_DELINQUENCY,
+                tool_name="revenue_forecast",
+                tool_inputs={"tax_code": tax_code},
+                description=f"Dự báo doanh thu quý tới DN {tax_code}",
+                depends_on=[],
+                priority=4,
+            ))
+            step_id += 1
+
+        if "entity_resolution_check" in tools and tax_code:
+            steps.append(SubTask(
+                step_id=step_id,
+                step_type=PlanStep.ANALYZE_OWNERSHIP,
+                tool_name="entity_resolution_check",
+                tool_inputs={"tax_code": tax_code},
+                description=f"Kiểm tra trùng lặp thực thể DN {tax_code}",
+                depends_on=[],
+                priority=5,
+                optional=True,
+            ))
+            step_id += 1
+
         return steps
 
     def _generate_reasoning(
@@ -472,6 +515,10 @@ class TaxAgentPlanner:
             "gnn_analysis": "phân tích đồ thị giao dịch bằng AI",
             "motif_detection": "phát hiện mẫu gian lận",
             "ownership_analysis": "phân tích cấu trúc sở hữu/UBO",
+            "nlp_red_flag_scan": "phân tích NLP mô tả hóa đơn phát hiện gian lận",
+            "revenue_forecast": "dự báo doanh thu quý tới bằng ML",
+            "entity_resolution_check": "phát hiện doanh nghiệp trùng lặp/phượng hoàng",
+            "ocr_document_process": "trích xuất thông tin từ ảnh/PDF hóa đơn",
         }
         reasons = [
             f"{tool_reasons.get(t, t)}"
@@ -512,6 +559,10 @@ class TaxAgentPlanner:
             "gnn_analysis": 400,
             "motif_detection": 800,
             "ownership_analysis": 300,
+            "nlp_red_flag_scan": 500,
+            "revenue_forecast": 400,
+            "entity_resolution_check": 600,
+            "ocr_document_process": 2000,
         }
 
         # Simple estimate: sum of sequential stages
