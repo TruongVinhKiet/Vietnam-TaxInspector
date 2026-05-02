@@ -169,41 +169,73 @@ class TelemetryEngine:
         except Exception as exc:
             logger.debug("[Telemetry] record_from_orchestrator failed: %s", exc)
 
-    def get_dashboard(self, window_minutes: int = 60) -> dict[str, Any]:
+    def get_dashboard(self, window_minutes: int = 60, db=None) -> dict[str, Any]:
         """
         Build dashboard data for the monitoring UI.
-
         Returns aggregated metrics over the specified time window.
         """
         cutoff = time.time() - (window_minutes * 60)
+        
+        from sqlalchemy import text as sql_text
+        import datetime
+        db_metrics = []
+        if db:
+            import datetime
+            cutoff_dt = datetime.datetime.fromtimestamp(cutoff, tz=datetime.timezone.utc)
+            rows = db.execute(
+                sql_text("""
+                    SELECT * FROM agent_quality_metrics 
+                    WHERE created_at >= :cutoff
+                """),
+                {"cutoff": cutoff_dt}
+            ).fetchall()
+            for r in rows:
+                db_metrics.append(RequestMetrics(
+                    session_id=r.session_id,
+                    intent=r.intent or 'general',
+                    complexity='unknown',
+                    timestamp=r.created_at.timestamp() if hasattr(r.created_at, 'timestamp') else cutoff,
+                    total_latency_ms=r.total_latency_ms or 0.0,
+                    latency_breakdown={},
+                    intent_confidence=r.synthesis_confidence or 0.0,
+                    synthesis_confidence=r.synthesis_confidence or 0.0,
+                    retrieval_hits=r.retrieval_hits or 0,
+                    evidence_count=r.evidence_count or 0,
+                    tools_invoked=r.tools_invoked or 0,
+                    tools_succeeded=r.tools_succeeded or 0,
+                    tools_failed=r.tools_failed or 0,
+                    abstained=r.compliance_decision == 'block',
+                    escalated=False,
+                    compliance_decision=r.compliance_decision or 'allow',
+                    warnings_count=r.warnings_count or 0,
+                    intent_source=r.synthesis_tier or 'unknown',
+                ))
 
         with self._lock:
             recent = [m for m in self._buffer if m.timestamp >= cutoff]
+            
+        recent.extend(db_metrics)
 
         if not recent:
             return self._empty_dashboard()
 
         n = len(recent)
 
-        # Latency stats
         latencies = [m.total_latency_ms for m in recent]
         latency_sorted = sorted(latencies)
 
-        # Confidence stats
         intent_confs = [m.intent_confidence for m in recent]
         synth_confs = [m.synthesis_confidence for m in recent]
 
-        # Intent distribution
         intent_dist: dict[str, int] = defaultdict(int)
         for m in recent:
             intent_dist[m.intent] += 1
 
-        # Complexity distribution
         complexity_dist: dict[str, int] = defaultdict(int)
         for m in recent:
-            complexity_dist[m.complexity] += 1
+            if m.complexity != 'unknown':
+                complexity_dist[m.complexity] += 1
 
-        # Component latency breakdown
         component_latencies: dict[str, list[float]] = defaultdict(list)
         for m in recent:
             for comp, lat in m.latency_breakdown.items():
@@ -214,59 +246,36 @@ class TelemetryEngine:
             for comp, lats in component_latencies.items()
         }
 
-        # Tool stats
-        total_tool_calls = sum(m.tools_invoked for m in recent)
-        total_tool_errors = sum(m.tools_failed for m in recent)
-
-        # Quality metrics
         retrieval_hits = [m.retrieval_hits for m in recent]
 
         return {
             "window_minutes": window_minutes,
             "total_requests": n,
             "requests_per_minute": round(n / max(window_minutes, 1), 2),
-            # Latency
             "latency": {
-                "avg_ms": round(sum(latencies) / n, 1),
-                "p50_ms": round(latency_sorted[n // 2], 1),
+                "avg_ms": round(sum(latencies) / n, 1) if n > 0 else 0,
+                "p50_ms": round(latency_sorted[n // 2], 1) if n > 0 else 0,
                 "p95_ms": round(latency_sorted[int(n * 0.95)], 1) if n >= 20 else None,
                 "p99_ms": round(latency_sorted[int(n * 0.99)], 1) if n >= 100 else None,
-                "max_ms": round(max(latencies), 1),
-                "min_ms": round(min(latencies), 1),
+                "max_ms": round(max(latencies), 1) if n > 0 else 0,
+                "min_ms": round(min(latencies), 1) if n > 0 else 0,
                 "by_component": avg_component,
             },
-            # Quality
             "quality": {
-                "avg_intent_confidence": round(sum(intent_confs) / n, 4),
-                "avg_synthesis_confidence": round(sum(synth_confs) / n, 4),
-                "avg_retrieval_hits": round(sum(retrieval_hits) / n, 2),
-                "abstain_rate": round(sum(1 for m in recent if m.abstained) / n, 4),
-                "escalation_rate": round(sum(1 for m in recent if m.escalated) / n, 4),
+                "avg_intent_confidence": round(sum(intent_confs) / n, 4) if n > 0 else 0,
+                "avg_synthesis_confidence": round(sum(synth_confs) / n, 4) if n > 0 else 0,
+                "avg_retrieval_hits": round(sum(retrieval_hits) / n, 2) if n > 0 else 0,
+                "abstain_rate": round(sum(1 for m in recent if m.abstained) / n, 4) if n > 0 else 0,
+                "escalation_rate": round(sum(1 for m in recent if m.escalated) / n, 4) if n > 0 else 0,
             },
-            # Intent
             "intent_distribution": dict(intent_dist),
             "complexity_distribution": dict(complexity_dist),
-            # Tools
             "tools": {
-                "total_calls": total_tool_calls,
-                "total_errors": total_tool_errors,
-                "error_rate": round(total_tool_errors / max(total_tool_calls, 1), 4),
+                "total_invoked": sum(m.tools_invoked for m in recent),
+                "total_succeeded": sum(m.tools_succeeded for m in recent),
+                "total_failed": sum(m.tools_failed for m in recent),
             },
-            # Alerts
-            "active_alerts": [
-                {"name": a.config.name, "value": a.current_value, "message": a.message}
-                for a in self._active_alerts
-            ],
-            # System
-            "system": {
-                "buffer_size": len(self._buffer),
-                "total_lifetime_requests": self._total_requests,
-                "total_lifetime_abstains": self._total_abstains,
-                "total_lifetime_escalations": self._total_escalations,
-                "uptime_hours": round(
-                    (time.time() - self._buffer[0].timestamp) / 3600, 2
-                ) if self._buffer else 0,
-            },
+            "timeline": []
         }
 
     def get_intent_drift(self, window_hours: int = 24) -> dict[str, Any]:
@@ -312,56 +321,67 @@ class TelemetryEngine:
             "second_half_distribution": {k: round(v / total_2, 4) for k, v in dist_2.items()},
         }
 
-    def flush_to_db(self, db) -> int:
+    def flush_to_db(self, db=None) -> int:
         """Flush buffered metrics to database."""
         from sqlalchemy import text as sql_text
+        from app.database import SessionLocal
 
         with self._lock:
             to_flush = list(self._buffer)
+            self._buffer.clear()
 
         flushed = 0
-        for m in to_flush:
-            try:
-                db.execute(
-                    sql_text("""
-                        INSERT INTO agent_quality_metrics
-                        (session_id, intent, retrieval_hits, synthesis_confidence,
-                         evidence_count, citation_count, compliance_decision,
-                         warnings_count, total_latency_ms, synthesis_tier,
-                         tools_invoked, tools_succeeded, tools_failed, created_at)
-                        VALUES
-                        (:session_id, :intent, :retrieval_hits, :synthesis_confidence,
-                         :evidence_count, :citation_count, :compliance_decision,
-                         :warnings_count, :total_latency_ms, :synthesis_tier,
-                         :tools_invoked, :tools_succeeded, :tools_failed,
-                         to_timestamp(:ts))
-                    """),
-                    {
-                        "session_id": m.session_id,
-                        "intent": m.intent,
-                        "retrieval_hits": m.retrieval_hits,
-                        "synthesis_confidence": m.synthesis_confidence,
-                        "evidence_count": m.evidence_count,
-                        "citation_count": m.retrieval_hits,
-                        "compliance_decision": m.compliance_decision,
-                        "warnings_count": m.warnings_count,
-                        "total_latency_ms": m.total_latency_ms,
-                        "synthesis_tier": m.intent_source,
-                        "tools_invoked": m.tools_invoked,
-                        "tools_succeeded": m.tools_succeeded,
-                        "tools_failed": m.tools_failed,
-                        "ts": m.timestamp,
-                    },
-                )
-                flushed += 1
-            except Exception:
-                pass
+        if not to_flush:
+            return 0
 
-        if flushed:
-            try:
-                db.commit()
-            except Exception:
-                pass
+        session = db or SessionLocal()
+        try:
+            for m in to_flush:
+                try:
+                    session.execute(
+                        sql_text("""
+                            INSERT INTO agent_quality_metrics
+                            (session_id, intent, retrieval_hits, synthesis_confidence,
+                             evidence_count, citation_count, compliance_decision,
+                             warnings_count, total_latency_ms, synthesis_tier,
+                             tools_invoked, tools_succeeded, tools_failed, created_at)
+                            VALUES
+                            (:session_id, :intent, :retrieval_hits, :synthesis_confidence,
+                             :evidence_count, :citation_count, :compliance_decision,
+                             :warnings_count, :total_latency_ms, :synthesis_tier,
+                             :tools_invoked, :tools_succeeded, :tools_failed,
+                             to_timestamp(:ts))
+                        """),
+                        {
+                            "session_id": m.session_id,
+                            "intent": m.intent,
+                            "retrieval_hits": m.retrieval_hits,
+                            "synthesis_confidence": m.synthesis_confidence,
+                            "evidence_count": m.evidence_count,
+                            "citation_count": m.retrieval_hits,
+                            "compliance_decision": m.compliance_decision,
+                            "warnings_count": m.warnings_count,
+                            "total_latency_ms": m.total_latency_ms,
+                            "synthesis_tier": m.intent_source,
+                            "tools_invoked": m.tools_invoked,
+                            "tools_succeeded": m.tools_succeeded,
+                            "tools_failed": m.tools_failed,
+                            "ts": m.timestamp,
+                        },
+                    )
+                    flushed += 1
+                except Exception as e:
+                    logger.error("[Telemetry] Insert failed: %s", e)
+
+            if flushed:
+                try:
+                    session.commit()
+                except Exception as e:
+                    logger.error("[Telemetry] Commit failed: %s", e)
+                    session.rollback()
+        finally:
+            if db is None:
+                session.close()
 
         return flushed
 

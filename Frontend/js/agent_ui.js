@@ -38,7 +38,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const MODE_CONFIG = {
         full:        { label: 'Toàn diện',   icon: 'fa-bolt',                     color: 'text-amber-500' },
-        fraud:       { label: 'Gian lận',    icon: 'fa-magnifying-glass-chart',   color: 'text-red-500' },
+        fraud:       { label: 'Gian lận',    icon: 'fa-user-secret',              color: 'text-red-500' },
         vat:         { label: 'VAT & HĐ',    icon: 'fa-file-invoice-dollar',      color: 'text-blue-500' },
         delinquency: { label: 'Dự báo Nợ',   icon: 'fa-chart-line',               color: 'text-violet-500' },
         macro:       { label: 'Vĩ mô',       icon: 'fa-globe',                    color: 'text-emerald-500' },
@@ -902,7 +902,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 <div class="viz-card-header"><i class="fa-solid fa-brain text-violet-500"></i> XAI — Giải Thích Dự Đoán (SHAP)</div>
                 <div class="viz-card-body">
                     <div class="text-sm text-slate-600 mb-3">${viz.xai_shap.summary || ''}</div>
-                    <canvas id="${chartId}" height="${Math.max(120, attrs.length * 28)}"></canvas>
+                    <div style="position: relative; height: ${Math.max(250, attrs.length * 30)}px; width: 100%;">
+                        <canvas id="${chartId}"></canvas>
+                    </div>
                     <div class="flex items-center gap-4 mt-3 text-xs text-slate-400">
                         <span><span class="inline-block w-3 h-3 rounded-sm mr-1" style="background:#EF4444"></span> Tăng rủi ro</span>
                         <span><span class="inline-block w-3 h-3 rounded-sm mr-1" style="background:#22C55E"></span> Giảm rủi ro</span>
@@ -1021,7 +1023,7 @@ document.addEventListener('DOMContentLoaded', () => {
                                 <span class="ml-auto text-xs px-2 py-0.5 rounded-full font-bold" style="background: ${sc}15; color: ${sc}">${stanceIcons[s.stance] || '?'} ${(s.risk_score).toFixed(0)}%</span>
                             </div>
                             <div class="text-xs text-slate-500 space-y-1">
-                                ${s.findings.slice(0, 3).map(f => `<div>${f}</div>`).join('')}
+                                ${s.findings.slice(0, 3).map(f => `<div>${formatMarkdown(f)}</div>`).join('')}
                             </div>
                             <div class="mt-2 text-xs text-slate-400">Độ tin cậy: ${(s.confidence * 100).toFixed(0)}%</div>
                         </div>`;
@@ -1037,14 +1039,14 @@ document.addEventListener('DOMContentLoaded', () => {
                         <div class="debate-disagreement">
                             <div class="flex items-center gap-2 mb-1">
                                 <span class="px-2 py-0.5 rounded-full text-[10px] font-bold ${severityBadge[d.severity] || 'bg-slate-100'}">${d.severity.toUpperCase()}</span>
-                                <span class="text-xs font-semibold text-slate-600">${d.topic}</span>
+                                <span class="text-xs font-semibold text-slate-600">${formatMarkdown(d.topic)}</span>
                             </div>
                             <div class="grid grid-cols-2 gap-2 text-xs mb-1">
                                 ${Object.entries(d.positions).map(([agent, pos]) =>
-                                    `<div class="px-2 py-1 rounded bg-slate-50"><span class="font-semibold">${agent}:</span> ${pos}</div>`
+                                    `<div class="px-2 py-1 rounded bg-slate-50"><span class="font-semibold">${agent}:</span> ${formatMarkdown(pos)}</div>`
                                 ).join('')}
                             </div>
-                            ${d.resolution ? `<div class="text-xs text-slate-500 italic">💡 ${d.resolution}</div>` : ''}
+                            ${d.resolution ? `<div class="text-xs text-slate-500 italic">💡 ${formatMarkdown(d.resolution)}</div>` : ''}
                         </div>`).join('')}
                     </div>
                 </div>` : ''}
@@ -1081,7 +1083,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (data.recommendations && data.recommendations.length > 0) {
             html += '<div class="viz-rec-pills">';
             data.recommendations.forEach(r => {
-                html += `<div class="viz-rec-pill">${r}</div>`;
+                html += `<div class="viz-rec-pill">${formatMarkdown(r)}</div>`;
             });
             html += '</div>';
         }
@@ -1263,6 +1265,8 @@ document.addEventListener('DOMContentLoaded', () => {
                     data: values,
                     backgroundColor: colors,
                     borderRadius: 4,
+                    barThickness: 24,
+                    maxBarThickness: 24,
                 }]
             },
             options: {

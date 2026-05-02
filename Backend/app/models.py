@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Float, Boolean, Date, DateTime, Numeric, ForeignKey, Text, JSON
+from sqlalchemy import Column, Integer, String, Float, Boolean, Date, DateTime, Numeric, ForeignKey, Text, JSON, UniqueConstraint
 from sqlalchemy.sql import func
 
 from .database import Base
@@ -85,6 +85,7 @@ class Invoice(Base):
     payment_status = Column(String(30), default="unknown")   # For graph enrichment
     goods_category = Column(String(100))                      # Product category for motif analysis
     is_adjustment = Column(Boolean, default=False)            # Credit note / adjustment
+    risk_label = Column(Integer, default=0)                   # Invoice risk flag
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
@@ -1327,3 +1328,20 @@ class DelinquencyPrediction(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
+class AgentEntityMemory(Base):
+    __tablename__ = "agent_entity_memory"
+
+    id = Column(Integer, primary_key=True, index=True)
+    session_id = Column(String(120), ForeignKey("agent_sessions.session_id", ondelete="CASCADE"), nullable=False, index=True)
+    entity_type = Column(String(50), nullable=False)
+    entity_value = Column(String(255), nullable=False)
+    first_seen_turn = Column(Integer, nullable=False, default=0)
+    last_seen_turn = Column(Integer, nullable=False, default=0)
+    mention_count = Column(Integer, nullable=False, default=1)
+    confidence = Column(Float, nullable=False, default=1.0)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    # Adding unique constraint for UPSERT (ON CONFLICT)
+    __table_args__ = (
+        UniqueConstraint('session_id', 'entity_type', 'entity_value', name='_session_entity_uc'),
+    )

@@ -164,6 +164,33 @@ async def lifespan(app: FastAPI):
             ))
 
             conn.execute(text(
+                "CREATE TABLE IF NOT EXISTS agent_quality_metrics ("
+                "id SERIAL PRIMARY KEY, "
+                "session_id VARCHAR(64) NOT NULL, "
+                "turn_id INT, "
+                "intent VARCHAR(64), "
+                "retrieval_hits INT, "
+                "retrieval_mrr FLOAT, "
+                "retrieval_ndcg FLOAT, "
+                "synthesis_confidence FLOAT, "
+                "evidence_count INT, "
+                "citation_count INT, "
+                "compliance_decision VARCHAR(16), "
+                "warnings_count INT, "
+                "total_latency_ms FLOAT, "
+                "embedding_tier VARCHAR(32), "
+                "reranker_tier VARCHAR(32), "
+                "synthesis_tier VARCHAR(32), "
+                "tools_invoked INT, "
+                "tools_succeeded INT, "
+                "tools_failed INT, "
+                "user_rating INT, "
+                "user_feedback TEXT, "
+                "created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP"
+                ");"
+            ))
+
+            conn.execute(text(
                 "CREATE TABLE IF NOT EXISTS kpi_trigger_policies ("
                 "id SERIAL PRIMARY KEY, "
                 "track_name VARCHAR(50) NOT NULL, "

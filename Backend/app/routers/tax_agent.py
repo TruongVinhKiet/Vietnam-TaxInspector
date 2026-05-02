@@ -663,29 +663,23 @@ async def chat_with_file(
 # ═══════════════════════════════════════════════════════════════════════
 
 @router.post("/chat/v2/stream")
-def chat_tax_agent_v2_stream(payload: ChatRequest, db: Session = Depends(get_db)):
+async def chat_tax_agent_v2_stream(payload: ChatRequest, db: Session = Depends(get_db)):
     """
     V2 chat endpoint with SSE streaming.
     Yields real-time events as the orchestrator processes each pipeline step.
-    
-    Event types:
-    - thinking:    Step progress (intent classification, planning, etc.)
-    - tool_start:  Tool execution started
-    - tool_done:   Tool execution completed
-    - sub_agent:   Sub-agent status update
-    - text_chunk:  Partial answer text (for typewriter effect)
-    - viz_data:    Visualization data for charts
-    - done:        Final complete response
     """
     import json as _json
+    import asyncio
+    import threading
 
     session_id = payload.session_id or f"sess-{uuid.uuid4().hex[:10]}"
-
     from ml_engine.tax_agent_orchestrator import get_orchestrator
-
     orchestrator = get_orchestrator()
 
-    def event_generator():
+    queue = asyncio.Queue()
+    loop = asyncio.get_running_loop()
+
+    def run_orchestrator():
         try:
             for event in orchestrator.process_streaming(
                 db,
@@ -697,10 +691,30 @@ def chat_tax_agent_v2_stream(payload: ChatRequest, db: Session = Depends(get_db)
             ):
                 event_type = event.get("event", "message")
                 event_data = _json.dumps(event.get("data", {}), ensure_ascii=False, default=str)
-                yield f"event: {event_type}\ndata: {event_data}\n\n"
+                loop.call_soon_threadsafe(queue.put_nowait, f"event: {event_type}\ndata: {event_data}\n\n")
         except Exception as exc:
             error_data = _json.dumps({"error": str(exc)}, ensure_ascii=False)
-            yield f"event: error\ndata: {error_data}\n\n"
+            loop.call_soon_threadsafe(queue.put_nowait, f"event: error\ndata: {error_data}\n\n")
+        finally:
+            loop.call_soon_threadsafe(queue.put_nowait, None)  # EOF
+            try:
+                from ml_engine.tax_agent_telemetry import get_telemetry
+                get_telemetry().flush_to_db()
+            except Exception as e:
+                import logging
+                logging.getLogger(__name__).error("[TaxAgentRouter] flush_to_db failed: %s", e)
+
+    threading.Thread(target=run_orchestrator, daemon=True).start()
+
+    async def event_generator():
+        # Pad to prevent browser buffering
+        yield ": " + " " * 1024 + "\n\n"
+        while True:
+            item = await queue.get()
+            if item is None:
+                break
+            yield item
+            await asyncio.sleep(0.01)
 
     return StreamingResponse(
         event_generator(),
@@ -1014,13 +1028,13 @@ def active_learning_candidates(
 # ═══════════════════════════════════════════════════════════════════════
 
 @router.get("/telemetry/dashboard")
-def telemetry_dashboard(window_minutes: int = 60):
+def telemetry_dashboard(window_minutes: int = 60, db: Session = Depends(get_db)):
     """Get real-time agent telemetry dashboard data."""
     try:
         from ml_engine.tax_agent_telemetry import get_telemetry
 
         telemetry = get_telemetry()
-        return telemetry.get_dashboard(window_minutes=window_minutes)
+        return telemetry.get_dashboard(window_minutes=window_minutes, db=db)
     except Exception as exc:
         return {"error": str(exc)}
 

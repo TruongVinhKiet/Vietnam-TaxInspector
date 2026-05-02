@@ -225,6 +225,11 @@ class ToolExecutor:
                 )
 
             except Exception as exc:
+                if db is not None:
+                    try:
+                        db.rollback()
+                    except Exception:
+                        pass
                 latency = (time.perf_counter() - t0) * 1000.0
                 last_error = str(exc)
                 retries += 1
@@ -473,8 +478,8 @@ def _tool_company_risk_lookup(
     row = db.execute(
         sql_text("""
             SELECT
-                c.tax_code, c.company_name, c.industry, c.risk_score,
-                c.risk_level, c.last_risk_update, c.status
+                c.tax_code, c.name, c.industry, c.risk_score,
+                c.is_active
             FROM companies c
             WHERE c.tax_code = :tax_code
         """),
@@ -487,12 +492,11 @@ def _tool_company_risk_lookup(
     return {
         "status": "found",
         "tax_code": str(row["tax_code"]),
-        "company_name": str(row.get("company_name") or ""),
+        "company_name": str(row.get("name") or ""),
         "industry": str(row.get("industry") or ""),
         "risk_score": float(row.get("risk_score") or 0),
-        "risk_level": str(row.get("risk_level") or "unknown"),
-        "last_risk_update": str(row.get("last_risk_update") or ""),
-        "status_detail": str(row.get("status") or ""),
+        "risk_level": "high" if float(row.get("risk_score") or 0) > 80 else "medium" if float(row.get("risk_score") or 0) > 50 else "low",
+        "is_active": bool(row.get("is_active")),
     }
 
 
@@ -580,7 +584,7 @@ def _tool_motif_detection(
 
     invoices = db.execute(
         sql_text("""
-            SELECT seller_tax_code, buyer_tax_code, amount, invoice_date AS date
+            SELECT seller_tax_code, buyer_tax_code, amount, date
             FROM invoices
             WHERE (:tax_code IS NULL
                    OR seller_tax_code = :tax_code
@@ -616,7 +620,7 @@ def _tool_ownership_analysis(
     ownership_links = db.execute(
         sql_text("""
             SELECT parent_tax_code, child_tax_code, ownership_percent,
-                   relationship_type, reported_by
+                   relationship_type, data_source
             FROM ownership_links
             WHERE parent_tax_code = :tax_code OR child_tax_code = :tax_code
         """),
@@ -1135,7 +1139,7 @@ def _tool_nlp_red_flag_scan(
     **kwargs,
 ) -> dict[str, Any]:
     """NLP Red Flag Detector tool for analyzing invoice descriptions."""
-    from ml_engine.nlp_red_flag_detector import NLPRedFlagDetector
+    from ml_engine.nlp_red_flag_detector import get_red_flag_engine
     from sqlalchemy import text as sql_text
 
     query = sql_text("""
@@ -1149,16 +1153,17 @@ def _tool_nlp_red_flag_scan(
     if not descriptions:
         return {"status": "insufficient_data", "tax_code": tax_code, "message": "Không tìm thấy dữ liệu hóa đơn."}
 
-    detector = NLPRedFlagDetector()
-    results = detector.batch_analyze(descriptions)
+    invoices_payload = [{"invoice_number": f"INV-{i}", "descriptions": [desc]} for i, desc in enumerate(descriptions)]
+    detector = get_red_flag_engine()
+    results = detector.batch_analyze(invoices_payload)
 
-    high_risk_count = sum(1 for r in results if r["risk_score"] > 0.6)
+    high_risk_count = sum(1 for r in results if r.risk_score > 0.6)
     return {
         "status": "analyzed",
         "tax_code": tax_code,
         "total_analyzed": len(descriptions),
         "high_risk_count": high_risk_count,
-        "top_flags": [r for r in results if r["risk_score"] > 0.6][:5]
+        "top_flags": [{"risk_score": r.risk_score, "flags": r.flags} for r in results if r.risk_score > 0.6][:5]
     }
 
 

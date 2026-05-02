@@ -128,12 +128,14 @@
                 </button>
             </div>
         </div>
-        <div class="max-w-4xl mx-auto relative rounded-2xl bg-white shadow-[0_8px_30px_rgb(0,0,0,0.08)] border border-slate-200 flex items-end p-2 transition-shadow focus-within:shadow-[0_8px_40px_rgba(14,165,233,0.15)] focus-within:border-sky-300">
+        <div class="max-w-4xl mx-auto relative rounded-2xl bg-white shadow-[0_8px_30px_rgb(0,0,0,0.08)] border border-slate-200 flex items-end p-2 gap-2 transition-shadow focus-within:shadow-[0_8px_40px_rgba(14,165,233,0.15)] focus-within:border-sky-300">
             <!-- Model Mode Selector -->
-            <div id="modelSelector" class="relative">
-                <button id="modelSelectorBtn" class="flex items-center gap-2 px-3 py-2.5 rounded-xl bg-slate-50 hover:bg-slate-100 text-sm font-semibold text-slate-600 transition-all border border-slate-200 whitespace-nowrap" title="Chọn chế độ phân tích">
-                    <i class="fa-solid fa-bolt text-amber-500" id="modelIcon"></i>
-                    <span id="modelSelectorLabel" class="hidden sm:inline">Toàn diện</span>
+            <div id="modelSelector" class="relative mb-1">
+                <button id="modelSelectorBtn" class="flex items-center justify-between px-4 py-2.5 w-44 rounded-xl bg-slate-50 hover:bg-slate-100 text-sm font-semibold text-slate-600 transition-all border border-slate-200 whitespace-nowrap" title="Chọn chế độ phân tích">
+                    <div class="flex items-center gap-2">
+                        <i class="fa-solid fa-bolt text-amber-500" id="modelIcon"></i>
+                        <span id="modelSelectorLabel" class="hidden sm:inline">Toàn diện</span>
+                    </div>
                     <i class="fa-solid fa-chevron-down text-[10px] opacity-60"></i>
                 </button>
                 <div id="modelDropdown" class="hidden absolute bottom-full left-0 mb-2 w-80 bg-white/95 backdrop-blur-md rounded-xl shadow-2xl border border-slate-200 overflow-hidden z-50">
@@ -147,7 +149,7 @@
                             <span class="text-xs font-bold text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded">ALL</span>
                         </div>
                         <div class="model-option px-3 py-2.5 rounded-lg hover:bg-sky-50 cursor-pointer flex items-center gap-3 transition-colors" data-mode="fraud">
-                            <div class="w-8 h-8 rounded-lg bg-red-100 flex items-center justify-center"><i class="fa-solid fa-magnifying-glass-chart text-red-600"></i></div>
+                            <div class="w-8 h-8 rounded-lg bg-red-100 flex items-center justify-center"><i class="fa-solid fa-user-secret text-red-600"></i></div>
                             <div class="flex-1"><p class="text-sm font-bold text-slate-700">Gian lận</p><p class="text-xs text-slate-400">XGBoost + GNN + VAE</p></div>
                             <span class="text-xs font-bold text-red-600 bg-red-50 px-1.5 py-0.5 rounded">8</span>
                         </div>
@@ -170,20 +172,20 @@
                 </div>
             </div>
 
-            <button id="attachmentBtn" class="p-3 text-slate-400 hover:text-sky-600 transition-colors" title="Đính kèm file CSV">
+            <button id="attachmentBtn" class="p-2.5 mb-1 text-slate-400 hover:text-sky-600 transition-colors" title="Đính kèm file CSV">
                 <i class="fa-solid fa-paperclip text-lg"></i>
             </button>
             
-            <textarea id="chatInput" rows="1" placeholder="Nhập yêu cầu phân tích thuế, tên DN, hoặc MST..." class="flex-1 max-h-32 min-h-[48px] bg-transparent border-none focus:ring-0 resize-none py-3 px-2 text-slate-700 placeholder-slate-400 leading-relaxed"></textarea>
+            <textarea id="chatInput" rows="1" placeholder="Nhập yêu cầu phân tích thuế, tên DN, hoặc MST..." class="flex-1 max-h-32 min-h-[44px] mb-1 bg-transparent border-none focus:ring-0 resize-none py-2.5 px-2 text-slate-700 placeholder-slate-400 leading-relaxed"></textarea>
             
-            <div class="flex items-center gap-2 p-1">
-                <button id="micBtn" class="w-12 h-12 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-600 flex items-center justify-center transition-all relative">
-                    <i class="fa-solid fa-microphone text-lg"></i>
+            <div class="flex items-center gap-2 p-1 mb-1">
+                <button id="micBtn" class="w-10 h-10 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-600 flex items-center justify-center transition-all relative">
+                    <i class="fa-solid fa-microphone text-md"></i>
                     <!-- Mic recording pulse -->
                     <div class="absolute inset-0 rounded-full border-2 border-red-500 scale-150 opacity-0 transition-opacity pointer-events-none" id="micPulse"></div>
                 </button>
-                <button id="sendBtn" class="w-12 h-12 rounded-xl bg-[#0F172A] hover:bg-slate-800 text-white flex items-center justify-center shadow-md transition-transform hover:scale-105 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed">
-                    <i class="fa-solid fa-paper-plane"></i>
+                <button id="sendBtn" class="w-10 h-10 rounded-xl bg-[#0F172A] hover:bg-slate-800 text-white flex items-center justify-center shadow-md transition-transform hover:scale-105 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed">
+                    <i class="fa-solid fa-paper-plane text-sm"></i>
                 </button>
             </div>
         </div>

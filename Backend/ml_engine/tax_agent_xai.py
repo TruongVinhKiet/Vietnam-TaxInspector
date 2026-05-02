@@ -171,10 +171,10 @@ class SHAPExplainer:
 
         try:
             import joblib
-            model_path = MODEL_DIR / "xgboost_risk_model.pkl"
+            model_path = MODEL_DIR / "xgboost_model.joblib"
             if not model_path.exists():
                 # Try ensemble model
-                model_path = MODEL_DIR / "ensemble_model.pkl"
+                model_path = MODEL_DIR / "ensemble_meta.pkl"
             if model_path.exists():
                 self._model = joblib.load(model_path)
                 logger.info("[XAI:SHAP] Loaded model from %s", model_path)
@@ -216,15 +216,22 @@ class SHAPExplainer:
         names = feature_names or RISK_FEATURE_NAMES
         features = np.asarray(features).reshape(1, -1)
 
-        # Get prediction
+        # Get prediction and align feature shapes
         prediction = 0.0
         if self._model is not None:
+            n_expected = getattr(self._model, "n_features_in_", features.shape[1])
+            if features.shape[1] > n_expected:
+                features = features[:, :n_expected]
+            elif features.shape[1] < n_expected:
+                features = np.pad(features, ((0, 0), (0, n_expected - features.shape[1])))
+                
             try:
                 if hasattr(self._model, 'predict_proba'):
                     prediction = float(self._model.predict_proba(features)[0, 1])
                 else:
                     prediction = float(self._model.predict(features)[0])
-            except Exception:
+            except Exception as e:
+                logger.warning("[XAI:SHAP] Prediction failed: %s", e)
                 prediction = 0.0
 
         # Compute SHAP values
