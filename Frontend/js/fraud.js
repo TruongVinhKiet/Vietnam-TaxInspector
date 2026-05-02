@@ -6136,6 +6136,9 @@ async function processOCRFile(file) {
     const previewUrl = URL.createObjectURL(file);
     const previewImg = document.getElementById('ocr-preview-img');
     if (previewImg) previewImg.src = previewUrl;
+    
+    const scanner = document.getElementById('ocr-laser-scanner');
+    if (scanner) scanner.classList.add('laser-scanning');
 
     try {
         const formData = new FormData();
@@ -6205,6 +6208,8 @@ async function processOCRFile(file) {
         showToast('Lỗi OCR', err.message || 'Không thể xử lý tệp.', 'error');
     } finally {
         if (uploadZone) uploadZone.classList.remove('opacity-50', 'pointer-events-none');
+        const scanner = document.getElementById('ocr-laser-scanner');
+        if (scanner) scanner.classList.remove('laser-scanning');
     }
 }
 

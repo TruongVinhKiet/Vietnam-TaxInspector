@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="vi">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -10,54 +11,69 @@
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
     <link rel="stylesheet" href="../assets/css/agent.css">
 </head>
+
 <body class="bg-slate-50 text-slate-800 font-sans h-screen flex flex-col overflow-hidden m-0 p-0">
 
     <!-- Top Navigation -->
-    <header class="h-16 bg-white/80 backdrop-blur-md border-b border-slate-200 flex items-center justify-between px-6 z-10 sticky top-0 shadow-sm flex-shrink-0">
+    <header
+        class="h-16 bg-white/80 backdrop-blur-md border-b border-slate-200 flex items-center justify-between px-6 z-10 sticky top-0 shadow-sm flex-shrink-0">
         <div class="flex items-center gap-4">
-            <button id="backToDashBtn" class="w-10 h-10 rounded-full hover:bg-slate-100 flex items-center justify-center text-slate-600 transition-colors" title="Quay lại Dashboard">
+            <button id="backToDashBtn"
+                class="w-10 h-10 rounded-full hover:bg-slate-100 flex items-center justify-center text-slate-600 transition-colors"
+                title="Quay lại Dashboard">
                 <i class="fa-solid fa-arrow-left text-lg"></i>
             </button>
             <div class="flex items-center gap-3">
                 <div class="w-10 h-10 rounded-full overflow-hidden border-2 border-sky-100 shadow-sm relative">
                     <img src="../assets/img/ai_avatar.png" alt="AI Agent Avatar" class="w-full h-full object-cover">
                     <!-- Online indicator -->
-                    <div class="absolute bottom-0 right-0 w-3 h-3 bg-green-500 rounded-full border-2 border-white"></div>
+                    <div class="absolute bottom-0 right-0 w-3 h-3 bg-green-500 rounded-full border-2 border-white">
+                    </div>
                 </div>
                 <div>
                     <h1 class="text-sm font-bold text-slate-800">Trợ lý Phân tích Thuế AI</h1>
                     <div class="text-xs text-green-600 font-medium flex items-center gap-1">
                         <span class="relative flex h-2 w-2">
-                          <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
-                          <span class="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span>
+                            <span
+                                class="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
+                            <span class="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span>
                         </span>
                         Hệ thống Multi-Agent đang trực
                     </div>
                 </div>
             </div>
         </div>
-        
+
         <!-- Agent Status Indicators & Settings -->
         <div class="flex items-center gap-3 text-xs font-semibold text-slate-500">
-            <div id="status-legal" class="px-3 py-1.5 rounded-full bg-slate-100 border border-slate-200 flex items-center gap-2 transition-colors">
+            <div id="status-legal"
+                class="px-3 py-1.5 rounded-full bg-slate-100 border border-slate-200 flex items-center gap-2 transition-colors">
                 <i class="fa-solid fa-scale-balanced"></i> Pháp lý
             </div>
-            <div id="status-analytics" class="px-3 py-1.5 rounded-full bg-slate-100 border border-slate-200 flex items-center gap-2 transition-colors">
+            <div id="status-analytics"
+                class="px-3 py-1.5 rounded-full bg-slate-100 border border-slate-200 flex items-center gap-2 transition-colors">
                 <i class="fa-solid fa-chart-line"></i> Phân tích
             </div>
-            <div id="status-investigation" class="px-3 py-1.5 rounded-full bg-slate-100 border border-slate-200 flex items-center gap-2 transition-colors hidden md:flex">
+            <div id="status-investigation"
+                class="px-3 py-1.5 rounded-full bg-slate-100 border border-slate-200 flex items-center gap-2 transition-colors hidden md:flex">
                 <i class="fa-solid fa-magnifying-glass"></i> Không gian Mạng
             </div>
-            <div id="status-deeplearning" class="px-3 py-1.5 rounded-full bg-slate-100 border border-slate-200 flex items-center gap-2 transition-colors hidden md:flex">
+            <div id="status-deeplearning"
+                class="px-3 py-1.5 rounded-full bg-slate-100 border border-slate-200 flex items-center gap-2 transition-colors hidden md:flex">
                 <i class="fa-solid fa-brain"></i> Deep Learning
             </div>
-            <div id="status-causal" class="px-3 py-1.5 rounded-full bg-slate-100 border border-slate-200 flex items-center gap-2 transition-colors hidden lg:flex">
+            <div id="status-causal"
+                class="px-3 py-1.5 rounded-full bg-slate-100 border border-slate-200 flex items-center gap-2 transition-colors hidden lg:flex">
                 <i class="fa-solid fa-arrows-split-up-and-left"></i> Causal AI
             </div>
-            <a href="telemetry.html" class="ml-2 w-9 h-9 rounded-full bg-slate-100 hover:bg-slate-200 flex items-center justify-center text-slate-600 transition-colors" title="Telemetry Dashboard">
+            <a href="telemetry.html"
+                class="ml-2 w-9 h-9 rounded-full bg-slate-100 hover:bg-slate-200 flex items-center justify-center text-slate-600 transition-colors"
+                title="Telemetry Dashboard">
                 <i class="fa-solid fa-chart-pie"></i>
             </a>
-            <button id="themeSettingsBtn" class="w-9 h-9 rounded-full bg-slate-100 hover:bg-slate-200 flex items-center justify-center text-slate-600 transition-colors" title="Trang phục AI">
+            <button id="themeSettingsBtn"
+                class="w-9 h-9 rounded-full bg-slate-100 hover:bg-slate-200 flex items-center justify-center text-slate-600 transition-colors"
+                title="Trang phục AI">
                 <i class="fa-solid fa-shirt"></i>
             </button>
         </div>
@@ -66,33 +82,43 @@
     <!-- Main Chat Workspace -->
     <main class="flex-1 flex overflow-hidden relative">
         <div class="flex-1 max-w-7xl mx-auto w-full flex flex-col pt-4">
-            
+
             <!-- Chat Feed -->
             <div id="chatFeed" class="flex-1 overflow-y-auto px-4 pb-32 space-y-6 scroll-smooth">
                 <!-- Welcome Message -->
-                <div class="flex flex-col items-center justify-center h-full text-center space-y-4 opacity-50 transition-opacity" id="emptyState">
-                    <img src="../assets/img/ai_avatar.png" id="emptyStateAvatar" alt="AI Agent" class="w-32 h-32 rounded-full shadow-xl opacity-80 mix-blend-multiply">
+                <div class="flex flex-col items-center justify-center h-full text-center space-y-4 opacity-50 transition-opacity"
+                    id="emptyState">
+                    <img src="../assets/img/ai_avatar.png" id="emptyStateAvatar" alt="AI Agent"
+                        class="w-32 h-32 rounded-full shadow-xl opacity-80 mix-blend-multiply">
                     <h2 class="text-2xl font-bold text-slate-700">Xin chào! Tôi có thể giúp gì cho ngài?</h2>
-                    <p class="text-slate-500 max-w-md">Tôi là Hệ thống Multi-Agent. Chọn chế độ phân tích, nhập MST/tên DN, hoặc upload file CSV.</p>
+                    <p class="text-slate-500 max-w-md">Tôi là Hệ thống Multi-Agent. Chọn chế độ phân tích, nhập MST/tên
+                        DN, hoặc upload file CSV.</p>
                     <!-- Suggestion Chips -->
                     <div class="flex flex-wrap justify-center gap-2 mt-3" id="suggestionChips">
-                        <button class="suggestion-chip px-4 py-2 rounded-full bg-white border border-slate-200 text-sm font-medium text-slate-600 hover:border-sky-400 hover:text-sky-600 hover:shadow-md transition-all" data-msg="Top 10 doanh nghiệp rủi ro cao nhất">
+                        <button
+                            class="suggestion-chip px-4 py-2 rounded-full bg-white border border-slate-200 text-sm font-medium text-slate-600 hover:border-sky-400 hover:text-sky-600 hover:shadow-md transition-all"
+                            data-msg="Top 10 doanh nghiệp rủi ro cao nhất">
                             <i class="fa-solid fa-ranking-star text-amber-500 mr-1"></i> Top 10 DN rủi ro
                         </button>
-                        <button class="suggestion-chip px-4 py-2 rounded-full bg-white border border-slate-200 text-sm font-medium text-slate-600 hover:border-sky-400 hover:text-sky-600 hover:shadow-md transition-all" data-msg="Phân tích MST 0312345678">
+                        <button
+                            class="suggestion-chip px-4 py-2 rounded-full bg-white border border-slate-200 text-sm font-medium text-slate-600 hover:border-sky-400 hover:text-sky-600 hover:shadow-md transition-all"
+                            data-msg="Phân tích MST 0312345678">
                             <i class="fa-solid fa-magnifying-glass text-sky-500 mr-1"></i> Phân tích MST
                         </button>
-                        <button class="suggestion-chip px-4 py-2 rounded-full bg-white border border-slate-200 text-sm font-medium text-slate-600 hover:border-sky-400 hover:text-sky-600 hover:shadow-md transition-all" data-msg="">
+                        <button
+                            class="suggestion-chip px-4 py-2 rounded-full bg-white border border-slate-200 text-sm font-medium text-slate-600 hover:border-sky-400 hover:text-sky-600 hover:shadow-md transition-all"
+                            data-msg="">
                             <i class="fa-solid fa-file-csv text-emerald-500 mr-1"></i> Upload CSV
                         </button>
                     </div>
                 </div>
             </div>
-            
+
         </div>
-        
+
         <!-- Background Audio Visualizer Overlay (hidden mostly, active during mic voice) -->
-        <div id="audioVisualizer" class="pointer-events-none absolute inset-0 flex items-center justify-center opacity-0 transition-opacity duration-300 z-0">
+        <div id="audioVisualizer"
+            class="pointer-events-none absolute inset-0 flex items-center justify-center opacity-0 transition-opacity duration-300 z-0">
             <!-- Render dynamic waves here -->
             <div class="flex items-center gap-2">
                 <div class="wave wave-1"></div>
@@ -105,7 +131,8 @@
     </main>
 
     <!-- File Drop Overlay -->
-    <div id="fileDropOverlay" class="fixed inset-0 bg-sky-500/10 backdrop-blur-sm z-[90] hidden flex items-center justify-center pointer-events-none">
+    <div id="fileDropOverlay"
+        class="fixed inset-0 bg-sky-500/10 backdrop-blur-sm z-[90] hidden flex items-center justify-center pointer-events-none">
         <div class="bg-white rounded-2xl shadow-2xl p-10 border-2 border-dashed border-sky-400 text-center">
             <i class="fa-solid fa-cloud-arrow-up text-5xl text-sky-500 mb-4"></i>
             <p class="text-lg font-bold text-slate-700">Thả file CSV vào đây</p>
@@ -114,95 +141,139 @@
     </div>
 
     <!-- Hidden file input -->
-    <input type="file" id="fileUploadInput" accept=".csv" class="hidden">
+    <input type="file" id="fileUploadInput" accept=".csv, .png, .jpg, .jpeg, .pdf" class="hidden">
 
     <!-- Input Bar Fixed at Bottom -->
     <div class="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-slate-50 via-slate-50 to-transparent p-6 z-20">
         <!-- File preview chip (hidden by default) -->
         <div id="fileChipContainer" class="max-w-4xl mx-auto mb-2 hidden">
-            <div class="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-emerald-50 border border-emerald-200 text-sm text-emerald-700">
-                <i class="fa-solid fa-file-csv"></i>
-                <span id="fileChipName">file.csv</span>
-                <button id="fileChipRemove" class="w-5 h-5 rounded-full bg-emerald-200 hover:bg-red-300 flex items-center justify-center text-xs transition-colors">
+            <div id="fileChipWrapper"
+                class="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-emerald-50 border border-emerald-200 text-sm text-emerald-700 shadow-sm relative overflow-hidden group">
+                <!-- Thumbnail background for images -->
+                <div id="fileChipThumb" class="absolute inset-0 bg-cover bg-center opacity-20 hidden"></div>
+                <i id="fileChipIcon" class="fa-solid fa-file-csv relative z-10"></i>
+                <span id="fileChipName" class="font-medium relative z-10 max-w-[200px] truncate">file.csv</span>
+                <span id="fileChipSize" class="text-[10px] opacity-70 relative z-10"></span>
+                <button id="fileChipRemove"
+                    class="w-5 h-5 rounded-full bg-emerald-200 hover:bg-red-300 flex items-center justify-center text-xs transition-colors">
                     <i class="fa-solid fa-xmark"></i>
                 </button>
             </div>
         </div>
-        <div class="max-w-4xl mx-auto relative rounded-2xl bg-white shadow-[0_8px_30px_rgb(0,0,0,0.08)] border border-slate-200 flex items-end p-2 gap-2 transition-shadow focus-within:shadow-[0_8px_40px_rgba(14,165,233,0.15)] focus-within:border-sky-300">
+        <div
+            class="max-w-4xl mx-auto relative rounded-2xl bg-white shadow-[0_8px_30px_rgb(0,0,0,0.08)] border border-slate-200 flex items-end p-2 gap-2 transition-shadow focus-within:shadow-[0_8px_40px_rgba(14,165,233,0.15)] focus-within:border-sky-300">
             <!-- Model Mode Selector -->
             <div id="modelSelector" class="relative mb-1">
-                <button id="modelSelectorBtn" class="flex items-center justify-between px-4 py-2.5 w-44 rounded-xl bg-slate-50 hover:bg-slate-100 text-sm font-semibold text-slate-600 transition-all border border-slate-200 whitespace-nowrap" title="Chọn chế độ phân tích">
+                <button id="modelSelectorBtn"
+                    class="flex items-center justify-between px-4 py-2.5 w-44 rounded-xl bg-slate-50 hover:bg-slate-100 text-sm font-semibold text-slate-600 transition-all border border-slate-200 whitespace-nowrap"
+                    title="Chọn chế độ phân tích">
                     <div class="flex items-center gap-2">
                         <i class="fa-solid fa-bolt text-amber-500" id="modelIcon"></i>
                         <span id="modelSelectorLabel" class="hidden sm:inline">Toàn diện</span>
                     </div>
                     <i class="fa-solid fa-chevron-down text-[10px] opacity-60"></i>
                 </button>
-                <div id="modelDropdown" class="hidden absolute bottom-full left-0 mb-2 w-80 bg-white/95 backdrop-blur-md rounded-xl shadow-2xl border border-slate-200 overflow-hidden z-50">
+                <div id="modelDropdown"
+                    class="hidden absolute bottom-full left-0 mb-2 w-80 bg-white/95 backdrop-blur-md rounded-xl shadow-2xl border border-slate-200 overflow-hidden z-50">
                     <div class="p-2 border-b border-slate-100">
                         <p class="text-xs font-bold text-slate-400 uppercase px-2 py-1">Chế độ Phân tích</p>
                     </div>
                     <div class="p-1">
-                        <div class="model-option px-3 py-2.5 rounded-lg hover:bg-sky-50 cursor-pointer flex items-center gap-3 transition-colors" data-mode="full">
-                            <div class="w-8 h-8 rounded-lg bg-amber-100 flex items-center justify-center"><i class="fa-solid fa-bolt text-amber-600"></i></div>
-                            <div class="flex-1"><p class="text-sm font-bold text-slate-700">Toàn diện</p><p class="text-xs text-slate-400">Tất cả 11+ công cụ AI</p></div>
+                        <div class="model-option px-3 py-2.5 rounded-lg hover:bg-sky-50 cursor-pointer flex items-center gap-3 transition-colors"
+                            data-mode="full">
+                            <div class="w-8 h-8 rounded-lg bg-amber-100 flex items-center justify-center"><i
+                                    class="fa-solid fa-bolt text-amber-600"></i></div>
+                            <div class="flex-1">
+                                <p class="text-sm font-bold text-slate-700">Toàn diện</p>
+                                <p class="text-xs text-slate-400">Tất cả 11+ công cụ AI</p>
+                            </div>
                             <span class="text-xs font-bold text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded">ALL</span>
                         </div>
-                        <div class="model-option px-3 py-2.5 rounded-lg hover:bg-sky-50 cursor-pointer flex items-center gap-3 transition-colors" data-mode="fraud">
-                            <div class="w-8 h-8 rounded-lg bg-red-100 flex items-center justify-center"><i class="fa-solid fa-user-secret text-red-600"></i></div>
-                            <div class="flex-1"><p class="text-sm font-bold text-slate-700">Gian lận</p><p class="text-xs text-slate-400">XGBoost + GNN + VAE</p></div>
+                        <div class="model-option px-3 py-2.5 rounded-lg hover:bg-sky-50 cursor-pointer flex items-center gap-3 transition-colors"
+                            data-mode="fraud">
+                            <div class="w-8 h-8 rounded-lg bg-red-100 flex items-center justify-center"><i
+                                    class="fa-solid fa-user-secret text-red-600"></i></div>
+                            <div class="flex-1">
+                                <p class="text-sm font-bold text-slate-700">Gian lận</p>
+                                <p class="text-xs text-slate-400">XGBoost + GNN + VAE</p>
+                            </div>
                             <span class="text-xs font-bold text-red-600 bg-red-50 px-1.5 py-0.5 rounded">8</span>
                         </div>
-                        <div class="model-option px-3 py-2.5 rounded-lg hover:bg-sky-50 cursor-pointer flex items-center gap-3 transition-colors" data-mode="vat">
-                            <div class="w-8 h-8 rounded-lg bg-blue-100 flex items-center justify-center"><i class="fa-solid fa-file-invoice-dollar text-blue-600"></i></div>
-                            <div class="flex-1"><p class="text-sm font-bold text-slate-700">VAT & Hóa đơn</p><p class="text-xs text-slate-400">VAT Refund + Invoice Risk</p></div>
+                        <div class="model-option px-3 py-2.5 rounded-lg hover:bg-sky-50 cursor-pointer flex items-center gap-3 transition-colors"
+                            data-mode="vat">
+                            <div class="w-8 h-8 rounded-lg bg-blue-100 flex items-center justify-center"><i
+                                    class="fa-solid fa-file-invoice-dollar text-blue-600"></i></div>
+                            <div class="flex-1">
+                                <p class="text-sm font-bold text-slate-700">VAT & Hóa đơn</p>
+                                <p class="text-xs text-slate-400">VAT Refund + Invoice Risk</p>
+                            </div>
                             <span class="text-xs font-bold text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded">5</span>
                         </div>
-                        <div class="model-option px-3 py-2.5 rounded-lg hover:bg-sky-50 cursor-pointer flex items-center gap-3 transition-colors" data-mode="delinquency">
-                            <div class="w-8 h-8 rounded-lg bg-violet-100 flex items-center justify-center"><i class="fa-solid fa-chart-line text-violet-600"></i></div>
-                            <div class="flex-1"><p class="text-sm font-bold text-slate-700">Dự báo Nợ</p><p class="text-xs text-slate-400">Transformer + Causal</p></div>
+                        <div class="model-option px-3 py-2.5 rounded-lg hover:bg-sky-50 cursor-pointer flex items-center gap-3 transition-colors"
+                            data-mode="delinquency">
+                            <div class="w-8 h-8 rounded-lg bg-violet-100 flex items-center justify-center"><i
+                                    class="fa-solid fa-chart-line text-violet-600"></i></div>
+                            <div class="flex-1">
+                                <p class="text-sm font-bold text-slate-700">Dự báo Nợ</p>
+                                <p class="text-xs text-slate-400">Transformer + Causal</p>
+                            </div>
                             <span class="text-xs font-bold text-violet-600 bg-violet-50 px-1.5 py-0.5 rounded">5</span>
                         </div>
-                        <div class="model-option px-3 py-2.5 rounded-lg hover:bg-sky-50 cursor-pointer flex items-center gap-3 transition-colors" data-mode="macro">
-                            <div class="w-8 h-8 rounded-lg bg-emerald-100 flex items-center justify-center"><i class="fa-solid fa-globe text-emerald-600"></i></div>
-                            <div class="flex-1"><p class="text-sm font-bold text-slate-700">Vĩ mô</p><p class="text-xs text-slate-400">Macro Hypothesis Sim</p></div>
-                            <span class="text-xs font-bold text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded">2</span>
+                        <div class="model-option px-3 py-2.5 rounded-lg hover:bg-sky-50 cursor-pointer flex items-center gap-3 transition-colors"
+                            data-mode="macro">
+                            <div class="w-8 h-8 rounded-lg bg-emerald-100 flex items-center justify-center"><i
+                                    class="fa-solid fa-globe text-emerald-600"></i></div>
+                            <div class="flex-1">
+                                <p class="text-sm font-bold text-slate-700">Vĩ mô</p>
+                                <p class="text-xs text-slate-400">Macro Hypothesis Sim</p>
+                            </div>
+                            <span
+                                class="text-xs font-bold text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded">2</span>
                         </div>
                     </div>
                 </div>
             </div>
 
-            <button id="attachmentBtn" class="p-2.5 mb-1 text-slate-400 hover:text-sky-600 transition-colors" title="Đính kèm file CSV">
+            <button id="attachmentBtn" class="p-2.5 mb-1 text-slate-400 hover:text-sky-600 transition-colors"
+                title="Đính kèm file CSV">
                 <i class="fa-solid fa-paperclip text-lg"></i>
             </button>
-            
-            <textarea id="chatInput" rows="1" placeholder="Nhập yêu cầu phân tích thuế, tên DN, hoặc MST..." class="flex-1 max-h-32 min-h-[44px] mb-1 bg-transparent border-none focus:ring-0 resize-none py-2.5 px-2 text-slate-700 placeholder-slate-400 leading-relaxed"></textarea>
-            
+
+            <textarea id="chatInput" rows="1" placeholder="Nhập yêu cầu phân tích thuế, tên DN, hoặc MST..."
+                class="flex-1 max-h-32 min-h-[44px] mb-1 bg-transparent border-none focus:ring-0 resize-none py-2.5 px-2 text-slate-700 placeholder-slate-400 leading-relaxed"></textarea>
+
             <div class="flex items-center gap-2 p-1 mb-1">
-                <button id="micBtn" class="w-10 h-10 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-600 flex items-center justify-center transition-all relative">
+                <button id="micBtn"
+                    class="w-10 h-10 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-600 flex items-center justify-center transition-all relative">
                     <i class="fa-solid fa-microphone text-md"></i>
                     <!-- Mic recording pulse -->
-                    <div class="absolute inset-0 rounded-full border-2 border-red-500 scale-150 opacity-0 transition-opacity pointer-events-none" id="micPulse"></div>
+                    <div class="absolute inset-0 rounded-full border-2 border-red-500 scale-150 opacity-0 transition-opacity pointer-events-none"
+                        id="micPulse"></div>
                 </button>
-                <button id="sendBtn" class="w-10 h-10 rounded-xl bg-[#0F172A] hover:bg-slate-800 text-white flex items-center justify-center shadow-md transition-transform hover:scale-105 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed">
+                <button id="sendBtn"
+                    class="w-10 h-10 rounded-xl bg-[#0F172A] hover:bg-slate-800 text-white flex items-center justify-center shadow-md transition-transform hover:scale-105 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed">
                     <i class="fa-solid fa-paper-plane text-sm"></i>
                 </button>
             </div>
         </div>
         <div class="text-center mt-2">
-            <span class="text-[11px] text-slate-400">Agent có thể mắc lỗi. Vui lòng kiểm chứng lại các điều khoản luật quan trọng.</span>
+            <span class="text-[11px] text-slate-400">Agent có thể mắc lỗi. Vui lòng kiểm chứng lại các điều khoản luật
+                quan trọng.</span>
         </div>
     </div>
 
     <!-- Wardrobe Theme Modal -->
-    <div id="wardrobeModal" class="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-[100] hidden flex items-center justify-center opacity-0 transition-opacity duration-300">
-        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-2xl overflow-hidden transform scale-95 transition-transform duration-300" id="wardrobeModalContent">
+    <div id="wardrobeModal"
+        class="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-[100] hidden flex items-center justify-center opacity-0 transition-opacity duration-300">
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-2xl overflow-hidden transform scale-95 transition-transform duration-300"
+            id="wardrobeModalContent">
             <div class="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
                 <div>
                     <h3 class="text-lg font-bold text-slate-800">Tủ đồ Trợ lý AI</h3>
                     <p class="text-sm text-slate-500">Thay đổi phong cách hiển thị của trợ lý.</p>
                 </div>
-                <button id="closeWardrobeBtn" class="text-slate-400 hover:text-slate-700 transition-colors w-8 h-8 flex items-center justify-center rounded-full hover:bg-slate-100">
+                <button id="closeWardrobeBtn"
+                    class="text-slate-400 hover:text-slate-700 transition-colors w-8 h-8 flex items-center justify-center rounded-full hover:bg-slate-100">
                     <i class="fa-solid fa-xmark"></i>
                 </button>
             </div>
@@ -210,9 +281,11 @@
                 <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
                     <!-- Option 1 -->
                     <div class="theme-option cursor-pointer group" data-theme="ai_avatar.png">
-                        <div class="rounded-xl overflow-hidden border-2 border-transparent group-hover:border-sky-400 transition-all aspect-square relative shadow-sm">
+                        <div
+                            class="rounded-xl overflow-hidden border-2 border-transparent group-hover:border-sky-400 transition-all aspect-square relative shadow-sm">
                             <img src="../assets/img/ai_avatar.png" alt="Công sở" class="w-full h-full object-cover">
-                            <div class="absolute inset-0 bg-black/20 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                            <div
+                                class="absolute inset-0 bg-black/20 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
                                 <i class="fa-solid fa-check text-white text-2xl hidden checkmark"></i>
                             </div>
                         </div>
@@ -220,9 +293,11 @@
                     </div>
                     <!-- Option 2 -->
                     <div class="theme-option cursor-pointer group" data-theme="avatar_satin.png">
-                        <div class="rounded-xl overflow-hidden border-2 border-transparent group-hover:border-sky-400 transition-all aspect-square relative shadow-sm">
+                        <div
+                            class="rounded-xl overflow-hidden border-2 border-transparent group-hover:border-sky-400 transition-all aspect-square relative shadow-sm">
                             <img src="../assets/img/avatar_satin.png" alt="Satin" class="w-full h-full object-cover">
-                            <div class="absolute inset-0 bg-black/20 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                            <div
+                                class="absolute inset-0 bg-black/20 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
                                 <i class="fa-solid fa-check text-white text-2xl hidden checkmark"></i>
                             </div>
                         </div>
@@ -230,9 +305,11 @@
                     </div>
                     <!-- Option 3 -->
                     <div class="theme-option cursor-pointer group" data-theme="avatar_qipao.png">
-                        <div class="rounded-xl overflow-hidden border-2 border-transparent group-hover:border-sky-400 transition-all aspect-square relative shadow-sm">
+                        <div
+                            class="rounded-xl overflow-hidden border-2 border-transparent group-hover:border-sky-400 transition-all aspect-square relative shadow-sm">
                             <img src="../assets/img/avatar_qipao.png" alt="Sườn xám" class="w-full h-full object-cover">
-                            <div class="absolute inset-0 bg-black/20 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                            <div
+                                class="absolute inset-0 bg-black/20 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
                                 <i class="fa-solid fa-check text-white text-2xl hidden checkmark"></i>
                             </div>
                         </div>
@@ -240,9 +317,11 @@
                     </div>
                     <!-- Option 4 -->
                     <div class="theme-option cursor-pointer group" data-theme="avatar_maid.png">
-                        <div class="rounded-xl overflow-hidden border-2 border-transparent group-hover:border-sky-400 transition-all aspect-square relative shadow-sm">
+                        <div
+                            class="rounded-xl overflow-hidden border-2 border-transparent group-hover:border-sky-400 transition-all aspect-square relative shadow-sm">
                             <img src="../assets/img/avatar_maid.png" alt="Hầu gái" class="w-full h-full object-cover">
-                            <div class="absolute inset-0 bg-black/20 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                            <div
+                                class="absolute inset-0 bg-black/20 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
                                 <i class="fa-solid fa-check text-white text-2xl hidden checkmark"></i>
                             </div>
                         </div>
@@ -250,9 +329,12 @@
                     </div>
                     <!-- Option 5: Bodysuit Ren đính đá khoác Blazer -->
                     <div class="theme-option cursor-pointer group" data-theme="avatar_bodysuit.png">
-                        <div class="rounded-xl overflow-hidden border-2 border-transparent group-hover:border-sky-400 transition-all aspect-square relative shadow-sm">
-                            <img src="../assets/img/avatar_bodysuit.png" alt="Bodysuit Blazer" class="w-full h-full object-cover">
-                            <div class="absolute inset-0 bg-black/20 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                        <div
+                            class="rounded-xl overflow-hidden border-2 border-transparent group-hover:border-sky-400 transition-all aspect-square relative shadow-sm">
+                            <img src="../assets/img/avatar_bodysuit.png" alt="Bodysuit Blazer"
+                                class="w-full h-full object-cover">
+                            <div
+                                class="absolute inset-0 bg-black/20 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
                                 <i class="fa-solid fa-check text-white text-2xl hidden checkmark"></i>
                             </div>
                         </div>
@@ -260,9 +342,12 @@
                     </div>
                     <!-- Option 6: Váy Cổ Yếm Lụa Màu be -->
                     <div class="theme-option cursor-pointer group" data-theme="avatar_halter.png">
-                        <div class="rounded-xl overflow-hidden border-2 border-transparent group-hover:border-sky-400 transition-all aspect-square relative shadow-sm">
-                            <img src="../assets/img/avatar_halter.png" alt="Cổ Yếm Lụa" class="w-full h-full object-cover">
-                            <div class="absolute inset-0 bg-black/20 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                        <div
+                            class="rounded-xl overflow-hidden border-2 border-transparent group-hover:border-sky-400 transition-all aspect-square relative shadow-sm">
+                            <img src="../assets/img/avatar_halter.png" alt="Cổ Yếm Lụa"
+                                class="w-full h-full object-cover">
+                            <div
+                                class="absolute inset-0 bg-black/20 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
                                 <i class="fa-solid fa-check text-white text-2xl hidden checkmark"></i>
                             </div>
                         </div>
@@ -270,9 +355,12 @@
                     </div>
                     <!-- Option 7: Sườn Xám Cách Tân Cúp Ngực -->
                     <div class="theme-option cursor-pointer group" data-theme="avatar_strapless_qipao.png">
-                        <div class="rounded-xl overflow-hidden border-2 border-transparent group-hover:border-sky-400 transition-all aspect-square relative shadow-sm">
-                            <img src="../assets/img/avatar_strapless_qipao.png" alt="Sườn xám Cúp Ngực" class="w-full h-full object-cover">
-                            <div class="absolute inset-0 bg-black/20 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                        <div
+                            class="rounded-xl overflow-hidden border-2 border-transparent group-hover:border-sky-400 transition-all aspect-square relative shadow-sm">
+                            <img src="../assets/img/avatar_strapless_qipao.png" alt="Sườn xám Cúp Ngực"
+                                class="w-full h-full object-cover">
+                            <div
+                                class="absolute inset-0 bg-black/20 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
                                 <i class="fa-solid fa-check text-white text-2xl hidden checkmark"></i>
                             </div>
                         </div>
@@ -280,9 +368,12 @@
                     </div>
                     <!-- Option 8: Váy Lụa Champagne Nơ -->
                     <div class="theme-option cursor-pointer group" data-theme="avatar_silk_1.png">
-                        <div class="rounded-xl overflow-hidden border-2 border-transparent group-hover:border-sky-400 transition-all aspect-square relative shadow-sm">
-                            <img src="../assets/img/avatar_silk_1.png" alt="Lụa Champagne Nơ" class="w-full h-full object-cover">
-                            <div class="absolute inset-0 bg-black/20 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                        <div
+                            class="rounded-xl overflow-hidden border-2 border-transparent group-hover:border-sky-400 transition-all aspect-square relative shadow-sm">
+                            <img src="../assets/img/avatar_silk_1.png" alt="Lụa Champagne Nơ"
+                                class="w-full h-full object-cover">
+                            <div
+                                class="absolute inset-0 bg-black/20 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
                                 <i class="fa-solid fa-check text-white text-2xl hidden checkmark"></i>
                             </div>
                         </div>
@@ -290,9 +381,12 @@
                     </div>
                     <!-- Option 9: Váy Lụa Cam Đào -->
                     <div class="theme-option cursor-pointer group" data-theme="avatar_silk_2.png">
-                        <div class="rounded-xl overflow-hidden border-2 border-transparent group-hover:border-sky-400 transition-all aspect-square relative shadow-sm">
-                            <img src="../assets/img/avatar_silk_2.png" alt="Lụa Cam Đào" class="w-full h-full object-cover">
-                            <div class="absolute inset-0 bg-black/20 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                        <div
+                            class="rounded-xl overflow-hidden border-2 border-transparent group-hover:border-sky-400 transition-all aspect-square relative shadow-sm">
+                            <img src="../assets/img/avatar_silk_2.png" alt="Lụa Cam Đào"
+                                class="w-full h-full object-cover">
+                            <div
+                                class="absolute inset-0 bg-black/20 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
                                 <i class="fa-solid fa-check text-white text-2xl hidden checkmark"></i>
                             </div>
                         </div>
@@ -300,9 +394,12 @@
                     </div>
                     <!-- Option 10: Váy Lụa Champagne Cổ Tròn -->
                     <div class="theme-option cursor-pointer group" data-theme="avatar_silk_3.png">
-                        <div class="rounded-xl overflow-hidden border-2 border-transparent group-hover:border-sky-400 transition-all aspect-square relative shadow-sm">
-                            <img src="../assets/img/avatar_silk_3.png" alt="Lụa Champagne Tròn" class="w-full h-full object-cover">
-                            <div class="absolute inset-0 bg-black/20 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                        <div
+                            class="rounded-xl overflow-hidden border-2 border-transparent group-hover:border-sky-400 transition-all aspect-square relative shadow-sm">
+                            <img src="../assets/img/avatar_silk_3.png" alt="Lụa Champagne Tròn"
+                                class="w-full h-full object-cover">
+                            <div
+                                class="absolute inset-0 bg-black/20 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
                                 <i class="fa-solid fa-check text-white text-2xl hidden checkmark"></i>
                             </div>
                         </div>
@@ -310,9 +407,12 @@
                     </div>
                     <!-- Option 11: Váy Lụa Trắng Trơn -->
                     <div class="theme-option cursor-pointer group" data-theme="avatar_silk_5.png">
-                        <div class="rounded-xl overflow-hidden border-2 border-transparent group-hover:border-sky-400 transition-all aspect-square relative shadow-sm">
-                            <img src="../assets/img/avatar_silk_5.png" alt="Lụa Trắng Trơn" class="w-full h-full object-cover">
-                            <div class="absolute inset-0 bg-black/20 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                        <div
+                            class="rounded-xl overflow-hidden border-2 border-transparent group-hover:border-sky-400 transition-all aspect-square relative shadow-sm">
+                            <img src="../assets/img/avatar_silk_5.png" alt="Lụa Trắng Trơn"
+                                class="w-full h-full object-cover">
+                            <div
+                                class="absolute inset-0 bg-black/20 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
                                 <i class="fa-solid fa-check text-white text-2xl hidden checkmark"></i>
                             </div>
                         </div>
@@ -321,11 +421,14 @@
                 </div>
             </div>
             <div class="px-6 py-4 bg-slate-50 border-t border-slate-100 text-right">
-                <button id="applyThemeBtn" class="px-6 py-2 bg-[#0F172A] hover:bg-slate-800 text-white rounded-lg font-medium transition-colors shadow-sm disabled:opacity-50 disabled:cursor-not-allowed">Lưu Trang Phục</button>
+                <button id="applyThemeBtn"
+                    class="px-6 py-2 bg-[#0F172A] hover:bg-slate-800 text-white rounded-lg font-medium transition-colors shadow-sm disabled:opacity-50 disabled:cursor-not-allowed">Lưu
+                    Trang Phục</button>
             </div>
         </div>
     </div>
 
     <script src="../js/agent_ui.js" type="module"></script>
 </body>
+
 </html>

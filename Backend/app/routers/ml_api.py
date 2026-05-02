@@ -13,8 +13,12 @@ import time
 from pathlib import Path
 from typing import Any, Optional
 
-from fastapi import APIRouter, UploadFile, File, Query
+from fastapi import APIRouter, UploadFile, File, Query, Depends
 from fastapi.responses import JSONResponse
+from sqlalchemy.orm import Session
+
+from ..database import get_db
+from ..multimodal_analysis import analyze_invoice_document_upload
 
 logger = logging.getLogger(__name__)
 
@@ -172,30 +176,28 @@ def ocr_process_sample(sample_id: int):
 
 
 @router.post("/ocr/upload")
-async def ocr_upload(file: UploadFile = File(...)):
+async def ocr_upload(file: UploadFile = File(...), db: Session = Depends(get_db)):
     """Upload ảnh hóa đơn để OCR (demo: trả kết quả mẫu gần nhất)."""
     content = await file.read()
     file_size = len(content)
+    if file_size > 50 * 1024 * 1024:
+        return JSONResponse(status_code=400, content={"error": "File too large. Maximum size is 50MB."})
+
+    try:
+        return analyze_invoice_document_upload(
+            db,
+            content=content,
+            filename=file.filename or "invoice_upload.pdf",
+            content_type=file.content_type,
+            source="ml_ocr_upload",
+        )
+    except ValueError as exc:
+        return JSONResponse(status_code=400, content={"error": str(exc)})
+    except Exception as exc:
+        logger.exception("OCR upload failed")
+        return JSONResponse(status_code=500, content={"error": str(exc), "filename": file.filename})
 
     # Trong production sẽ gọi PaddleOCR engine thật
-    meta = _load_json(DATA_DIR / "ocr_invoice_metadata.json")
-    sample = random.choice(meta) if meta else {}
-
-    return {
-        "status": "success",
-        "filename": file.filename,
-        "file_size_bytes": file_size,
-        "processing_time_ms": round(random.uniform(500, 2000), 0),
-        "confidence": round(random.uniform(0.85, 0.98), 3),
-        "extracted_fields": {
-            "invoice_number": sample.get("invoice_number", "N/A"),
-            "seller_name": sample.get("seller_name", "N/A"),
-            "buyer_name": sample.get("buyer_name", "N/A"),
-            "grand_total": sample.get("grand_total", 0),
-        },
-    }
-
-
 # ═══════════════════════════════════════════
 #  3. Revenue Forecast
 # ═══════════════════════════════════════════

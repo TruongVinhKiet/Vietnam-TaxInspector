@@ -42,6 +42,23 @@ def _embed(text_value: str, dim: int = 96) -> list[float]:
     return vec
 
 
+def _vector_literal(values: list[float]) -> str:
+    return "[" + ",".join(f"{float(v):.8f}" for v in values) + "]"
+
+
+def _embed_for_ingestion(text_value: str) -> tuple[list[float], str]:
+    """Use the production embedding engine, with hash-TFIDF as deterministic fallback."""
+    try:
+        from ml_engine.tax_agent_embeddings import get_embedding_engine
+
+        engine = get_embedding_engine()
+        result = engine.embed_passage(text_value)
+        return [float(v) for v in result.vector], str(result.model_tier)
+    except Exception:
+        emb = _embed(text_value)
+        return emb, "hash-tfidf-v1"
+
+
 def _split_chunks(text_value: str, max_chars: int = 1200) -> list[str]:
     paragraphs = [p.strip() for p in (text_value or "").split("\n\n") if p.strip()]
     chunks: list[str] = []
@@ -197,21 +214,47 @@ def ingest_document(
                 },
             ).fetchone()
             chunk_id = int(chunk_row[0])
-            emb = _embed(chunk_text)
-            db.execute(
-                text(
-                    """
-                    INSERT INTO knowledge_chunk_embeddings (chunk_id, embedding_model, embedding_dim, embedding_json)
-                    VALUES (:chunk_id, :embedding_model, :embedding_dim, CAST(:embedding_json AS jsonb))
-                    """
-                ),
-                {
-                    "chunk_id": chunk_id,
-                    "embedding_model": "hash-tfidf-v1",
-                    "embedding_dim": len(emb),
-                    "embedding_json": json.dumps(emb),
-                },
-            )
+            emb, embedding_model = _embed_for_ingestion(chunk_text)
+            embedding_params = {
+                "chunk_id": chunk_id,
+                "embedding_model": embedding_model,
+                "embedding_dim": len(emb),
+                "embedding_json": json.dumps(emb),
+                "embedding_vector": _vector_literal(emb) if len(emb) == 384 else None,
+                "embedding_hash_vector": _vector_literal(emb) if len(emb) == 96 else None,
+                "content_hash": _sha({"chunk_text": chunk_text}),
+            }
+            nested = db.begin_nested()
+            try:
+                db.execute(
+                    text(
+                        """
+                        INSERT INTO knowledge_chunk_embeddings
+                        (chunk_id, embedding_model, embedding_dim, embedding_json,
+                         embedding_vector, embedding_hash_vector, embedding_source, content_hash, indexed_at)
+                        VALUES
+                        (:chunk_id, :embedding_model, :embedding_dim, CAST(:embedding_json AS jsonb),
+                         CAST(:embedding_vector AS vector(384)), CAST(:embedding_hash_vector AS vector(96)),
+                         'ingestion', :content_hash, CURRENT_TIMESTAMP)
+                        """
+                    ),
+                    embedding_params,
+                )
+                nested.commit()
+            except Exception:
+                nested.rollback()
+                db.execute(
+                    text(
+                        """
+                        INSERT INTO knowledge_chunk_embeddings
+                        (chunk_id, embedding_model, embedding_dim, embedding_json, embedding_source, content_hash)
+                        VALUES
+                        (:chunk_id, :embedding_model, :embedding_dim, CAST(:embedding_json AS jsonb),
+                         'ingestion', :content_hash)
+                        """
+                    ),
+                    embedding_params,
+                )
             if "điều" in chunk_text.lower() or "article" in chunk_text.lower():
                 citation_key = f"{chunk_key}:cite"
                 db.execute(
@@ -248,7 +291,7 @@ def ingest_document(
             "version_tag": version_tag,
             "chunks": len(chunks),
             "citations": citation_inserted,
-            "embedding_model": "hash-tfidf-v1",
+            "embedding_model": embedding_model if chunks else "none",
         }
 
 

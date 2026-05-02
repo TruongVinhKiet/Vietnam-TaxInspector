@@ -30,11 +30,12 @@ Tools (13+):
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 import time
 import traceback
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
@@ -82,6 +83,7 @@ class ToolCallRequest:
     inputs: dict[str, Any]
     request_id: str = ""
     timeout_override: float | None = None
+    max_retries_override: int | None = None
 
 
 @dataclass
@@ -202,18 +204,25 @@ class ToolExecutor:
         retries = 0
         last_error = None
 
-        while retries <= tool.max_retries:
+        max_retries = request.max_retries_override if request.max_retries_override is not None else tool.max_retries
+
+        while retries <= max_retries:
             t0 = time.perf_counter()
+            attempt_db = db
+            owns_db = False
             try:
                 # Build kwargs
                 kwargs = dict(request.inputs)
                 if tool.requires_db:
-                    if db is None and self.db_factory:
-                        db = self.db_factory()
-                    kwargs["db"] = db
+                    if attempt_db is None and self.db_factory:
+                        attempt_db = self.db_factory()
+                        owns_db = True
+                    kwargs["db"] = attempt_db
 
                 # Execute with timeout
                 result = tool.handler(**kwargs)
+                if owns_db and attempt_db is not None:
+                    attempt_db.commit()
                 latency = (time.perf_counter() - t0) * 1000.0
 
                 return ToolCallResult(
@@ -225,9 +234,9 @@ class ToolExecutor:
                 )
 
             except Exception as exc:
-                if db is not None:
+                if attempt_db is not None:
                     try:
-                        db.rollback()
+                        attempt_db.rollback()
                     except Exception:
                         pass
                 latency = (time.perf_counter() - t0) * 1000.0
@@ -235,10 +244,16 @@ class ToolExecutor:
                 retries += 1
                 logger.warning(
                     "[ToolExecutor] %s failed (attempt %d/%d): %s",
-                    request.tool_name, retries, tool.max_retries + 1, last_error,
+                    request.tool_name, retries, max_retries + 1, last_error,
                 )
-                if retries <= tool.max_retries:
+                if retries <= max_retries:
                     time.sleep(0.1 * retries)  # Simple backoff
+            finally:
+                if owns_db and attempt_db is not None:
+                    try:
+                        attempt_db.close()
+                    except Exception:
+                        pass
 
         return ToolCallResult(
             tool_name=request.tool_name,
@@ -261,21 +276,51 @@ class ToolExecutor:
             return [self.execute_single(requests[0], db=db)]
 
         futures_map = {}
+        submit_db = None if self.db_factory else db
         for req in requests:
-            future = self._executor.submit(self.execute_single, req, db)
-            futures_map[future] = req.tool_name
+            future = self._executor.submit(self.execute_single, req, submit_db)
+            futures_map[future] = req
 
         results = []
-        for future in as_completed(futures_map):
-            try:
-                result = future.result(timeout=60)
-                results.append(result)
-            except Exception as exc:
+        pending = set(futures_map.keys())
+        deadline_by_future = {}
+        for future, req in futures_map.items():
+            tool = self.registry.get(req.tool_name)
+            timeout = req.timeout_override or (tool.timeout_seconds if tool else 55.0)
+            deadline_by_future[future] = time.perf_counter() + timeout + 2.0
+
+        while pending:
+            now = time.perf_counter()
+            completed = [future for future in pending if future.done()]
+
+            for future in completed:
+                pending.remove(future)
+                req = futures_map[future]
+                try:
+                    results.append(future.result())
+                except Exception as exc:
+                    results.append(ToolCallResult(
+                        tool_name=req.tool_name,
+                        status=ToolStatus.ERROR,
+                        error=str(exc),
+                    ))
+
+            expired = [
+                future for future in pending
+                if now >= deadline_by_future.get(future, now)
+            ]
+            for future in expired:
+                pending.remove(future)
+                req = futures_map[future]
+                future.cancel()
                 results.append(ToolCallResult(
-                    tool_name=futures_map[future],
-                    status=ToolStatus.ERROR,
-                    error=str(exc),
+                    tool_name=req.tool_name,
+                    status=ToolStatus.TIMEOUT,
+                    error=f"Tool exceeded timeout budget for {req.tool_name}",
                 ))
+
+            if pending:
+                time.sleep(0.02)
 
         # Maintain original order
         result_map = {r.tool_name: r for r in results}
@@ -317,6 +362,102 @@ class ToolExecutor:
 # These wrap existing ML/DL models and APIs.
 
 
+def _vector_literal(values: Any, *, max_dim: int | None = None) -> str:
+    """Format a Python vector for pgvector CAST(:param AS vector(n))."""
+    arr = [float(v) for v in list(values)]
+    if max_dim is not None:
+        arr = arr[:max_dim]
+    return "[" + ",".join(f"{v:.8f}" for v in arr) + "]"
+
+
+def _hash_payload(payload: Any) -> str:
+    raw = json.dumps(payload, sort_keys=True, ensure_ascii=True, default=str).encode("utf-8")
+    return hashlib.sha256(raw).hexdigest()
+
+
+def _parse_vector_json(value: Any) -> list[float] | None:
+    if value is None:
+        return None
+    try:
+        if isinstance(value, str):
+            parsed = json.loads(value)
+        else:
+            parsed = value
+        if not isinstance(parsed, list):
+            return None
+        return [float(v) for v in parsed]
+    except Exception:
+        return None
+
+
+def _citation_spans(chunk_text: str, citation_text: str | None) -> list[dict[str, Any]]:
+    """Best-effort citation span extraction for audit and UI highlighting."""
+    if not citation_text:
+        return []
+    needle = citation_text.strip()[:120]
+    if not needle:
+        return []
+    pos = chunk_text.find(needle)
+    if pos < 0:
+        pos = chunk_text.lower().find(needle.lower())
+    if pos < 0:
+        return []
+    return [{"start": pos, "end": min(pos + len(needle), len(chunk_text)), "text": chunk_text[pos:pos + len(needle)]}]
+
+
+def _execute_with_savepoint(db, statement, params: dict[str, Any]):
+    """Run a statement inside a savepoint so optional pgvector paths can fail safely."""
+    nested = None
+    try:
+        if hasattr(db, "begin_nested"):
+            nested = db.begin_nested()
+        result = db.execute(statement, params)
+        if nested is not None:
+            nested.commit()
+        return result
+    except Exception:
+        if nested is not None:
+            try:
+                nested.rollback()
+            except Exception:
+                pass
+        raise
+
+
+def _log_retrieval_event(db, *, payload: dict[str, Any]) -> None:
+    """Persist retrieval diagnostics without making RAG depend on audit schema freshness."""
+    from sqlalchemy import text as sql_text
+
+    nested = None
+    try:
+        if hasattr(db, "begin_nested"):
+            nested = db.begin_nested()
+        db.execute(
+            sql_text("""
+                INSERT INTO retrieval_logs
+                (request_id, session_id, query_text, query_hash, intent, entity_scope,
+                 retrieved_chunks, retrieval_scores, top_k, latency_ms, corpus_version,
+                 index_key, embedding_tier, reranker_tier, query_embedding_hash,
+                 candidate_count, citation_spans, latency_breakdown)
+                VALUES
+                (:request_id, :session_id, :query_text, :query_hash, :intent, CAST(:entity_scope AS jsonb),
+                 CAST(:retrieved_chunks AS jsonb), CAST(:retrieval_scores AS jsonb), :top_k, :latency_ms,
+                 :corpus_version, :index_key, :embedding_tier, :reranker_tier, :query_embedding_hash,
+                 :candidate_count, CAST(:citation_spans AS jsonb), CAST(:latency_breakdown AS jsonb))
+            """),
+            payload,
+        )
+        if nested is not None:
+            nested.commit()
+    except Exception as exc:
+        if nested is not None:
+            try:
+                nested.rollback()
+            except Exception:
+                pass
+        logger.debug("[knowledge_search] retrieval log skipped: %s", exc)
+
+
 def _tool_knowledge_search(
     db,
     query: str,
@@ -324,18 +465,21 @@ def _tool_knowledge_search(
     top_k: int = 5,
     **kwargs,
 ) -> dict[str, Any]:
-    """Enhanced knowledge retrieval (Phase 1 RAG)."""
-    from ml_engine.tax_agent_retrieval import (
-        RetrievalCandidate, bm25_scores, tokenize,
-    )
+    """Production RAG: pgvector candidates + BM25 + cross-encoder reranking."""
+    from ml_engine.tax_agent_retrieval import bm25_scores, tokenize
     from ml_engine.tax_agent_embeddings import get_embedding_engine, expand_query
     from sqlalchemy import text as sql_text
 
+    t_start = time.perf_counter()
     engine = get_embedding_engine()
     expanded_query = expand_query(query)
     query_embedding = engine.embed_query(expanded_query)
+    query_embedding_hash = _hash_payload({
+        "tier": engine.model_tier,
+        "dim": int(len(query_embedding.vector)),
+        "vector": [round(float(v), 6) for v in query_embedding.vector[:16]],
+    })
 
-    # Intent-based doc type filtering
     doc_type_map = {
         "vat_refund_risk": ["vat_refund", "vat", "circular", "decree", "law"],
         "invoice_risk": ["invoice", "vat", "circular", "decree", "law"],
@@ -345,58 +489,167 @@ def _tool_knowledge_search(
         "osint_ownership": ["ubo", "ownership", "company_law", "international_tax", "law"],
     }
     doc_types = doc_type_map.get(intent, [])
+    candidate_limit = max(120, min(800, top_k * 40))
+    request_id = kwargs.get("request_id") or f"rag-{hashlib.sha1(query.encode('utf-8')).hexdigest()[:12]}"
+    session_id = kwargs.get("session_id")
+    entity_scope = kwargs.get("entity_scope") or {}
 
-    rows = db.execute(
-        sql_text("""
+    rows = []
+    vector_tier = "lexical_fallback"
+    vector_latency_ms = 0.0
+
+    if int(len(query_embedding.vector)) == 384:
+        vector_sql = sql_text("""
             SELECT
                 kc.id AS chunk_id,
                 kc.chunk_key,
                 kc.chunk_text,
+                kc.metadata_json,
+                kdv.version_tag,
+                kdv.content_hash,
+                kd.document_key,
                 kd.title,
                 kd.doc_type,
-                kce.embedding_json
+                kce.embedding_json,
+                kcit.citation_key,
+                kcit.legal_reference,
+                kcit.citation_text,
+                kcit.confidence AS citation_confidence,
+                (kce.embedding_vector <=> CAST(:query_vector AS vector(384))) AS vector_distance
+            FROM knowledge_chunks kc
+            JOIN knowledge_document_versions kdv ON kdv.id = kc.version_id
+            JOIN knowledge_documents kd ON kd.id = kdv.document_id
+            JOIN knowledge_chunk_embeddings kce ON kce.chunk_id = kc.id
+            LEFT JOIN LATERAL (
+                SELECT citation_key, legal_reference, citation_text, confidence
+                FROM knowledge_citations
+                WHERE chunk_id = kc.id
+                ORDER BY confidence DESC NULLS LAST, id ASC
+                LIMIT 1
+            ) kcit ON TRUE
+            WHERE kd.status = 'active'
+              AND kce.embedding_vector IS NOT NULL
+              AND (:use_doc_types = FALSE OR kd.doc_type = ANY(:doc_types))
+            ORDER BY kce.embedding_vector <=> CAST(:query_vector AS vector(384))
+            LIMIT :candidate_limit
+        """)
+        try:
+            t_vec = time.perf_counter()
+            rows = _execute_with_savepoint(
+                db,
+                vector_sql,
+                {
+                    "query_vector": _vector_literal(query_embedding.vector, max_dim=384),
+                    "use_doc_types": bool(doc_types),
+                    "doc_types": doc_types,
+                    "candidate_limit": candidate_limit,
+                },
+            ).mappings().all()
+            vector_latency_ms = (time.perf_counter() - t_vec) * 1000.0
+            if rows:
+                vector_tier = "pgvector_hnsw_or_ivfflat"
+        except Exception as exc:
+            logger.debug("[knowledge_search] pgvector path unavailable: %s", exc)
+
+    if not rows:
+        legacy_sql = sql_text("""
+            SELECT
+                kc.id AS chunk_id,
+                kc.chunk_key,
+                kc.chunk_text,
+                kc.metadata_json,
+                kdv.version_tag,
+                kdv.content_hash,
+                kd.document_key,
+                kd.title,
+                kd.doc_type,
+                kce.embedding_json,
+                kcit.citation_key,
+                kcit.legal_reference,
+                kcit.citation_text,
+                kcit.confidence AS citation_confidence,
+                NULL AS vector_distance
             FROM knowledge_chunks kc
             JOIN knowledge_document_versions kdv ON kdv.id = kc.version_id
             JOIN knowledge_documents kd ON kd.id = kdv.document_id
             LEFT JOIN knowledge_chunk_embeddings kce ON kce.chunk_id = kc.id
+            LEFT JOIN LATERAL (
+                SELECT citation_key, legal_reference, citation_text, confidence
+                FROM knowledge_citations
+                WHERE chunk_id = kc.id
+                ORDER BY confidence DESC NULLS LAST, id ASC
+                LIMIT 1
+            ) kcit ON TRUE
             WHERE kd.status = 'active'
               AND (:use_doc_types = FALSE OR kd.doc_type = ANY(:doc_types))
             ORDER BY kc.created_at DESC
-            LIMIT 400
-        """),
-        {"use_doc_types": bool(doc_types), "doc_types": doc_types},
-    ).mappings().all()
+            LIMIT :candidate_limit
+        """)
+        rows = db.execute(
+            legacy_sql,
+            {
+                "use_doc_types": bool(doc_types),
+                "doc_types": doc_types,
+                "candidate_limit": max(400, candidate_limit),
+            },
+        ).mappings().all()
 
     q_tokens = tokenize(expanded_query)
-    candidates = []
-    passage_texts = []
+    candidates: list[dict[str, Any]] = []
+    passage_texts: list[str] = []
+    stored_vectors: list[list[float] | None] = []
 
     for row in rows:
         chunk_text = str(row.get("chunk_text") or "")
+        citation_text = row.get("citation_text")
         candidates.append({
             "chunk_id": int(row["chunk_id"]),
             "chunk_key": str(row["chunk_key"]),
             "title": str(row.get("title") or ""),
             "doc_type": str(row.get("doc_type") or ""),
             "text": chunk_text[:900],
+            "document_key": str(row.get("document_key") or ""),
+            "version_tag": str(row.get("version_tag") or ""),
+            "content_hash": str(row.get("content_hash") or ""),
+            "citation_key": row.get("citation_key"),
+            "legal_reference": row.get("legal_reference"),
+            "citation_text": citation_text,
+            "citation_confidence": row.get("citation_confidence"),
+            "citation_spans": _citation_spans(chunk_text, citation_text),
+            "vector_distance": row.get("vector_distance"),
         })
         passage_texts.append(chunk_text)
+        stored_vectors.append(_parse_vector_json(row.get("embedding_json")))
 
-    # BM25 scores
     docs_tokens = [tokenize(t) for t in passage_texts]
     bm25 = bm25_scores(q_tokens, docs_tokens)
     bm25_max = max(bm25) if bm25 else 1.0
-
-    # Dense semantic scores (Phase 1 upgrade)
-    if engine.is_semantic and passage_texts:
-        batch_result = engine.embed_passages_batch(passage_texts)
-        passage_vecs = np.stack([e.vector for e in batch_result.embeddings])
-        dense_scores = engine.cosine_similarity_batch(query_embedding.vector, passage_vecs)
-    else:
-        dense_scores = np.zeros(len(candidates))
-
-    # Lexical overlap
     query_token_set = set(q_tokens)
+
+    dense_scores = np.zeros(len(candidates))
+    if candidates:
+        if any(c.get("vector_distance") is not None for c in candidates):
+            dense_scores = np.array([
+                max(0.0, 1.0 - float(c.get("vector_distance") or 1.0))
+                for c in candidates
+            ], dtype=np.float32)
+        else:
+            q_vec = np.asarray(query_embedding.vector, dtype=np.float32)
+            reusable = [
+                np.asarray(v, dtype=np.float32)
+                if v is not None and len(v) == len(q_vec)
+                else None
+                for v in stored_vectors
+            ]
+            if all(v is not None for v in reusable):
+                passage_vecs = np.stack(reusable)
+                dense_scores = engine.cosine_similarity_batch(q_vec, passage_vecs)
+                vector_tier = "stored_embedding_json"
+            elif engine.is_semantic and passage_texts:
+                batch_result = engine.embed_passages_batch(passage_texts)
+                passage_vecs = np.stack([e.vector for e in batch_result.embeddings])
+                dense_scores = engine.cosine_similarity_batch(query_embedding.vector, passage_vecs)
+                vector_tier = "runtime_embedding"
 
     scored = []
     for i, cand in enumerate(candidates):
@@ -404,10 +657,7 @@ def _tool_knowledge_search(
         lexical = len(query_token_set & doc_tokens_set) / max(len(query_token_set), 1)
         bm25_norm = float(bm25[i]) / max(bm25_max, 1e-9)
         dense = float(dense_scores[i])
-
-        # Hybrid score with enhanced weights
         score = 0.35 * bm25_norm + 0.50 * dense + 0.15 * lexical
-
         scored.append({
             **cand,
             "score": round(score, 6),
@@ -415,16 +665,15 @@ def _tool_knowledge_search(
                 "bm25": round(bm25_norm, 6),
                 "dense": round(dense, 6),
                 "lexical": round(lexical, 6),
+                "vector_distance": cand.get("vector_distance"),
             },
         })
 
     scored.sort(key=lambda x: x["score"], reverse=True)
 
-    # Cross-encoder reranking (Phase 1)
-    from ml_engine.tax_agent_cross_encoder import TaxAgentCrossEncoder, RerankCandidate
-    reranker = TaxAgentCrossEncoder()
-    reranker.load()
-
+    from ml_engine.tax_agent_cross_encoder import RerankCandidate, get_cross_encoder
+    reranker = get_cross_encoder()
+    source_by_key = {item["chunk_key"]: item for item in scored}
     rerank_candidates = [
         RerankCandidate(
             chunk_id=item["chunk_id"],
@@ -439,7 +688,6 @@ def _tool_knowledge_search(
         )
         for rank, item in enumerate(scored[:RERANK_TOP_N])
     ]
-
     rerank_result = reranker.rerank(
         query, rerank_candidates,
         top_k=top_k,
@@ -448,6 +696,7 @@ def _tool_knowledge_search(
 
     final = []
     for rc in rerank_result.candidates:
+        src = source_by_key.get(rc.chunk_key, {})
         final.append({
             "chunk_id": rc.chunk_id,
             "chunk_key": rc.chunk_key,
@@ -456,13 +705,63 @@ def _tool_knowledge_search(
             "text": rc.text,
             "score": round(rc.rerank_score, 6),
             "rerank_tier": rc.rerank_tier,
+            "components": src.get("components", {}),
+            "document_key": src.get("document_key"),
+            "corpus_version": f"{src.get('document_key', '')}:{src.get('version_tag', '')}",
+            "content_hash": src.get("content_hash"),
+            "citation_key": src.get("citation_key"),
+            "legal_reference": src.get("legal_reference"),
+            "citation_spans": src.get("citation_spans", []),
         })
 
+    latency_ms = (time.perf_counter() - t_start) * 1000.0
+    corpus_versions = sorted({h.get("corpus_version") for h in final if h.get("corpus_version")})
+    retrieval_scores = {
+        h["chunk_key"]: {
+            "score": h["score"],
+            "rerank_tier": h.get("rerank_tier"),
+            "components": h.get("components", {}),
+        }
+        for h in final
+    }
+    citation_spans = {
+        h["chunk_key"]: h.get("citation_spans", [])
+        for h in final
+        if h.get("citation_spans")
+    }
+    _log_retrieval_event(
+        db,
+        payload={
+            "request_id": request_id,
+            "session_id": session_id,
+            "query_text": query,
+            "query_hash": _hash_payload({"query": query, "expanded": expanded_query}),
+            "intent": intent,
+            "entity_scope": json.dumps(entity_scope, default=str),
+            "retrieved_chunks": json.dumps(final, default=str),
+            "retrieval_scores": json.dumps(retrieval_scores, default=str),
+            "top_k": top_k,
+            "latency_ms": latency_ms,
+            "corpus_version": ",".join(corpus_versions) if corpus_versions else None,
+            "index_key": kwargs.get("index_key") or ("tax_knowledge_pgvector" if vector_tier.startswith("pgvector") else "tax_knowledge_lexical"),
+            "embedding_tier": engine.model_tier,
+            "reranker_tier": rerank_result.model_tier,
+            "query_embedding_hash": query_embedding_hash,
+            "candidate_count": len(candidates),
+            "citation_spans": json.dumps(citation_spans, default=str),
+            "latency_breakdown": json.dumps({"vector_ms": round(vector_latency_ms, 1)}, default=str),
+        },
+    )
+
     return {
+        "status": "success",
         "hits": final,
         "total_candidates": len(candidates),
         "rerank_model": rerank_result.model_tier,
         "embedding_model": engine.model_tier,
+        "retrieval_tier": vector_tier,
+        "corpus_versions": corpus_versions,
+        "query_embedding_hash": query_embedding_hash,
         "expanded_query": expanded_query if expanded_query != query else None,
     }
 
@@ -1237,19 +1536,32 @@ def _tool_ocr_document_process(
     **kwargs,
 ) -> dict[str, Any]:
     """OCR Document Process tool."""
-    from ml_engine.document_ocr_engine import DocumentOCREngine
+    from dataclasses import asdict
+    from ml_engine.document_ocr_engine import get_ocr_engine
 
     if not file_path or not Path(file_path).exists():
         return {"status": "error", "message": f"File không tồn tại: {file_path}"}
 
-    engine = DocumentOCREngine()
-    result = engine.process_document(file_path)
+    result = get_ocr_engine().process(file_path)
+    payload = asdict(result)
+    fields = payload.get("invoice_fields") or {}
+    page_scores = [
+        float(page.get("confidence") or 0.0)
+        for page in payload.get("ocr_results", [])
+        if isinstance(page, dict)
+    ]
+    confidence = float(fields.get("confidence") or 0.0)
+    if confidence <= 0 and page_scores:
+        confidence = sum(page_scores) / len(page_scores)
 
     return {
         "status": "analyzed",
         "file_path": file_path,
-        "extracted_data": result.get("extracted_fields", {}),
-        "confidence": result.get("confidence", 0.0)
+        "extracted_data": fields,
+        "full_text_preview": str(payload.get("full_text") or "")[:1200],
+        "tables": payload.get("tables", []),
+        "confidence": round(confidence, 4),
+        "errors": payload.get("errors", []),
     }
 
 

@@ -507,6 +507,69 @@ def _run_entity_resolution_migration(conn) -> None:
     """))
 
 
+def _run_multimodal_upload_migration(conn) -> None:
+    conn.execute(text("""
+        CREATE TABLE IF NOT EXISTS analysis_uploads (
+            id SERIAL PRIMARY KEY,
+            source VARCHAR(80) NOT NULL DEFAULT 'unknown',
+            batch_type VARCHAR(80) NOT NULL DEFAULT 'generic',
+            original_filename VARCHAR(500) NOT NULL,
+            stored_filename VARCHAR(500),
+            file_path VARCHAR(1000),
+            content_type VARCHAR(120),
+            file_size_bytes INTEGER NOT NULL DEFAULT 0,
+            sha256 VARCHAR(64) NOT NULL,
+            status VARCHAR(30) NOT NULL DEFAULT 'received',
+            error_message TEXT,
+            metadata_json JSONB,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            processed_at TIMESTAMP
+        );
+    """))
+    conn.execute(text("CREATE INDEX IF NOT EXISTS idx_analysis_uploads_source_created ON analysis_uploads (source, created_at DESC);"))
+    conn.execute(text("CREATE INDEX IF NOT EXISTS idx_analysis_uploads_sha256 ON analysis_uploads (sha256);"))
+    conn.execute(text("CREATE INDEX IF NOT EXISTS idx_analysis_uploads_status ON analysis_uploads (status);"))
+    conn.execute(text("""
+        CREATE TABLE IF NOT EXISTS vat_graph_analysis_batches (
+            id SERIAL PRIMARY KEY,
+            upload_id INTEGER REFERENCES analysis_uploads(id) ON DELETE SET NULL,
+            filename VARCHAR(500) NOT NULL,
+            detected_schema VARCHAR(80),
+            total_rows INTEGER DEFAULT 0,
+            processed_rows INTEGER DEFAULT 0,
+            status VARCHAR(20) NOT NULL DEFAULT 'pending',
+            error_message TEXT,
+            warnings JSONB,
+            result_summary JSONB,
+            result_json JSONB,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            started_at TIMESTAMP,
+            completed_at TIMESTAMP
+        );
+    """))
+    conn.execute(text("CREATE INDEX IF NOT EXISTS idx_vat_graph_batches_status_created ON vat_graph_analysis_batches (status, created_at DESC);"))
+    conn.execute(text("CREATE INDEX IF NOT EXISTS idx_vat_graph_batches_upload ON vat_graph_analysis_batches (upload_id);"))
+    conn.execute(text("""
+        CREATE TABLE IF NOT EXISTS vat_graph_batch_results (
+            id SERIAL PRIMARY KEY,
+            batch_id INTEGER NOT NULL REFERENCES vat_graph_analysis_batches(id) ON DELETE CASCADE,
+            invoice_number VARCHAR(80) NOT NULL,
+            seller_tax_code VARCHAR(20) NOT NULL,
+            buyer_tax_code VARCHAR(20) NOT NULL,
+            amount NUMERIC(18, 2) NOT NULL DEFAULT 0.0,
+            vat_rate NUMERIC(5, 2) NOT NULL DEFAULT 10.0,
+            invoice_date DATE NOT NULL,
+            edge_risk_score DOUBLE PRECISION,
+            edge_risk_level VARCHAR(20),
+            signals JSONB,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+    """))
+    conn.execute(text("CREATE INDEX IF NOT EXISTS idx_vat_graph_batch_results_batch_score ON vat_graph_batch_results (batch_id, edge_risk_score DESC);"))
+    conn.execute(text("CREATE INDEX IF NOT EXISTS idx_vat_graph_batch_results_seller ON vat_graph_batch_results (seller_tax_code);"))
+    conn.execute(text("CREATE INDEX IF NOT EXISTS idx_vat_graph_batch_results_buyer ON vat_graph_batch_results (buyer_tax_code);"))
+
+
 def run_migration() -> None:
     with engine.begin() as conn:
         _run_safe_user_profile_migration(conn)
@@ -518,8 +581,9 @@ def run_migration() -> None:
         _run_invoice_risk_migration(conn)
         _run_vat_refund_case_migration(conn)
         _run_entity_resolution_migration(conn)
+        _run_multimodal_upload_migration(conn)
 
-    print("[OK] Completed migration: user profile columns + offshore proxy mapping + numeric tax_code contract.")
+    print("[OK] Completed migration: user profile columns + offshore proxy mapping + numeric tax_code contract + multimodal uploads.")
 
 
 if __name__ == "__main__":

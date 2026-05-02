@@ -275,7 +275,8 @@ def train_model(
             max_depth=6,
             num_leaves=31,
             subsample=0.8,
-            random_state=42
+            random_state=42,
+            verbose=-1
         )
         model.fit(
             X_train, y_train,

@@ -364,3 +364,15 @@ class TaxAgentCrossEncoder:
             "loaded": self._loaded,
             "batch_size": self.batch_size,
         }
+
+
+_default_cross_encoder: TaxAgentCrossEncoder | None = None
+
+
+def get_cross_encoder() -> TaxAgentCrossEncoder:
+    """Return a process-wide reranker singleton."""
+    global _default_cross_encoder
+    if _default_cross_encoder is None:
+        _default_cross_encoder = TaxAgentCrossEncoder()
+        _default_cross_encoder.load()
+    return _default_cross_encoder

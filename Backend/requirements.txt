@@ -27,6 +27,10 @@ cryptography
 # Image processing (signature comparison)
 Pillow
 imagehash
+pdfplumber
+pdf2image
+pytesseract
+opencv-python-headless
 torch==2.5.1
 torch_geometric==2.6.1
 geopy==2.4.1

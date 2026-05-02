@@ -25,6 +25,70 @@ class User(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
+class AnalysisUpload(Base):
+    """
+    Shared audit record for uploaded files used by risk, VAT graph, OCR, and agent flows.
+    """
+    __tablename__ = "analysis_uploads"
+
+    id = Column(Integer, primary_key=True, index=True)
+    source = Column(String(80), nullable=False, default="unknown", index=True)
+    batch_type = Column(String(80), nullable=False, default="generic", index=True)
+    original_filename = Column(String(500), nullable=False)
+    stored_filename = Column(String(500), nullable=True)
+    file_path = Column(String(1000), nullable=True)
+    content_type = Column(String(120), nullable=True)
+    file_size_bytes = Column(Integer, nullable=False, default=0)
+    sha256 = Column(String(64), nullable=False, index=True)
+    status = Column(String(30), nullable=False, default="received", index=True)
+    error_message = Column(Text, nullable=True)
+    metadata_json = Column(JSON, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    processed_at = Column(DateTime(timezone=True), nullable=True)
+
+
+class VatGraphAnalysisBatch(Base):
+    """
+    Persisted CSV ingestion batch for VAT network graph analysis.
+    """
+    __tablename__ = "vat_graph_analysis_batches"
+
+    id = Column(Integer, primary_key=True, index=True)
+    upload_id = Column(Integer, ForeignKey("analysis_uploads.id", ondelete="SET NULL"), nullable=True, index=True)
+    filename = Column(String(500), nullable=False)
+    detected_schema = Column(String(80), nullable=True)
+    total_rows = Column(Integer, default=0)
+    processed_rows = Column(Integer, default=0)
+    status = Column(String(20), nullable=False, default="pending", index=True)
+    error_message = Column(Text, nullable=True)
+    warnings = Column(JSON, nullable=True)
+    result_summary = Column(JSON, nullable=True)
+    result_json = Column(JSON, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    started_at = Column(DateTime(timezone=True), nullable=True)
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+
+
+class VatGraphBatchResult(Base):
+    """
+    Per-invoice audit row produced by a VAT graph CSV batch.
+    """
+    __tablename__ = "vat_graph_batch_results"
+
+    id = Column(Integer, primary_key=True, index=True)
+    batch_id = Column(Integer, ForeignKey("vat_graph_analysis_batches.id", ondelete="CASCADE"), nullable=False, index=True)
+    invoice_number = Column(String(80), nullable=False, index=True)
+    seller_tax_code = Column(String(20), nullable=False, index=True)
+    buyer_tax_code = Column(String(20), nullable=False, index=True)
+    amount = Column(Numeric(18, 2), nullable=False, default=0.0)
+    vat_rate = Column(Numeric(5, 2), nullable=False, default=10.0)
+    invoice_date = Column(Date, nullable=False)
+    edge_risk_score = Column(Float, nullable=True)
+    edge_risk_level = Column(String(20), nullable=True)
+    signals = Column(JSON, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
 class PasswordResetToken(Base):
     __tablename__ = "password_reset_tokens"
 
@@ -995,6 +1059,9 @@ class KnowledgeChunkEmbedding(Base):
     embedding_model = Column(String(80), nullable=False)
     embedding_dim = Column(Integer, nullable=False)
     embedding_json = Column(JSON, nullable=False)
+    embedding_source = Column(String(40), nullable=False, default="ingestion")
+    content_hash = Column(String(64), nullable=True)
+    indexed_at = Column(DateTime(timezone=True), server_default=func.now())
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
@@ -1011,6 +1078,14 @@ class RetrievalLog(Base):
     retrieved_chunks = Column(JSON, nullable=True)
     retrieval_scores = Column(JSON, nullable=True)
     top_k = Column(Integer, nullable=False, default=5)
+    corpus_version = Column(String(200), nullable=True)
+    index_key = Column(String(120), nullable=True)
+    embedding_tier = Column(String(40), nullable=True)
+    reranker_tier = Column(String(40), nullable=True)
+    query_embedding_hash = Column(String(64), nullable=True)
+    candidate_count = Column(Integer, nullable=True)
+    citation_spans = Column(JSON, nullable=True)
+    latency_breakdown = Column(JSON, nullable=True)
     latency_ms = Column(Float, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
@@ -1097,6 +1172,30 @@ class AgentDecisionTrace(Base):
     escalation_required = Column(Boolean, nullable=False, default=False)
     evidence_json = Column(JSON, nullable=True)
     answer_text = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class AgentExecutionPlan(Base):
+    __tablename__ = "agent_execution_plans"
+
+    id = Column(Integer, primary_key=True, index=True)
+    plan_id = Column(String(64), nullable=False, unique=True, index=True)
+    session_id = Column(String(64), nullable=False, index=True)
+    turn_id = Column(Integer, nullable=True)
+    query_text = Column(Text, nullable=True)
+    intent = Column(String(64), nullable=True, index=True)
+    complexity = Column(String(32), nullable=True)
+    reasoning_trace = Column(Text, nullable=True)
+    budget_ms = Column(Integer, nullable=True)
+    max_react_iterations = Column(Integer, nullable=True)
+    retry_policy_json = Column(JSON, nullable=True)
+    evidence_contract_json = Column(JSON, nullable=True)
+    steps_json = Column(JSON, nullable=True)
+    tool_results_json = Column(JSON, nullable=True)
+    synthesis_json = Column(JSON, nullable=True)
+    compliance_json = Column(JSON, nullable=True)
+    latency_ms = Column(Float, nullable=True)
+    latency_breakdown = Column(JSON, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 

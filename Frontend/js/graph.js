@@ -573,6 +573,9 @@ document.addEventListener("DOMContentLoaded", () => {
     if (btnResolveEntity) {
         btnResolveEntity.addEventListener('click', runEntityResolution);
     }
+    
+    // Setup VAT CSV Upload
+    setupVATUpload();
 });
 
 // ════════════════════════════════════════════════════════════════
@@ -662,6 +665,164 @@ function renderSearchDropdown(results, dropdown) {
             loadGraph(tc);
         });
     });
+}
+
+// ════════════════════════════════════════════════════════════════
+//  VAT CSV Upload
+// ════════════════════════════════════════════════════════════════
+function setupVATUpload() {
+    const btn = document.getElementById('graph-upload-btn');
+    const modal = document.getElementById('vatUploadModal');
+    const closeBtn = document.getElementById('closeVatUploadBtn');
+    const input = document.getElementById('vatFileInput');
+    const dropzone = document.getElementById('vat-upload-zone');
+    const progressArea = document.getElementById('vat-upload-progress-area');
+    const progressBar = document.getElementById('vat-progress-bar');
+    const progressStatus = document.getElementById('vat-progress-status');
+    const progressPct = document.getElementById('vat-progress-pct');
+
+    if (!btn || !modal) return;
+
+    function openModal() {
+        modal.classList.remove('opacity-0', 'pointer-events-none');
+        document.getElementById('vatUploadModalContent').classList.remove('scale-95');
+        // Reset UI
+        progressArea.classList.add('hidden');
+        dropzone.classList.remove('hidden');
+        progressBar.style.width = '0%';
+        input.value = '';
+    }
+
+    function closeModal() {
+        modal.classList.add('opacity-0', 'pointer-events-none');
+        document.getElementById('vatUploadModalContent').classList.add('scale-95');
+    }
+
+    btn.addEventListener('click', openModal);
+    closeBtn.addEventListener('click', closeModal);
+    modal.addEventListener('click', (e) => {
+        if (e.target === modal) closeModal();
+    });
+
+    dropzone.addEventListener('click', () => input.click());
+
+    dropzone.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        dropzone.classList.add('bg-emerald-100', 'border-emerald-500');
+    });
+    dropzone.addEventListener('dragleave', () => {
+        dropzone.classList.remove('bg-emerald-100', 'border-emerald-500');
+    });
+    dropzone.addEventListener('drop', (e) => {
+        e.preventDefault();
+        dropzone.classList.remove('bg-emerald-100', 'border-emerald-500');
+        if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+            handleFileUpload(e.dataTransfer.files[0]);
+        }
+    });
+
+    input.addEventListener('change', (e) => {
+        if (e.target.files && e.target.files[0]) {
+            handleFileUpload(e.target.files[0]);
+        }
+    });
+
+    async function handleFileUpload(file) {
+        if (!file.name.toLowerCase().endsWith('.csv')) {
+            showGraphToast("Định dạng không hợp lệ", "Vui lòng chọn file CSV.", "warning");
+            return;
+        }
+
+        dropzone.classList.add('hidden');
+        progressArea.classList.remove('hidden');
+        progressBar.style.width = '10%';
+        progressStatus.textContent = 'Đang tải lên và phân tích...';
+        progressPct.textContent = '10%';
+
+        const formData = new FormData();
+        formData.append('file', file);
+        formData.append('persist', 'true');
+        formData.append('analysis_depth', 'standard');
+
+        try {
+            const res = await fetch(`${GRAPH_API_BASE}/graph/batch-upload`, {
+                method: 'POST',
+                body: formData
+            });
+            if (!res.ok) {
+                const err = await res.json();
+                throw new Error(err.detail || `Upload failed with status ${res.status}`);
+            }
+
+            const data = await res.json();
+            const batchId = data.batch_id;
+            
+            progressBar.style.width = '40%';
+            progressPct.textContent = '40%';
+
+            if (data.status === 'completed') {
+                finalizeUpload(data);
+            } else {
+                pollBatchStatus(batchId);
+            }
+        } catch (error) {
+            console.error("Upload error:", error);
+            showGraphToast("Lỗi tải lên", error.message, "error");
+            closeModal();
+        }
+    }
+
+    async function pollBatchStatus(batchId) {
+        let attempts = 0;
+        const maxAttempts = 60; // 2 minutes with 2s intervals
+        
+        const interval = setInterval(async () => {
+            attempts++;
+            try {
+                const res = await fetch(`${GRAPH_API_BASE}/graph/batch-status/${batchId}`);
+                if (!res.ok) throw new Error("Status check failed");
+                const data = await res.json();
+                
+                // Simulate progress visualization
+                const progress = Math.min(95, 40 + (attempts * 2));
+                progressBar.style.width = `${progress}%`;
+                progressPct.textContent = `${progress}%`;
+
+                if (data.status === 'completed') {
+                    clearInterval(interval);
+                    finalizeUpload(data);
+                } else if (data.status === 'failed') {
+                    clearInterval(interval);
+                    throw new Error("Batch processing failed on server");
+                } else if (attempts >= maxAttempts) {
+                    clearInterval(interval);
+                    throw new Error("Timeout processing batch");
+                }
+            } catch (err) {
+                clearInterval(interval);
+                showGraphToast("Lỗi xử lý Batch", err.message, "error");
+                closeModal();
+            }
+        }, 2000);
+    }
+
+    function finalizeUpload(data) {
+        progressBar.style.width = '100%';
+        progressPct.textContent = '100%';
+        progressStatus.textContent = 'Hoàn tất! Đang khởi tạo Mạng lưới...';
+        
+        setTimeout(() => {
+            showGraphToast(
+                "Tải lên thành công", 
+                `Phân tích ${data.row_count || data.processed_rows || 'dữ liệu'} thành công. ${data.summary || ''}`, 
+                "success"
+            );
+            closeModal();
+            // Reload global graph or clear current specific search to show new data
+            document.getElementById("graph-search-input").value = "";
+            loadGraph(""); 
+        }, 800);
+    }
 }
 
 // ════════════════════════════════════════════════════════════════

@@ -275,6 +275,51 @@ class NLQueryExecutor:
             if not rows:
                 return {"total": 0, "status": "empty_file", "filename": filename}
 
+            try:
+                import pandas as pd
+                from ml_engine.pipeline import TaxFraudPipeline
+
+                df = pd.read_csv(io.BytesIO(csv_content), dtype={"tax_code": "string"}, low_memory=False)
+                pipeline = TaxFraudPipeline()
+                pipeline.load_models()
+                result = pipeline.predict_batch(df)
+                assessments = sorted(
+                    result.get("assessments", []),
+                    key=lambda a: float(a.get("risk_score") or 0.0),
+                    reverse=True,
+                )
+                by_level = {"critical": 0, "high": 0, "medium": 0, "low": 0}
+                for assessment in assessments:
+                    level = str(assessment.get("risk_level") or "low")
+                    by_level[level] = by_level.get(level, 0) + 1
+
+                latency = (time.perf_counter() - t0) * 1000.0
+                logger.info(
+                    "[NLQuery] batch_inline_pipeline: file=%s rows=%d latency=%.0fms",
+                    filename, len(assessments), latency,
+                )
+
+                return {
+                    "total": int(result.get("total_companies") or len(assessments)),
+                    "by_level": by_level,
+                    "top_5": assessments[:5],
+                    "assessments": assessments[:50],
+                    "statistics": result.get("statistics", {}),
+                    "filename": filename,
+                    "status": "success",
+                    "analysis_type": "risk_csv",
+                    "latency_ms": round(latency, 1),
+                }
+            except Exception as model_exc:
+                logger.warning("[NLQuery] batch_inline pipeline failed: %s", model_exc)
+                return {
+                    "total": 0,
+                    "status": "error",
+                    "analysis_type": "risk_csv",
+                    "error": str(model_exc),
+                    "filename": filename,
+                }
+
             # Score each row using simplified risk heuristics
             assessments = []
             for row in rows:

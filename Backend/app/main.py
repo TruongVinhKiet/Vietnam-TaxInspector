@@ -51,6 +51,17 @@ async def lifespan(app: FastAPI):
     try:
         from sqlalchemy import text
         with engine.connect() as conn:
+            pgvector_ready = False
+            try:
+                conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector;"))
+                pgvector_ready = True
+            except Exception as vector_exc:
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
+                print("[INFO] Môi trường không có pgvector. Hệ thống tự động chuyển sang chế độ Local RAG (BM25 + JSON).")
+
             # Original migrations
             conn.execute(text(
                 "ALTER TABLE ai_risk_assessments "
@@ -162,6 +173,46 @@ async def lifespan(app: FastAPI):
                 "ALTER TABLE inspector_labels "
                 "ADD COLUMN IF NOT EXISTS kpi_window_days INTEGER DEFAULT 90;"
             ))
+
+            conn.execute(text(
+                "CREATE TABLE IF NOT EXISTS agent_execution_plans ("
+                "id SERIAL PRIMARY KEY, "
+                "plan_id VARCHAR(64) NOT NULL UNIQUE, "
+                "session_id VARCHAR(64) NOT NULL, "
+                "turn_id INT, "
+                "query_text TEXT, "
+                "intent VARCHAR(64), "
+                "complexity VARCHAR(32), "
+                "reasoning_trace TEXT, "
+                "budget_ms INT, "
+                "max_react_iterations INT, "
+                "retry_policy_json JSONB, "
+                "evidence_contract_json JSONB, "
+                "steps_json JSONB, "
+                "tool_results_json JSONB, "
+                "synthesis_json JSONB, "
+                "compliance_json JSONB, "
+                "latency_ms FLOAT, "
+                "latency_breakdown JSONB, "
+                "created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP"
+                ");"
+            ))
+            conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS idx_agent_exec_plans_session "
+                "ON agent_execution_plans (session_id);"
+            ))
+            conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS idx_agent_exec_plans_intent "
+                "ON agent_execution_plans (intent);"
+            ))
+            conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS idx_agent_exec_plans_created "
+                "ON agent_execution_plans (created_at DESC);"
+            ))
+            conn.execute(text("ALTER TABLE agent_execution_plans ADD COLUMN IF NOT EXISTS budget_ms INT;"))
+            conn.execute(text("ALTER TABLE agent_execution_plans ADD COLUMN IF NOT EXISTS max_react_iterations INT;"))
+            conn.execute(text("ALTER TABLE agent_execution_plans ADD COLUMN IF NOT EXISTS retry_policy_json JSONB;"))
+            conn.execute(text("ALTER TABLE agent_execution_plans ADD COLUMN IF NOT EXISTS evidence_contract_json JSONB;"))
 
             conn.execute(text(
                 "CREATE TABLE IF NOT EXISTS agent_quality_metrics ("
@@ -771,9 +822,49 @@ async def lifespan(app: FastAPI):
                 "embedding_model VARCHAR(80) NOT NULL, "
                 "embedding_dim INTEGER NOT NULL, "
                 "embedding_json JSONB NOT NULL, "
+                "embedding_source VARCHAR(40) NOT NULL DEFAULT 'ingestion', "
+                "content_hash VARCHAR(64), "
+                "indexed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, "
                 "created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP"
                 ");"
             ))
+            conn.execute(text("ALTER TABLE knowledge_chunk_embeddings ADD COLUMN IF NOT EXISTS embedding_source VARCHAR(40) NOT NULL DEFAULT 'ingestion';"))
+            conn.execute(text("ALTER TABLE knowledge_chunk_embeddings ADD COLUMN IF NOT EXISTS content_hash VARCHAR(64);"))
+            conn.execute(text("ALTER TABLE knowledge_chunk_embeddings ADD COLUMN IF NOT EXISTS indexed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;"))
+            if pgvector_ready:
+                conn.execute(text("ALTER TABLE knowledge_chunk_embeddings ADD COLUMN IF NOT EXISTS embedding_vector vector(384);"))
+                conn.execute(text("ALTER TABLE knowledge_chunk_embeddings ADD COLUMN IF NOT EXISTS embedding_hash_vector vector(96);"))
+                for index_stmt in [
+                    (
+                        "CREATE INDEX IF NOT EXISTS idx_knowledge_embeddings_vector_hnsw "
+                        "ON knowledge_chunk_embeddings USING hnsw (embedding_vector vector_cosine_ops) "
+                        "WHERE embedding_vector IS NOT NULL;"
+                    ),
+                    (
+                        "CREATE INDEX IF NOT EXISTS idx_knowledge_embeddings_vector_ivfflat "
+                        "ON knowledge_chunk_embeddings USING ivfflat (embedding_vector vector_cosine_ops) WITH (lists = 100) "
+                        "WHERE embedding_vector IS NOT NULL;"
+                    ),
+                    (
+                        "CREATE INDEX IF NOT EXISTS idx_knowledge_embeddings_hash_hnsw "
+                        "ON knowledge_chunk_embeddings USING hnsw (embedding_hash_vector vector_cosine_ops) "
+                        "WHERE embedding_hash_vector IS NOT NULL;"
+                    ),
+                ]:
+                    nested = None
+                    try:
+                        if hasattr(conn, "begin_nested"):
+                            nested = conn.begin_nested()
+                        conn.execute(text(index_stmt))
+                        if nested is not None:
+                            nested.commit()
+                    except Exception as index_exc:
+                        if nested is not None:
+                            try:
+                                nested.rollback()
+                            except Exception:
+                                pass
+                        print(f"[WARN] pgvector ANN index skipped: {index_exc}")
             conn.execute(text(
                 "CREATE TABLE IF NOT EXISTS vector_index_registry ("
                 "id SERIAL PRIMARY KEY, "
@@ -815,10 +906,26 @@ async def lifespan(app: FastAPI):
                 "retrieved_chunks JSONB, "
                 "retrieval_scores JSONB, "
                 "top_k INTEGER NOT NULL DEFAULT 5, "
+                "corpus_version VARCHAR(200), "
+                "index_key VARCHAR(120), "
+                "embedding_tier VARCHAR(40), "
+                "reranker_tier VARCHAR(40), "
+                "query_embedding_hash VARCHAR(64), "
+                "candidate_count INTEGER, "
+                "citation_spans JSONB, "
+                "latency_breakdown JSONB, "
                 "latency_ms FLOAT, "
                 "created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP"
                 ");"
             ))
+            conn.execute(text("ALTER TABLE retrieval_logs ADD COLUMN IF NOT EXISTS corpus_version VARCHAR(200);"))
+            conn.execute(text("ALTER TABLE retrieval_logs ADD COLUMN IF NOT EXISTS index_key VARCHAR(120);"))
+            conn.execute(text("ALTER TABLE retrieval_logs ADD COLUMN IF NOT EXISTS embedding_tier VARCHAR(40);"))
+            conn.execute(text("ALTER TABLE retrieval_logs ADD COLUMN IF NOT EXISTS reranker_tier VARCHAR(40);"))
+            conn.execute(text("ALTER TABLE retrieval_logs ADD COLUMN IF NOT EXISTS query_embedding_hash VARCHAR(64);"))
+            conn.execute(text("ALTER TABLE retrieval_logs ADD COLUMN IF NOT EXISTS candidate_count INTEGER;"))
+            conn.execute(text("ALTER TABLE retrieval_logs ADD COLUMN IF NOT EXISTS citation_spans JSONB;"))
+            conn.execute(text("ALTER TABLE retrieval_logs ADD COLUMN IF NOT EXISTS latency_breakdown JSONB;"))
             conn.execute(text(
                 "CREATE TABLE IF NOT EXISTS agent_sessions ("
                 "id SERIAL PRIMARY KEY, "

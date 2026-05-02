@@ -135,6 +135,8 @@ class ChatResponseV2(BaseModel):
     visualization_data: dict[str, Any] = {}
     # Model mode used for this response
     model_mode: str = "full"
+    # Structured result from CSV/image/PDF upload, when present
+    attachment_analysis: dict[str, Any] = Field(default_factory=dict)
 
 
 class AgentStatus(BaseModel):
@@ -632,18 +634,27 @@ async def chat_with_file(
 
     orchestrator = get_orchestrator()
 
-    # If file is attached, handle batch analysis inline
-    csv_results = None
-    if file and file.filename and file.filename.lower().endswith(".csv"):
+    # If file is attached, run multimodal analysis before orchestration.
+    attachment_analysis = None
+    if file and file.filename:
         content = await file.read()
         file_size_mb = len(content) / (1024 * 1024)
         if file_size_mb > 100:
             raise HTTPException(status_code=400, detail="File quá lớn (tối đa 100MB cho chat inline)")
-        csv_results = {
-            "filename": file.filename,
-            "content": content,
-            "size_mb": round(file_size_mb, 2),
-        }
+        try:
+            from ..multimodal_analysis import analyze_attachment_for_agent
+
+            attachment_analysis = analyze_attachment_for_agent(
+                db,
+                content=content,
+                filename=file.filename,
+                content_type=file.content_type,
+                model_mode=resolved_mode,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=f"File analysis failed: {exc}")
 
     orch_response = orchestrator.process(
         db,
@@ -652,7 +663,7 @@ async def chat_with_file(
         user_id=user_id,
         top_k=5,
         model_mode=resolved_mode,
-        csv_attachment=csv_results,
+        attachment_analysis=attachment_analysis,
     )
 
     return _build_v2_response(orch_response, model_mode=resolved_mode)
@@ -755,6 +766,7 @@ def _build_v2_response(orch_response, *, model_mode: str = "full") -> dict:
         tool_results=orch_response.tool_results,
         visualization_data=orch_response.visualization_data,
         model_mode=model_mode,
+        attachment_analysis=orch_response.tool_results.get("_attachment_analysis", {}),
     )
 
 
@@ -1049,4 +1061,3 @@ def telemetry_drift(window_hours: int = 24):
         return telemetry.get_intent_drift(window_hours=window_hours)
     except Exception as exc:
         return {"error": str(exc)}
-

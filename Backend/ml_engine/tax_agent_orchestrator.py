@@ -203,7 +203,11 @@ class TaxAgentOrchestrator:
         # Tool Registry & Executor
         from ml_engine.tax_agent_tools import get_tool_registry, ToolExecutor
         self._tool_registry = get_tool_registry()
-        self._tool_executor = ToolExecutor(self._tool_registry)
+        try:
+            from app.database import SessionLocal
+        except Exception:
+            SessionLocal = None
+        self._tool_executor = ToolExecutor(self._tool_registry, db_factory=SessionLocal)
 
         # Synthesizer
         from ml_engine.tax_agent_synthesis import TaxAgentSynthesizer
@@ -249,6 +253,7 @@ class TaxAgentOrchestrator:
         top_k: int = 5,
         model_mode: str = "full",
         csv_attachment: dict | None = None,
+        attachment_analysis: dict | None = None,
     ) -> OrchestratorResponse:
         """
         Process a user message through the full multi-agent pipeline.
@@ -262,14 +267,50 @@ class TaxAgentOrchestrator:
         6. Run compliance checks
         7. Log everything
         """
-        t_total_start = time.perf_counter()
-        latency_breakdown: dict[str, float] = {}
+        done_payload: dict[str, Any] | None = None
+        for event in self.process_streaming(
+            db,
+            session_id=session_id,
+            message=message,
+            user_id=user_id,
+            top_k=top_k,
+            model_mode=model_mode,
+            csv_attachment=csv_attachment,
+            attachment_analysis=attachment_analysis,
+        ):
+            if event.get("event") == "done":
+                done_payload = event.get("data", {})
 
-        self._ensure_initialized(db)
+        if not done_payload:
+            raise RuntimeError("TaxAgentOrchestrator finished without a done payload")
 
-        # Update compliance gate's DB reference
-        self._compliance_gate.db = db
-        self._memory.db = db
+        return OrchestratorResponse(
+            session_id=done_payload.get("session_id", session_id),
+            intent=done_payload.get("intent", "general_tax_query"),
+            intent_confidence=float(done_payload.get("intent_confidence", 0.0)),
+            complexity=done_payload.get("complexity", "simple"),
+            reasoning_trace=done_payload.get("reasoning_trace", ""),
+            tools_used=done_payload.get("tools_used", []),
+            answer=done_payload.get("answer", ""),
+            summary=done_payload.get("summary", ""),
+            citations=done_payload.get("citations", []),
+            recommendations=done_payload.get("recommendations", []),
+            confidence=float(done_payload.get("confidence", 0.0)),
+            abstained=bool(done_payload.get("abstained", False)),
+            escalation_required=bool(done_payload.get("escalation_required", False)),
+            escalation_domain=done_payload.get("escalation_domain", "none"),
+            compliance_warnings=done_payload.get("compliance_warnings", []),
+            active_tax_code=done_payload.get("active_tax_code"),
+            active_tax_period=done_payload.get("active_tax_period"),
+            latency_ms=float(done_payload.get("latency_ms", 0.0)),
+            latency_breakdown=done_payload.get("latency_breakdown", {}),
+            tool_results=done_payload.get("tool_results", {}),
+            synthesis_tier=done_payload.get("synthesis_tier", "template"),
+            policy_traces=done_payload.get("policy_traces", []),
+            plan_steps=done_payload.get("plan_steps", []),
+            visualization_data=done_payload.get("visualization_data", {}),
+            model_mode=model_mode,
+        )
 
     # ═══════════════════════════════════════════════════════════════════════
     #  STREAMING VERSION — yields SSE events at each pipeline step
@@ -285,6 +326,7 @@ class TaxAgentOrchestrator:
         top_k: int = 5,
         model_mode: str = "full",
         csv_attachment: dict | None = None,
+        attachment_analysis: dict | None = None,
     ):
         """
         Streaming version of process(). Yields SSE event dicts:
@@ -432,6 +474,20 @@ class TaxAgentOrchestrator:
                     if len(matches) == 1:
                         context.active_tax_code = matches[0]["tax_code"]
 
+            if attachment_analysis:
+                analysis_type = str(attachment_analysis.get("analysis_type") or attachment_analysis.get("detected_schema", "attachment"))
+                yield {"event": "thinking", "data": {"step": "attachment", "detail": f"Da phan tich tep dinh kem: {analysis_type}"}}
+                nl_results["_attachment_analysis"] = attachment_analysis
+                if analysis_type == "risk_csv":
+                    intent = "batch_analysis"
+                    nl_results["_batch_results"] = attachment_analysis
+                elif analysis_type == "vat_graph_csv":
+                    intent = "vat_network_analysis"
+                    nl_results["_vat_graph_batch_results"] = attachment_analysis
+                elif analysis_type == "ocr_invoice":
+                    intent = "invoice_risk"
+                    nl_results["_ocr_document_results"] = attachment_analysis
+
             if csv_attachment:
                 intent = "batch_analysis"
                 yield {"event": "thinking", "data": {"step": "batch", "detail": f"Đang phân tích file {csv_attachment.get('filename', 'CSV')}..."}}
@@ -459,12 +515,14 @@ class TaxAgentOrchestrator:
             tax_period=context.active_tax_period,
             context_intents=context.active_intent_history,
         )
+        budget_ms = int(getattr(plan, "budget_ms", 30000) or 30000)
         latency_breakdown["planning"] = (time.perf_counter() - t0) * 1000.0
 
         yield {"event": "thinking", "data": {
             "step": "plan_done",
             "detail": f"Kế hoạch: {plan.complexity.value} — {len(plan.steps)} tools",
             "tools": [s.tool_name for s in plan.steps],
+            "budget_ms": budget_ms,
         }}
 
         # ─── Step 4: Tool Execution ─────────────────────────────────────
@@ -485,10 +543,24 @@ class TaxAgentOrchestrator:
                     continue
                 if allowed_tools is not None and step.tool_name not in allowed_tools and step.tool_name not in allowed_optional:
                     continue
+                tool_inputs = dict(step.tool_inputs)
+                request_id = f"req-{uuid.uuid4().hex[:8]}"
+                if step.tool_name == "knowledge_search":
+                    tool_inputs.update({
+                        "session_id": session_id,
+                        "request_id": request_id,
+                        "entity_scope": {
+                            "tax_code": context.active_tax_code,
+                            "tax_period": context.active_tax_period,
+                        },
+                        "top_k": top_k,
+                    })
                 requests.append(ToolCallRequest(
                     tool_name=step.tool_name,
-                    inputs=step.tool_inputs,
-                    request_id=f"req-{uuid.uuid4().hex[:8]}",
+                    inputs=tool_inputs,
+                    request_id=request_id,
+                    timeout_override=getattr(step, "timeout_ms", 10000) / 1000.0,
+                    max_retries_override=getattr(step, "max_retries", 1),
                 ))
 
             # Emit tool_start events
@@ -509,8 +581,98 @@ class TaxAgentOrchestrator:
                     "status": result.status.value,
                     "latency_ms": round(result.latency_ms or 0, 1),
                 }}
+            if (time.perf_counter() - t_total_start) * 1000.0 > budget_ms:
+                yield {"event": "thinking", "data": {
+                    "step": "budget",
+                    "detail": "Execution budget reached; moving to synthesis with collected evidence.",
+                    "budget_ms": budget_ms,
+                }}
+                break
 
         latency_breakdown["tools"] = (time.perf_counter() - t0) * 1000.0
+
+        # Step 4.2: ReAct self-correction before sub-agents and synthesis.
+        t0 = time.perf_counter()
+        react_reflections = []
+        react_escalate = False
+        try:
+            from ml_engine.tax_agent_react import ReActEngine
+            react = ReActEngine()
+            planned_tool_names = [s.tool_name for s in plan.steps]
+            evidence_contracts = {
+                s.tool_name: getattr(s, "evidence_contract", {}) or {}
+                for s in plan.steps
+            }
+            max_react_iterations = int(getattr(plan, "max_react_iterations", 1) or 1)
+
+            for iteration in range(max_react_iterations):
+                if (time.perf_counter() - t_total_start) * 1000.0 > budget_ms:
+                    yield {"event": "thinking", "data": {
+                        "step": "budget",
+                        "detail": "Skipping further ReAct retries because the plan budget is exhausted.",
+                        "budget_ms": budget_ms,
+                    }}
+                    break
+                reflection = react.reflect(
+                    tool_results=all_tool_results,
+                    planned_tools=planned_tool_names,
+                    intent=intent,
+                    iteration=iteration,
+                    sub_agent_analysis=None,
+                    evidence_contracts=evidence_contracts,
+                )
+                reflection_dict = reflection.to_dict()
+                react_reflections.append(reflection_dict)
+                yield {"event": "thinking", "data": {
+                    "step": "react",
+                    "detail": reflection.summary,
+                    "iteration": iteration + 1,
+                    "should_retry": reflection.should_retry,
+                }}
+
+                if any(a.get("action") == "trigger_investigation" for a in reflection_dict.get("actions", [])):
+                    react_escalate = True
+
+                if not reflection.should_retry:
+                    break
+
+                react_requests = self._build_react_tool_requests(
+                    reflection.actions,
+                    plan=plan,
+                    context=context,
+                    session_id=session_id,
+                    top_k=top_k,
+                )
+                if not react_requests:
+                    break
+
+                for req in react_requests:
+                    yield {"event": "tool_start", "data": {
+                        "tool": req.tool_name,
+                        "description": "ReAct retry/additional evidence",
+                        "react_iteration": iteration + 1,
+                    }}
+
+                react_results = self._tool_executor.execute_parallel(react_requests, db=db)
+                for result in react_results:
+                    all_tool_results[result.tool_name] = {
+                        "status": result.status.value,
+                        **(result.outputs or {}),
+                        "_latency_ms": result.latency_ms,
+                        "_error": result.error,
+                        "_react_iteration": iteration + 1,
+                    }
+                    if result.tool_name not in planned_tool_names:
+                        planned_tool_names.append(result.tool_name)
+                    yield {"event": "tool_done", "data": {
+                        "tool": result.tool_name,
+                        "status": result.status.value,
+                        "latency_ms": round(result.latency_ms or 0, 1),
+                        "react_iteration": iteration + 1,
+                    }}
+        except Exception as exc:
+            logger.warning("[Orchestrator:stream] ReAct loop error: %s", exc)
+        latency_breakdown["react"] = (time.perf_counter() - t0) * 1000.0
 
         # ─── Step 4.5: Sub-Agent Dispatch ───────────────────────────────
         t0 = time.perf_counter()
@@ -593,32 +755,16 @@ class TaxAgentOrchestrator:
         answer = self._enrich_with_sub_agents(answer, sub_agent_analysis)
         latency_breakdown["synthesis"] = (time.perf_counter() - t0) * 1000.0
 
-        # ─── Step 5.5: ReAct Self-Reflection ─────────────────────────────
-        react_reflections = []
-        try:
-            from ml_engine.tax_agent_react import ReActEngine
-            react = ReActEngine()
-            planned_tool_names = [s.tool_name for s in plan.steps]
-            reflection = react.reflect(
-                tool_results=all_tool_results,
-                planned_tools=planned_tool_names,
-                intent=intent,
-                iteration=0,
-                sub_agent_analysis=sub_agent_analysis,
+        debate_escalate = self._debate_requires_escalation(debate_result_dict)
+        if debate_result_dict:
+            synthesis_result.confidence = self._confidence_after_debate(
+                synthesis_result.confidence,
+                debate_result_dict,
             )
-            react_reflections.append(reflection.to_dict())
-            if reflection.observations:
-                yield {"event": "thinking", "data": {
-                    "step": "react", "detail": reflection.summary,
-                }}
-        except Exception as exc:
-            logger.debug("[Orchestrator:stream] ReAct error: %s", exc)
+            if debate_escalate:
+                synthesis_result.escalation_needed = True
 
-        # Stream answer text in chunks
-        chunk_size = 80
-        for i in range(0, len(answer), chunk_size):
-            yield {"event": "text_chunk", "data": {"chunk": answer[i:i + chunk_size]}}
-
+        # ─── Step 5.5: ReAct Self-Reflection ─────────────────────────────
         # ─── Step 6: Compliance ─────────────────────────────────────────
         t0 = time.perf_counter()
         turn_row = db.execute(
@@ -644,7 +790,30 @@ class TaxAgentOrchestrator:
             )
             answer = self._synthesizer.format_response_text(synthesis_result)
 
+        final_escalate = bool(
+            compliance.escalate
+            or debate_escalate
+            or react_escalate
+            or synthesis_result.escalation_needed
+        )
+        final_escalation_domain = compliance.escalation_domain or "none"
+        if debate_escalate:
+            final_escalation_domain = "adjudication"
+        elif react_escalate and final_escalation_domain == "none":
+            final_escalation_domain = "investigation"
+
+        compliance_warnings = list(compliance.warnings)
+        if debate_escalate:
+            compliance_warnings.append("Multi-agent debate confidence is low or has major disagreement.")
+        if react_escalate:
+            compliance_warnings.append("ReAct detected contradictions that require deeper investigation.")
+
         latency_breakdown["compliance"] = (time.perf_counter() - t0) * 1000.0
+
+        # Stream only the final post-compliance answer.
+        chunk_size = 80
+        for i in range(0, len(answer), chunk_size):
+            yield {"event": "text_chunk", "data": {"chunk": answer[i:i + chunk_size]}}
 
         # ─── Step 7: Audit ──────────────────────────────────────────────
         t0 = time.perf_counter()
@@ -675,10 +844,22 @@ class TaxAgentOrchestrator:
         """), {
             "session_id": session_id, "turn_id": assistant_turn_id, "intent": intent,
             "selected_track": plan.complexity.value, "confidence": synthesis_result.confidence,
-            "abstained": compliance.abstain, "escalation_required": compliance.escalate,
+            "abstained": compliance.abstain, "escalation_required": final_escalate,
             "evidence_json": _json.dumps({
-                "plan": {"complexity": plan.complexity.value, "tools": [s.tool_name for s in plan.steps]},
-                "compliance": {"decision": compliance.overall_decision.value},
+                "plan": {
+                    "complexity": plan.complexity.value,
+                    "tools": [s.tool_name for s in plan.steps],
+                    "budget_ms": getattr(plan, "budget_ms", None),
+                    "retry_policy": getattr(plan, "retry_policy", {}),
+                    "evidence_contract": getattr(plan, "evidence_contract", {}),
+                },
+                "react": react_reflections,
+                "debate": debate_result_dict,
+                "compliance": {
+                    "decision": compliance.overall_decision.value,
+                    "warnings": compliance_warnings,
+                    "final_escalation_domain": final_escalation_domain,
+                },
             }),
             "answer_text": answer,
         })
@@ -693,6 +874,28 @@ class TaxAgentOrchestrator:
                 "tool_output": _json.dumps({k: v for k, v in result.items() if not k.startswith("_")}, default=str),
                 "status": result.get("status", "unknown"), "latency_ms": result.get("_latency_ms"),
             })
+
+        self._persist_execution_plan(
+            db,
+            plan=plan,
+            session_id=session_id,
+            turn_id=assistant_turn_id,
+            query_text=message,
+            intent=intent,
+            tool_results=all_tool_results,
+            synthesis_result=synthesis_result,
+            compliance=compliance,
+            latency_breakdown=latency_breakdown,
+            final_escalate=final_escalate,
+        )
+        self._persist_debate_adjudication(
+            db,
+            session_id=session_id,
+            turn_id=assistant_turn_id,
+            tax_code=context.active_tax_code,
+            debate_result=debate_result_dict,
+            final_escalate=final_escalate,
+        )
 
         self._memory.persist_entities(session_id, context.active_entities)
         db.commit()
@@ -723,9 +926,9 @@ class TaxAgentOrchestrator:
                 recommendations=synthesis_result.recommendations,
                 confidence=synthesis_result.confidence,
                 abstained=compliance.abstain,
-                escalation_required=compliance.escalate,
-                escalation_domain=compliance.escalation_domain or "none",
-                compliance_warnings=compliance.warnings,
+                escalation_required=final_escalate,
+                escalation_domain=final_escalation_domain,
+                compliance_warnings=compliance_warnings,
                 active_tax_code=context.active_tax_code,
                 active_tax_period=context.active_tax_period,
                 latency_ms=total_latency,
@@ -755,16 +958,266 @@ class TaxAgentOrchestrator:
             "recommendations": synthesis_result.recommendations,
             "confidence": synthesis_result.confidence,
             "abstained": compliance.abstain,
-            "escalation_required": compliance.escalate,
+            "escalation_required": final_escalate,
+            "escalation_domain": final_escalation_domain,
+            "compliance_warnings": compliance_warnings,
             "active_tax_code": context.active_tax_code,
+            "active_tax_period": context.active_tax_period,
             "latency_ms": round(total_latency, 1),
             "latency_breakdown": {k: round(v, 1) for k, v in latency_breakdown.items()},
             "synthesis_tier": synthesis_result.synthesis_tier,
+            "tool_results": all_tool_results,
+            "policy_traces": [
+                {
+                    "rule_key": getattr(t, "rule_key", ""),
+                    "decision": getattr(getattr(t, "decision", None), "value", str(getattr(t, "decision", ""))),
+                    "score": getattr(t, "score", None),
+                    "reason": getattr(t, "reason", None),
+                    "details": getattr(t, "details", {}),
+                }
+                for t in getattr(compliance, "traces", [])
+            ],
             "visualization_data": viz_data,
             "model_mode": model_mode,
-            "plan_steps": [{"tool": s.tool_name, "description": s.description} for s in plan.steps],
+            "plan_budget_ms": budget_ms,
+            "retry_policy": getattr(plan, "retry_policy", {}),
+            "evidence_contract": getattr(plan, "evidence_contract", {}),
+            "react_reflections": react_reflections,
+            "debate": debate_result_dict,
+            "plan_steps": [
+                {
+                    "tool": s.tool_name,
+                    "description": s.description,
+                    "timeout_ms": getattr(s, "timeout_ms", None),
+                    "max_retries": getattr(s, "max_retries", None),
+                    "evidence_contract": getattr(s, "evidence_contract", {}),
+                }
+                for s in plan.steps
+            ],
         }}
 
+
+    def _build_react_tool_requests(
+        self,
+        actions: list[Any],
+        *,
+        plan,
+        context,
+        session_id: str,
+        top_k: int,
+    ) -> list[Any]:
+        """Convert ReAct actions into executable tool requests."""
+        from ml_engine.tax_agent_tools import ToolCallRequest
+
+        step_by_tool = {s.tool_name: s for s in plan.steps}
+        requests = []
+        seen: set[str] = set()
+        for action in actions:
+            action_name = getattr(getattr(action, "action", None), "value", str(getattr(action, "action", "")))
+            if action_name not in {"retry_tool", "add_tool"}:
+                continue
+            tool_name = getattr(action, "tool_name", None)
+            if not tool_name or tool_name in seen:
+                continue
+            seen.add(tool_name)
+
+            step = step_by_tool.get(tool_name)
+            inputs = dict(getattr(step, "tool_inputs", {}) or {})
+            inputs.update(getattr(action, "params", {}) or {})
+            if not inputs:
+                inputs = self._default_tool_inputs(
+                    tool_name,
+                    context=context,
+                    session_id=session_id,
+                    top_k=top_k,
+                )
+            if tool_name == "knowledge_search":
+                requested_top_k = int(inputs.get("top_k") or top_k)
+                inputs.update({
+                    "session_id": session_id,
+                    "request_id": f"react-{uuid.uuid4().hex[:8]}",
+                    "top_k": max(top_k, requested_top_k),
+                    "entity_scope": {
+                        "tax_code": context.active_tax_code,
+                        "tax_period": context.active_tax_period,
+                    },
+                })
+
+            requests.append(ToolCallRequest(
+                tool_name=tool_name,
+                inputs=inputs,
+                request_id=f"react-{uuid.uuid4().hex[:8]}",
+                timeout_override=(getattr(step, "timeout_ms", 10000) if step else 10000) / 1000.0,
+                max_retries_override=getattr(step, "max_retries", 1) if step else 1,
+            ))
+        return requests
+
+    def _default_tool_inputs(self, tool_name: str, *, context, session_id: str, top_k: int) -> dict[str, Any]:
+        if tool_name == "knowledge_search":
+            return {"query": "", "intent": "general_tax_query", "top_k": top_k, "session_id": session_id}
+        if context.active_tax_code:
+            return {"tax_code": context.active_tax_code}
+        return {}
+
+    def _debate_requires_escalation(self, debate_result: dict[str, Any] | None) -> bool:
+        if not debate_result:
+            return False
+        consensus = float(debate_result.get("consensus_score", 1.0) or 1.0)
+        if consensus < 0.58:
+            return True
+        severe = {"major", "critical"}
+        return any(
+            str(d.get("severity", "")).lower() in severe
+            for d in debate_result.get("disagreements", [])
+        )
+
+    def _confidence_after_debate(self, confidence: float, debate_result: dict[str, Any]) -> float:
+        consensus = float(debate_result.get("consensus_score", 1.0) or 1.0)
+        severe_count = sum(
+            1 for d in debate_result.get("disagreements", [])
+            if str(d.get("severity", "")).lower() in {"major", "critical"}
+        )
+        penalty = (1.0 - consensus) * 0.25 + min(0.2, severe_count * 0.08)
+        return round(max(0.05, min(0.98, float(confidence) - penalty)), 4)
+
+    def _persist_execution_plan(
+        self,
+        db,
+        *,
+        plan,
+        session_id: str,
+        turn_id: int,
+        query_text: str,
+        intent: str,
+        tool_results: dict[str, Any],
+        synthesis_result,
+        compliance,
+        latency_breakdown: dict[str, float],
+        final_escalate: bool,
+    ) -> None:
+        nested = None
+        try:
+            if hasattr(db, "begin_nested"):
+                nested = db.begin_nested()
+            db.execute(sql_text("""
+                INSERT INTO agent_execution_plans
+                (plan_id, session_id, turn_id, query_text, intent, complexity,
+                 reasoning_trace, budget_ms, max_react_iterations, retry_policy_json,
+                 evidence_contract_json, steps_json, tool_results_json, synthesis_json,
+                 compliance_json, latency_ms, latency_breakdown)
+                VALUES
+                (:plan_id, :session_id, :turn_id, :query_text, :intent, :complexity,
+                 :reasoning_trace, :budget_ms, :max_react_iterations,
+                 CAST(:retry_policy_json AS jsonb), CAST(:evidence_contract_json AS jsonb),
+                 CAST(:steps_json AS jsonb), CAST(:tool_results_json AS jsonb),
+                 CAST(:synthesis_json AS jsonb), CAST(:compliance_json AS jsonb),
+                 :latency_ms, CAST(:latency_breakdown AS jsonb))
+                ON CONFLICT (plan_id) DO NOTHING
+            """), {
+                "plan_id": plan.plan_id,
+                "session_id": session_id,
+                "turn_id": turn_id,
+                "query_text": query_text,
+                "intent": intent,
+                "complexity": plan.complexity.value,
+                "reasoning_trace": plan.reasoning,
+                "budget_ms": getattr(plan, "budget_ms", None),
+                "max_react_iterations": getattr(plan, "max_react_iterations", None),
+                "retry_policy_json": json.dumps(getattr(plan, "retry_policy", {}) or {}, default=str),
+                "evidence_contract_json": json.dumps(getattr(plan, "evidence_contract", {}) or {}, default=str),
+                "steps_json": json.dumps([
+                    {
+                        "step_id": s.step_id,
+                        "tool_name": s.tool_name,
+                        "description": s.description,
+                        "depends_on": s.depends_on,
+                        "priority": s.priority,
+                        "optional": s.optional,
+                        "timeout_ms": getattr(s, "timeout_ms", None),
+                        "max_retries": getattr(s, "max_retries", None),
+                        "evidence_contract": getattr(s, "evidence_contract", {}),
+                    }
+                    for s in plan.steps
+                ], default=str),
+                "tool_results_json": json.dumps(tool_results, default=str),
+                "synthesis_json": json.dumps({
+                    "summary": synthesis_result.summary,
+                    "confidence": synthesis_result.confidence,
+                    "tier": synthesis_result.synthesis_tier,
+                    "evidence_count": len(synthesis_result.evidence),
+                }, default=str),
+                "compliance_json": json.dumps({
+                    "decision": compliance.overall_decision.value,
+                    "abstain": compliance.abstain,
+                    "escalate": final_escalate,
+                }, default=str),
+                "latency_ms": sum(float(v or 0) for v in latency_breakdown.values()),
+                "latency_breakdown": json.dumps(latency_breakdown, default=str),
+            })
+            if nested is not None:
+                nested.commit()
+        except Exception as exc:
+            if nested is not None:
+                try:
+                    nested.rollback()
+                except Exception:
+                    pass
+            logger.debug("[Orchestrator] execution plan persist skipped: %s", exc)
+
+    def _persist_debate_adjudication(
+        self,
+        db,
+        *,
+        session_id: str,
+        turn_id: int,
+        tax_code: str | None,
+        debate_result: dict[str, Any] | None,
+        final_escalate: bool,
+    ) -> None:
+        if not debate_result:
+            return
+        nested = None
+        try:
+            if hasattr(db, "begin_nested"):
+                nested = db.begin_nested()
+            entity_id = tax_code or f"{session_id}:{turn_id}"
+            status = "open" if final_escalate else "resolved"
+            dispute_reason = "; ".join(
+                f"{d.get('severity')}:{d.get('topic')}"
+                for d in debate_result.get("disagreements", [])[:5]
+            )
+            db.execute(sql_text("""
+                INSERT INTO adjudication_cases
+                (entity_type, entity_id, model_name, model_version, model_label,
+                 human_label, final_label, status, dispute_reason, resolution_notes)
+                VALUES
+                ('tax_agent_debate', :entity_id, 'tax_agent_orchestrator',
+                 :model_version, :model_label, NULL, :final_label, :status,
+                 :dispute_reason, :resolution_notes)
+            """), {
+                "entity_id": entity_id,
+                "model_version": "multi_agent_v2",
+                "model_label": debate_result.get("consensus_stance"),
+                "final_label": debate_result.get("consensus_label"),
+                "status": status,
+                "dispute_reason": dispute_reason or None,
+                "resolution_notes": json.dumps({
+                    "session_id": session_id,
+                    "turn_id": turn_id,
+                    "consensus_score": debate_result.get("consensus_score"),
+                    "recommendation": debate_result.get("recommendation"),
+                    "summary": debate_result.get("summary"),
+                }, ensure_ascii=False, default=str),
+            })
+            if nested is not None:
+                nested.commit()
+        except Exception as exc:
+            if nested is not None:
+                try:
+                    nested.rollback()
+                except Exception:
+                    pass
+            logger.debug("[Orchestrator] debate adjudication persist skipped: %s", exc)
 
     def _enrich_with_sub_agents(
         self,
@@ -984,6 +1437,32 @@ class TaxAgentOrchestrator:
                     by_level.get("low", 0),
                 ],
                 "colors": ["#DC2626", "#EA580C", "#EAB308", "#16A34A"],
+            }
+
+        vat_batch = tool_results.get("_vat_graph_batch_results", {})
+        if vat_batch and isinstance(vat_batch, dict):
+            summary = vat_batch.get("summary", {}) if isinstance(vat_batch.get("summary"), dict) else {}
+            viz["vat_graph_batch"] = {
+                "batch_id": vat_batch.get("batch_id"),
+                "filename": vat_batch.get("filename", ""),
+                "processed_rows": vat_batch.get("processed_rows", 0),
+                "companies": summary.get("companies"),
+                "invoices": summary.get("invoices"),
+                "cycles": summary.get("cycles"),
+                "total_suspicious_amount": summary.get("total_suspicious_amount"),
+                "top_edges": summary.get("top_edges", []),
+                "top_nodes": summary.get("top_nodes", []),
+            }
+
+        ocr_data = tool_results.get("_ocr_document_results", {})
+        if ocr_data and isinstance(ocr_data, dict):
+            viz["ocr_invoice"] = {
+                "filename": ocr_data.get("filename", ""),
+                "confidence": ocr_data.get("confidence", 0.0),
+                "extracted_fields": ocr_data.get("extracted_fields", {}),
+                "invoice_risk": ocr_data.get("invoice_risk", {}),
+                "graph_linkage_candidates": ocr_data.get("graph_linkage_candidates", []),
+                "warnings": ocr_data.get("warnings", []),
             }
 
         # 10. Company Name Search Results

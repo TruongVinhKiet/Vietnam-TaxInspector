@@ -6,7 +6,7 @@ Endpoints:
     GET  /api/graph/search?q=...  → Search companies for graph exploration
 """
 
-from fastapi import APIRouter, Depends, Query, HTTPException
+from fastapi import APIRouter, Depends, Query, HTTPException, UploadFile, File, Form
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
@@ -19,6 +19,7 @@ from datetime import datetime, timezone
 
 from ..database import get_db
 from ..observability import get_structured_logger, log_event
+from ..multimodal_analysis import analyze_vat_csv_upload, get_vat_batch_results, get_vat_batch_status
 from . import monitoring as monitoring_router
 
 router = APIRouter(prefix="/api", tags=["VAT Invoice Graph (GNN)"])
@@ -944,6 +945,75 @@ def _build_split_trigger_status_context(snapshot_source: str = "graph_main") -> 
     }
 
 
+@router.post("/graph/batch-upload")
+async def vat_graph_batch_upload(
+    file: UploadFile = File(...),
+    persist: bool = Form(True),
+    analysis_depth: str = Form("standard"),
+    db: Session = Depends(get_db),
+):
+    """Upload a VAT invoice CSV, persist entities/invoices, and run graph analysis."""
+    filename = file.filename or "vat_graph.csv"
+    if not filename.lower().endswith(".csv"):
+        raise HTTPException(status_code=400, detail="Only CSV files are accepted for VAT graph batch analysis.")
+
+    content = await file.read()
+    file_size_mb = len(content) / (1024 * 1024)
+    if file_size_mb > 200:
+        raise HTTPException(status_code=400, detail="File too large. Maximum size is 200MB.")
+
+    try:
+        result = analyze_vat_csv_upload(
+            db,
+            content=content,
+            filename=filename,
+            content_type=file.content_type,
+            source="graph_batch_upload",
+            persist=persist,
+            analysis_depth=analysis_depth,
+        )
+        return {
+            "batch_id": result["batch_id"],
+            "upload_id": result["upload_id"],
+            "filename": filename,
+            "file_size_mb": round(file_size_mb, 2),
+            "status": result["status"],
+            "detected_schema": result["detected_schema"],
+            "row_count": result["row_count"],
+            "processed_rows": result["processed_rows"],
+            "warnings": result["warnings"],
+            "summary": result["summary"],
+        }
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        log_event(
+            logger,
+            "error",
+            "vat_graph_batch_upload_failed",
+            error_type=type(exc).__name__,
+            filename=filename,
+            error=str(exc),
+        )
+        raise HTTPException(status_code=500, detail=f"VAT graph batch analysis failed: {exc}")
+
+
+@router.get("/graph/batch-status/{batch_id}")
+def vat_graph_batch_status(batch_id: int, db: Session = Depends(get_db)):
+    try:
+        return get_vat_batch_status(db, batch_id)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+
+
+@router.get("/graph/batch-results/{batch_id}")
+def vat_graph_batch_results(batch_id: int, db: Session = Depends(get_db)):
+    try:
+        return get_vat_batch_results(db, batch_id)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+
+
 @router.get("/graph")
 def get_vat_invoice_graph(
     tax_code: Optional[str] = Query(None, description="Tax code tâm điểm để dựng subgraph"),
@@ -1849,4 +1919,3 @@ def score_transaction_rings(
     except Exception as e:
         log_event(logger, "error", "graph_ring_scoring_failed", error=str(e))
         raise HTTPException(status_code=500, detail=f"Lỗi chấm điểm vòng lặp: {str(e)}")
-

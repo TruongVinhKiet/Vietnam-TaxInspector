@@ -58,6 +58,9 @@ class SubTask:
     depends_on: list[int] = field(default_factory=list)  # step_ids this depends on
     priority: int = 5
     optional: bool = False
+    timeout_ms: int = 10000
+    max_retries: int = 1
+    evidence_contract: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -73,6 +76,10 @@ class ExecutionPlan:
     reasoning: str                    # Chain-of-thought explanation
     steps: list[SubTask]
     estimated_latency_ms: float = 0.0
+    budget_ms: int = 30000
+    max_react_iterations: int = 2
+    retry_policy: dict[str, Any] = field(default_factory=dict)
+    evidence_contract: dict[str, Any] = field(default_factory=dict)
     metadata: dict[str, Any] = field(default_factory=dict)
 
     def get_stages(self) -> list[list[SubTask]]:
@@ -131,19 +138,19 @@ class TaxAgentPlanner:
     INTENT_TOOL_MAP: dict[str, list[str]] = {
         "vat_refund_risk": [
             "knowledge_search", "company_risk_lookup", "invoice_risk_scan",
-            "nlp_red_flag_scan",
+            "nlp_red_flag_scan", "vae_anomaly_scan",
         ],
         "invoice_risk": [
             "knowledge_search", "invoice_risk_scan", "motif_detection",
-            "nlp_red_flag_scan",
+            "nlp_red_flag_scan", "vae_anomaly_scan",
         ],
         "delinquency": [
             "knowledge_search", "company_risk_lookup", "delinquency_check",
-            "revenue_forecast",
+            "revenue_forecast", "temporal_delinquency_deep", "causal_uplift_recommend",
         ],
         "osint_ownership": [
             "knowledge_search", "ownership_analysis", "company_risk_lookup", "gnn_analysis",
-            "entity_resolution_check",
+            "entity_resolution_check", "hetero_gnn_risk",
         ],
         "transfer_pricing": [
             "knowledge_search", "company_risk_lookup", "invoice_risk_scan",
@@ -223,6 +230,9 @@ class TaxAgentPlanner:
             tax_period=tax_period,
             query=query,
         )
+        budget_ms = self._estimate_budget_ms(complexity, steps)
+        retry_policy = self._build_retry_policy(complexity, intent_confidence)
+        evidence_contract = self._build_plan_evidence_contract(intent, tools)
 
         # Step 4: Generate reasoning trace
         reasoning = self._generate_reasoning(
@@ -237,12 +247,19 @@ class TaxAgentPlanner:
             reasoning=reasoning,
             steps=steps,
             estimated_latency_ms=self._estimate_latency(steps),
+            budget_ms=budget_ms,
+            max_react_iterations=retry_policy["max_react_iterations"],
+            retry_policy=retry_policy,
+            evidence_contract=evidence_contract,
             metadata={
                 "intent_confidence": intent_confidence,
                 "tax_code": tax_code,
                 "tax_period": tax_period,
                 "tools_selected": [t for t in tools],
                 "planning_latency_ms": (time.perf_counter() - t0) * 1000.0,
+                "budget_ms": budget_ms,
+                "retry_policy": retry_policy,
+                "evidence_contract": evidence_contract,
             },
         )
 
@@ -471,6 +488,63 @@ class TaxAgentPlanner:
             ))
             step_id += 1
 
+        if "temporal_delinquency_deep" in tools and tax_code:
+            steps.append(SubTask(
+                step_id=step_id,
+                step_type=PlanStep.CHECK_DELINQUENCY,
+                tool_name="temporal_delinquency_deep",
+                tool_inputs={"tax_code": tax_code},
+                description=f"Deep temporal delinquency model for {tax_code}",
+                depends_on=[],
+                priority=4,
+                optional=True,
+            ))
+            step_id += 1
+
+        if "hetero_gnn_risk" in tools and tax_code:
+            steps.append(SubTask(
+                step_id=step_id,
+                step_type=PlanStep.RUN_GNN,
+                tool_name="hetero_gnn_risk",
+                tool_inputs={"tax_code": tax_code},
+                description=f"Heterogeneous graph risk analysis for {tax_code}",
+                depends_on=[],
+                priority=4,
+                optional=True,
+            ))
+            step_id += 1
+
+        if "vae_anomaly_scan" in tools and tax_code:
+            steps.append(SubTask(
+                step_id=step_id,
+                step_type=PlanStep.SCAN_INVOICES,
+                tool_name="vae_anomaly_scan",
+                tool_inputs={"tax_code": tax_code},
+                description=f"VAE anomaly scan for invoices of {tax_code}",
+                depends_on=[],
+                priority=4,
+                optional=True,
+            ))
+            step_id += 1
+
+        if "causal_uplift_recommend" in tools and tax_code:
+            steps.append(SubTask(
+                step_id=step_id,
+                step_type=PlanStep.CHECK_DELINQUENCY,
+                tool_name="causal_uplift_recommend",
+                tool_inputs={"tax_code": tax_code},
+                description=f"Causal next-best-action uplift estimate for {tax_code}",
+                depends_on=[],
+                priority=5,
+                optional=True,
+            ))
+            step_id += 1
+
+        for step in steps:
+            step.timeout_ms = self._tool_timeout_ms(step.tool_name)
+            step.max_retries = self._tool_max_retries(step.tool_name)
+            step.evidence_contract = self._tool_evidence_contract(step.tool_name)
+
         return steps
 
     def _generate_reasoning(
@@ -563,6 +637,10 @@ class TaxAgentPlanner:
             "revenue_forecast": 400,
             "entity_resolution_check": 600,
             "ocr_document_process": 2000,
+            "temporal_delinquency_deep": 900,
+            "hetero_gnn_risk": 1200,
+            "vae_anomaly_scan": 900,
+            "causal_uplift_recommend": 700,
         }
 
         # Simple estimate: sum of sequential stages
@@ -582,3 +660,97 @@ class TaxAgentPlanner:
             total += stage_max
 
         return total
+
+    def _estimate_budget_ms(self, complexity: QueryComplexity, steps: list[SubTask]) -> int:
+        base = {
+            QueryComplexity.SIMPLE: 12000,
+            QueryComplexity.MODERATE: 25000,
+            QueryComplexity.COMPLEX: 45000,
+            QueryComplexity.INVESTIGATION: 70000,
+        }[complexity]
+        return max(base, int(self._estimate_latency(steps) * 1.8))
+
+    def _build_retry_policy(self, complexity: QueryComplexity, intent_confidence: float) -> dict[str, Any]:
+        max_iterations = {
+            QueryComplexity.SIMPLE: 1,
+            QueryComplexity.MODERATE: 1,
+            QueryComplexity.COMPLEX: 2,
+            QueryComplexity.INVESTIGATION: 3,
+        }[complexity]
+        if intent_confidence < 0.55:
+            max_iterations = min(3, max_iterations + 1)
+        return {
+            "max_react_iterations": max_iterations,
+            "retry_missing_required": True,
+            "retry_failed_optional": complexity in (QueryComplexity.COMPLEX, QueryComplexity.INVESTIGATION),
+            "escalate_on_contradiction": True,
+            "stop_when_budget_exhausted": True,
+        }
+
+    def _build_plan_evidence_contract(self, intent: str, tools: list[str]) -> dict[str, Any]:
+        required_tools = [
+            t for t in tools
+            if t in {
+                "knowledge_search",
+                "company_risk_lookup",
+                "invoice_risk_scan",
+                "delinquency_check",
+                "ownership_analysis",
+            }
+        ]
+        return {
+            "intent": intent,
+            "required_tools": required_tools,
+            "min_legal_hits": 1 if "knowledge_search" in tools else 0,
+            "require_citation_spans": "knowledge_search" in tools,
+            "require_numeric_scores": any(t in tools for t in [
+                "company_risk_lookup",
+                "invoice_risk_scan",
+                "delinquency_check",
+                "gnn_analysis",
+                "hetero_gnn_risk",
+                "vae_anomaly_scan",
+            ]),
+        }
+
+    def _tool_timeout_ms(self, tool_name: str) -> int:
+        return {
+            "knowledge_search": 15000,
+            "company_risk_lookup": 5000,
+            "delinquency_check": 10000,
+            "invoice_risk_scan": 10000,
+            "gnn_analysis": 15000,
+            "motif_detection": 20000,
+            "ownership_analysis": 15000,
+            "temporal_delinquency_deep": 15000,
+            "hetero_gnn_risk": 15000,
+            "vae_anomaly_scan": 15000,
+            "causal_uplift_recommend": 10000,
+            "nlp_red_flag_scan": 15000,
+            "revenue_forecast": 10000,
+            "entity_resolution_check": 15000,
+        }.get(tool_name, 10000)
+
+    def _tool_max_retries(self, tool_name: str) -> int:
+        if tool_name in {"knowledge_search", "company_risk_lookup"}:
+            return 2
+        return 1
+
+    def _tool_evidence_contract(self, tool_name: str) -> dict[str, Any]:
+        contracts = {
+            "knowledge_search": {
+                "required_fields": ["hits", "retrieval_tier", "query_embedding_hash"],
+                "min_hits": 1,
+                "quality_fields": ["score", "components", "citation_spans"],
+            },
+            "company_risk_lookup": {"required_fields": ["status", "risk_score", "risk_level"]},
+            "delinquency_check": {"required_fields": ["status", "prob_30d", "prob_60d", "prob_90d"]},
+            "invoice_risk_scan": {"required_fields": ["status", "total_invoices", "risk_ratio"]},
+            "gnn_analysis": {"required_fields": ["status", "gnn_outputs"]},
+            "hetero_gnn_risk": {"required_fields": ["status", "fraud_probability"]},
+            "vae_anomaly_scan": {"required_fields": ["status", "anomaly_count", "anomaly_ratio"]},
+            "ownership_analysis": {"required_fields": ["status", "summary"]},
+            "motif_detection": {"required_fields": ["status", "summary"]},
+            "causal_uplift_recommend": {"required_fields": ["status", "recommended_action"]},
+        }
+        return contracts.get(tool_name, {"required_fields": ["status"]})

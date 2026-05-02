@@ -499,7 +499,7 @@ def _fit_residual_candidates(
     try:
         import lightgbm as lgb  # type: ignore
         lgbm = lgb.LGBMRegressor(
-            n_estimators=220, learning_rate=0.05, num_leaves=31, max_depth=5, random_state=42
+            n_estimators=220, learning_rate=0.05, num_leaves=31, max_depth=5, random_state=42, verbose=-1
         )
         lgbm.fit(X_train, y_train)
         pred = lgbm.predict(X_val)

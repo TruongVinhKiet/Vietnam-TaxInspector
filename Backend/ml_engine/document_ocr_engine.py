@@ -103,12 +103,101 @@ class DocumentResult:
 #  1. OCR Backend (PaddleOCR + Tesseract fallback)
 # ════════════════════════════════════════════════════════════════
 
+class ImagePreprocessor:
+    """
+    OpenCV-based image preprocessing for OCR optimization.
+
+    Techniques:
+        - Red stamp / seal removal (filter red channel)
+        - Adaptive binarization (Otsu + adaptive threshold)
+        - Deskew (correct slight rotation)
+        - Noise reduction (morphological ops)
+    """
+
+    @staticmethod
+    def preprocess(image, *, remove_stamps: bool = True, binarize: bool = False) -> Any:
+        """Full preprocessing pipeline. Returns numpy array."""
+        import numpy as np
+        try:
+            import cv2
+        except ImportError:
+            return image if isinstance(image, np.ndarray) else np.array(image)
+
+        img = image if isinstance(image, np.ndarray) else np.array(image)
+        if len(img.shape) == 2:
+            img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
+
+        # 1. Remove red stamps/seals
+        if remove_stamps:
+            img = ImagePreprocessor._remove_red_channel(img)
+
+        # 2. Deskew slight rotations
+        img = ImagePreprocessor._deskew(img)
+
+        # 3. Optional binarization for noisy scans
+        if binarize:
+            gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+            gray = cv2.adaptiveThreshold(
+                gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+                cv2.THRESH_BINARY, 31, 10
+            )
+            img = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
+
+        return img
+
+    @staticmethod
+    def _remove_red_channel(img):
+        """Remove red stamps by filtering out high-red, low-blue/green pixels."""
+        import numpy as np
+        try:
+            import cv2
+        except ImportError:
+            return img
+        hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+        # Red hue ranges (0-10 and 160-180)
+        mask1 = cv2.inRange(hsv, np.array([0, 70, 50]), np.array([10, 255, 255]))
+        mask2 = cv2.inRange(hsv, np.array([160, 70, 50]), np.array([180, 255, 255]))
+        red_mask = cv2.bitwise_or(mask1, mask2)
+        # Replace red regions with white
+        img[red_mask > 0] = [255, 255, 255]
+        return img
+
+    @staticmethod
+    def _deskew(img, max_angle: float = 5.0):
+        """Correct slight rotation using Hough line detection."""
+        import numpy as np
+        try:
+            import cv2
+        except ImportError:
+            return img
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        edges = cv2.Canny(gray, 50, 150, apertureSize=3)
+        lines = cv2.HoughLinesP(edges, 1, np.pi / 180, 100, minLineLength=100, maxLineGap=10)
+        if lines is None or len(lines) < 3:
+            return img
+        angles = []
+        for line in lines:
+            x1, y1, x2, y2 = line[0]
+            angle = np.degrees(np.arctan2(y2 - y1, x2 - x1))
+            if abs(angle) < max_angle:
+                angles.append(angle)
+        if not angles:
+            return img
+        median_angle = float(np.median(angles))
+        if abs(median_angle) < 0.3:
+            return img
+        h, w = img.shape[:2]
+        center = (w // 2, h // 2)
+        M = cv2.getRotationMatrix2D(center, median_angle, 1.0)
+        return cv2.warpAffine(img, M, (w, h), flags=cv2.INTER_CUBIC, borderValue=(255, 255, 255))
+
+
 class OCRBackend:
     """
     Vietnamese-optimized OCR backend.
 
-    Primary: PaddleOCR (tốt cho tiếng Việt, chạy CPU)
-    Fallback: Tesseract (nếu PaddleOCR không available)
+    Priority: PaddleOCR → EasyOCR → Tesseract → regex_only
+    EasyOCR supports Vietnamese out of the box and runs on CPU.
     """
 
     def __init__(self):
@@ -116,6 +205,7 @@ class OCRBackend:
         self._backend: str = "none"
         self._lock = threading.Lock()
         self._loaded = False
+        self._preprocessor = ImagePreprocessor()
 
     def load(self) -> str:
         """Lazy load OCR engine. Returns backend name."""
@@ -128,6 +218,8 @@ class OCRBackend:
 
             # Try PaddleOCR first
             backend = self._try_paddle()
+            if not backend:
+                backend = self._try_easyocr()
             if not backend:
                 backend = self._try_tesseract()
             if not backend:
@@ -158,6 +250,25 @@ class OCRBackend:
             logger.debug("[OCR] PaddleOCR not installed")
             return None
 
+    def _try_easyocr(self) -> str | None:
+        """Thử load EasyOCR (hỗ trợ Vietnamese)."""
+        try:
+            import easyocr  # type: ignore
+            self._ocr_engine = easyocr.Reader(
+                ["vi", "en"],
+                gpu=False,
+                verbose=False,
+            )
+            self._backend = "easyocr"
+            logger.info("[OCR] EasyOCR loaded (vi+en, CPU mode)")
+            return "easyocr"
+        except ImportError:
+            logger.debug("[OCR] EasyOCR not installed")
+            return None
+        except Exception as exc:
+            logger.warning("[OCR] EasyOCR init failed: %s", exc)
+            return None
+
     def _try_tesseract(self) -> str | None:
         """Thử load Tesseract."""
         try:
@@ -173,6 +284,7 @@ class OCRBackend:
     def recognize(self, image) -> OCRResult:
         """
         Nhận dạng text từ image (numpy array hoặc PIL Image).
+        Applies preprocessing before OCR.
 
         Returns:
             OCRResult với raw_text và bounding boxes.
@@ -181,10 +293,15 @@ class OCRBackend:
 
         t0 = time.perf_counter()
 
+        # Preprocess image (red stamp removal, deskew)
+        processed = self._preprocessor.preprocess(image, remove_stamps=True)
+
         if self._backend == "paddleocr" and self._ocr_engine is not None:
-            return self._recognize_paddle(image, t0)
+            return self._recognize_paddle(processed, t0)
+        elif self._backend == "easyocr" and self._ocr_engine is not None:
+            return self._recognize_easyocr(processed, t0)
         elif self._backend == "tesseract":
-            return self._recognize_tesseract(image, t0)
+            return self._recognize_tesseract(processed, t0)
         else:
             return OCRResult(
                 page_index=0, raw_text="", confidence=0.0,
@@ -215,6 +332,41 @@ class OCRBackend:
                     "bbox": box_coords,
                 })
                 total_conf += conf
+
+        avg_conf = total_conf / max(1, len(lines))
+        elapsed = (time.perf_counter() - t0) * 1000
+
+        return OCRResult(
+            page_index=0,
+            raw_text="\n".join(lines),
+            confidence=round(avg_conf, 4),
+            boxes=boxes,
+            processing_time_ms=round(elapsed, 1),
+        )
+
+    def _recognize_easyocr(self, image, t0: float) -> OCRResult:
+        """OCR bằng EasyOCR (Vietnamese + English)."""
+        import numpy as np
+
+        if not isinstance(image, np.ndarray):
+            image = np.array(image)
+
+        results = self._ocr_engine.readtext(image)
+        lines = []
+        boxes = []
+        total_conf = 0.0
+
+        for (bbox_coords, text, conf) in results:
+            text = text.strip()
+            if not text:
+                continue
+            lines.append(text)
+            boxes.append({
+                "text": text,
+                "confidence": round(float(conf), 4),
+                "bbox": [list(map(float, pt)) for pt in bbox_coords],
+            })
+            total_conf += float(conf)
 
         avg_conf = total_conf / max(1, len(lines))
         elapsed = (time.perf_counter() - t0) * 1000
@@ -443,19 +595,26 @@ class InvoiceFieldExtractor:
         return fields
 
     def _extract_entity_name(self, text: str, keywords: list[str]) -> str:
-        """Trích xuất tên đơn vị dựa trên keyword."""
+        """Trích xuất tên đơn vị dựa trên keyword (hỗ trợ tên nằm ở dòng tiếp theo)."""
+        lines = text.splitlines()
         for kw in keywords:
-            pattern = re.compile(
-                rf'{re.escape(kw)}\s*[:.]?\s*(.+?)(?:\n|$)',
-                re.IGNORECASE
-            )
-            match = pattern.search(text)
-            if match:
-                name = match.group(1).strip()
-                # Clean up
-                name = re.sub(r'\s+', ' ', name)
-                if len(name) > 5:
-                    return name[:200]
+            for i, line in enumerate(lines):
+                if kw.lower() in line.lower():
+                    # Thử lấy phần text phía sau keyword trên cùng 1 dòng
+                    pattern = re.compile(rf'{re.escape(kw)}[^:]*[:.]?\s*(.+)$', re.IGNORECASE)
+                    match = pattern.search(line)
+                    name = ""
+                    if match:
+                        name = match.group(1).strip()
+                    
+                    # Nếu tên quá ngắn hoặc rỗng, lấy nguyên dòng tiếp theo
+                    if len(name) < 5 and i + 1 < len(lines):
+                        name = lines[i+1].strip()
+                        
+                    # Clean up
+                    name = re.sub(r'\s+', ' ', name)
+                    if len(name) > 5:
+                        return name[:200]
         return ""
 
     def _extract_amounts(self, text: str) -> list[float]:

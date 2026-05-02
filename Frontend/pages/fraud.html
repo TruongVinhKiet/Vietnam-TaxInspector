@@ -104,6 +104,15 @@
             from { opacity: 0; transform: translateY(20px); }
             to { opacity: 1; transform: translateY(0); }
         }
+        @keyframes laserScan {
+            0% { top: 0%; opacity: 0; }
+            10% { opacity: 1; }
+            90% { opacity: 1; }
+            100% { top: 100%; opacity: 0; }
+        }
+        .laser-scanning {
+            animation: laserScan 2s linear infinite;
+        }
         /* Progress bar */
         .progress-bar-fill {
             transition: width var(--motion-duration-fast, 0.3s) var(--motion-ease-emphasis, cubic-bezier(0.16, 1, 0.3, 1));
@@ -1188,8 +1197,10 @@ Danh sách Doanh nghiệp theo Điểm Rủi ro
 
         <div id="ocr-results" class="hidden grid grid-cols-12 gap-6">
             <div class="col-span-12 lg:col-span-5">
-                <div class="bg-surface-container-low rounded-xl border border-outline-variant/10 p-2 h-full min-h-[400px] flex items-center justify-center overflow-hidden">
+                <div class="bg-surface-container-low rounded-xl border border-outline-variant/10 p-2 h-full min-h-[400px] flex items-center justify-center overflow-hidden relative" id="ocr-preview-container">
                     <img id="ocr-preview-img" src="" alt="Preview" class="max-w-full max-h-[500px] object-contain rounded">
+                    <!-- Laser Scanner effect -->
+                    <div id="ocr-laser-scanner" class="absolute top-0 left-0 w-full h-0.5 bg-blue-400 shadow-[0_0_15px_4px_rgba(96,165,250,0.9)] opacity-0 pointer-events-none"></div>
                 </div>
             </div>
             <div class="col-span-12 lg:col-span-7 bg-surface-container-low p-6 rounded-xl border border-outline-variant/10">

@@ -105,6 +105,36 @@ document.addEventListener('DOMContentLoaded', () => {
         pendingFile = file;
         if (fileChipContainer) fileChipContainer.classList.remove('hidden');
         if (fileChipName) fileChipName.textContent = file.name;
+        
+        const sizeKb = (file.size / 1024).toFixed(1);
+        const fileChipSize = document.getElementById('fileChipSize');
+        if (fileChipSize) fileChipSize.textContent = `(${sizeKb} KB)`;
+
+        const ext = file.name.split('.').pop().toLowerCase();
+        const iconEl = document.getElementById('fileChipIcon');
+        const thumbEl = document.getElementById('fileChipThumb');
+        
+        // Default reset
+        if (iconEl) iconEl.className = 'fa-solid fa-file relative z-10';
+        if (thumbEl) { thumbEl.classList.add('hidden'); thumbEl.style.backgroundImage = ''; }
+
+        if (ext === 'csv') {
+            if (iconEl) iconEl.className = 'fa-solid fa-file-csv text-emerald-600 relative z-10';
+        } else if (ext === 'pdf') {
+            if (iconEl) iconEl.className = 'fa-solid fa-file-pdf text-red-500 relative z-10';
+        } else if (['png', 'jpg', 'jpeg'].includes(ext)) {
+            if (iconEl) iconEl.className = 'fa-solid fa-image text-sky-600 relative z-10';
+            // Image preview
+            if (thumbEl) {
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    thumbEl.style.backgroundImage = `url(${e.target.result})`;
+                    thumbEl.classList.remove('hidden');
+                };
+                reader.readAsDataURL(file);
+            }
+        }
+
         // Enable send button
         sendBtn.classList.remove('opacity-50', 'cursor-not-allowed');
         sendBtn.removeAttribute('disabled');
@@ -113,6 +143,8 @@ document.addEventListener('DOMContentLoaded', () => {
         pendingFile = null;
         if (fileChipContainer) fileChipContainer.classList.add('hidden');
         if (fileUploadInput) fileUploadInput.value = '';
+        const thumbEl = document.getElementById('fileChipThumb');
+        if (thumbEl) { thumbEl.classList.add('hidden'); thumbEl.style.backgroundImage = ''; }
     }
 
     // Suggestion Chips
@@ -327,7 +359,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
             // File uploads use non-streaming endpoint
             if (pendingFile) {
-                const loadingId = addTypingIndicator();
+                const loadingId = addTypingIndicator(true);
                 const formData = new FormData();
                 formData.append('message', text || `Phân tích rủi ro file ${pendingFile.name}`);
                 formData.append('file', pendingFile);
@@ -393,6 +425,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const latencyEl = responseWrapper.querySelector('.streaming-latency');
         let fullData = null;
         let answerAccumulator = '';
+        window.currentCitations = null; // reset per message
 
         try {
             const response = await fetch('http://localhost:8000/api/tax-agent/chat/v2/stream', {
@@ -437,6 +470,9 @@ document.addEventListener('DOMContentLoaded', () => {
                             // Store final data
                             if (currentEventType === 'done') {
                                 fullData = data;
+                            } else if (data.citations) {
+                                // Capture citations if they arrive early in the stream
+                                window.currentCitations = data.citations;
                             }
                         } catch (e) { /* skip malformed */ }
                     }
@@ -453,7 +489,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (responseWrapper.style.display === 'none') {
             responseWrapper.style.display = '';
             if (fullData?.answer) {
-                streamTextEl.innerHTML = formatMarkdown(fullData.answer);
+                streamTextEl.innerHTML = formatMarkdown(fullData.answer, fullData.citations || window.currentCitations || []);
             }
             chatFeed.appendChild(responseWrapper);
         }
@@ -563,9 +599,20 @@ document.addEventListener('DOMContentLoaded', () => {
 
             case 'tool_start': {
                 const stepEl = document.createElement('div');
-                stepEl.className = 'thinking-step flex items-center gap-2 text-xs animate-fadeIn';
+                stepEl.className = 'thinking-step w-full animate-fadeIn mt-1.5 mb-1.5';
                 stepEl.dataset.tool = data.tool;
-                stepEl.innerHTML = `<i class="fa-solid fa-gear fa-spin text-indigo-500 text-xs"></i> <span class="step-detail text-slate-500">🔧 ${data.tool}</span>`;
+                stepEl.innerHTML = `
+                    <div class="flex items-center justify-between text-xs mb-1">
+                        <div class="flex items-center gap-1.5">
+                            <i class="fa-solid fa-gear fa-spin text-indigo-500 text-[10px]"></i>
+                            <span class="step-detail text-slate-600 font-bold uppercase tracking-wider text-[10px]">Thực thi: ${data.tool}</span>
+                        </div>
+                        <span class="text-[9px] text-indigo-400 font-mono tracking-widest uppercase"><i class="fa-solid fa-bolt fa-fade mr-1"></i>Running...</span>
+                    </div>
+                    <div class="w-full bg-slate-100 rounded-full h-1 overflow-hidden tool-progress-bar">
+                        <div class="h-full bg-indigo-400 rounded-full w-1/3 animate-pulse"></div>
+                    </div>
+                `;
                 stepsEl.appendChild(stepEl);
                 scrollToBottom();
                 break;
@@ -574,10 +621,22 @@ document.addEventListener('DOMContentLoaded', () => {
             case 'tool_done': {
                 const toolStep = stepsEl.querySelector(`[data-tool="${data.tool}"]`);
                 if (toolStep) {
-                    const statusIcon = data.status === 'success' ? 'fa-circle-check text-emerald-500' : 'fa-circle-xmark text-red-400';
-                    toolStep.querySelector('i').className = `fa-solid ${statusIcon} text-xs`;
-                    toolStep.querySelector('.step-detail').classList.add(data.status === 'success' ? 'text-emerald-600' : 'text-red-500');
-                    toolStep.querySelector('.step-detail').textContent += ` ✓ ${data.latency_ms}ms`;
+                    const isSuccess = data.status === 'success';
+                    const statusColor = isSuccess ? 'text-emerald-500' : 'text-red-500';
+                    const bgColor = isSuccess ? 'bg-emerald-400' : 'bg-red-400';
+                    const icon = isSuccess ? 'fa-check' : 'fa-xmark';
+                    
+                    toolStep.querySelector('i.fa-gear').className = `fa-solid ${icon} ${statusColor} text-[10px]`;
+                    toolStep.querySelector('.step-detail').className = `step-detail font-bold text-[10px] ${statusColor} uppercase tracking-wider`;
+                    toolStep.querySelector('.step-detail').textContent = `Hoàn tất: ${data.tool}`;
+                    
+                    toolStep.querySelector('span.font-mono').innerHTML = `<i class="fa-solid fa-clock mr-0.5"></i> ${data.latency_ms || 0}ms`;
+                    toolStep.querySelector('span.font-mono').className = `text-[9px] font-mono font-bold ${statusColor}`;
+                    
+                    const pBar = toolStep.querySelector('.tool-progress-bar > div');
+                    if (pBar) {
+                        pBar.className = `h-full ${bgColor} rounded-full w-full transition-all duration-300`;
+                    }
                 }
                 break;
             }
@@ -609,7 +668,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
                 // Append chunk with typewriter effect
                 streamTextEl.innerHTML = formatMarkdown(
-                    (streamTextEl._rawText || '') + (data.chunk || '')
+                    (streamTextEl._rawText || '') + (data.chunk || ''),
+                    window.currentCitations || []
                 );
                 streamTextEl._rawText = (streamTextEl._rawText || '') + (data.chunk || '');
                 scrollToBottom();
@@ -977,14 +1037,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // 14. Multi-Agent Debate Panel
         if (viz.agent_debate) {
-            html += buildDebatePanel(viz.agent_debate);
+            html += buildDebatePanel(viz.agent_debate, fullData.escalation_required);
         }
 
         html += '</div>';
         return html;
     }
 
-    function buildDebatePanel(debate) {
+    function buildDebatePanel(debate, isEscalated = false) {
         if (!debate || !debate.stances || debate.stances.length < 2) return '';
 
         const stanceIcons = { safe: '✅', cautious: '⚠️', suspicious: '🔶', dangerous: '🔴' };
@@ -994,8 +1054,12 @@ document.addEventListener('DOMContentLoaded', () => {
         // Consensus header
         const cColor = stanceColors[debate.consensus_stance] || '#64748B';
         let html = `
-        <div class="viz-card viz-card-wide debate-card">
-            <div class="viz-card-header"><i class="fa-solid fa-scale-balanced text-violet-500"></i> Hội Đồng Agent — Tranh Luận Đa Chiều</div>
+        <div class="viz-card viz-card-wide debate-card relative overflow-hidden ${isEscalated ? 'border-red-300 ring-1 ring-red-200' : ''}">
+            ${isEscalated ? `<div class="absolute -right-12 top-6 bg-red-600 text-white text-[10px] font-bold uppercase tracking-wider py-1 px-12 rotate-45 shadow-lg flex items-center gap-1 z-10"><i class="fa-solid fa-gavel"></i> Tòa Án AI</div>` : ''}
+            <div class="viz-card-header ${isEscalated ? 'bg-red-50 text-red-700 border-b border-red-100' : ''}">
+                <i class="fa-solid ${isEscalated ? 'fa-scale-unbalanced text-red-600' : 'fa-scale-balanced text-violet-500'}"></i> 
+                ${isEscalated ? 'Cảnh Báo Bất Đồng — Kích Hoạt Tòa Án Adjudicator' : 'Hội Đồng Agent — Tranh Luận Đa Chiều'}
+            </div>
             <div class="viz-card-body">
                 <!-- Consensus Gauge -->
                 <div class="flex items-center gap-4 mb-4 p-3 rounded-xl" style="background: ${cColor}10; border: 1px solid ${cColor}30">
@@ -1086,6 +1150,30 @@ document.addEventListener('DOMContentLoaded', () => {
                 html += `<div class="viz-rec-pill">${formatMarkdown(r)}</div>`;
             });
             html += '</div>';
+        }
+        // Planner DAG & Reasoning Trace
+        if (data.reasoning_trace || (data.plan_steps && data.plan_steps.length > 0)) {
+            html += `
+            <div class="viz-card viz-card-wide bg-slate-50 border border-slate-200 mt-4 shadow-none">
+                <div class="viz-card-header text-slate-500 border-b border-slate-200">
+                    <i class="fa-solid fa-code-branch text-slate-400"></i> Dấu vết suy luận (DAG Planner Trace)
+                </div>
+                <div class="viz-card-body p-4 text-sm text-slate-600">
+                    ${data.reasoning_trace ? `<div class="mb-3 italic border-l-2 border-slate-300 pl-3">" ${formatMarkdown(data.reasoning_trace)} "</div>` : ''}
+                    
+                    ${data.plan_steps && data.plan_steps.length > 0 ? `
+                    <div class="relative pl-4 border-l-2 border-dashed border-sky-200 mt-4 space-y-4">
+                        ${data.plan_steps.map((step, idx) => `
+                        <div class="relative">
+                            <div class="absolute -left-[23px] top-1 bg-sky-100 text-sky-600 font-bold rounded-full w-4 h-4 flex items-center justify-center text-[9px] ring-2 ring-white">${idx + 1}</div>
+                            <div class="font-mono text-xs font-bold text-sky-700 mb-0.5"><i class="fa-solid fa-gear text-[10px] mr-1 text-sky-400"></i>${step.tool || step.tool_name} ${step.optional ? '<span class="text-slate-400 font-normal text-[9px]">(Optional)</span>' : ''}</div>
+                            <div class="text-[11px] text-slate-500 leading-tight">${step.description}</div>
+                        </div>
+                        `).join('')}
+                    </div>
+                    ` : ''}
+                </div>
+            </div>`;
         }
 
         return html;
@@ -1396,19 +1484,39 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    function addTypingIndicator() {
+    function addTypingIndicator(isScanning = false) {
         const id = 'typing-' + Date.now();
         const wrapper = document.createElement('div');
         wrapper.id = id;
         wrapper.className = 'w-full flex mb-6 chat-message';
+        
+        let contentHtml = '';
+        if (isScanning) {
+            contentHtml = `
+                <div class="agent-message flex flex-col gap-2 p-4 w-64 border border-sky-200 bg-sky-50/50">
+                    <div class="flex items-center gap-2 text-sky-700 text-sm font-bold">
+                        <i class="fa-solid fa-camera-viewfinder fa-beat"></i> Đang quét dữ liệu...
+                    </div>
+                    <div class="w-full h-1 bg-slate-200 rounded-full overflow-hidden relative">
+                        <div class="absolute top-0 left-0 h-full bg-sky-400 w-full animate-pulse"></div>
+                    </div>
+                    <div class="text-[10px] text-slate-400 uppercase tracking-wider">OCR & Schema Detect</div>
+                </div>
+            `;
+        } else {
+            contentHtml = `
+                <div class="agent-message flex items-center h-12 typing-indicator">
+                    <span></span><span></span><span></span>
+                </div>
+            `;
+        }
+
         wrapper.innerHTML = `
             <div class="flex gap-4">
                 <div class="w-10 h-10 rounded-full flex-shrink-0 overflow-hidden border border-slate-200">
                     <img src="../assets/img/${currentTheme}" alt="AI" class="w-full h-full object-cover grayscale opacity-70 agent-message-avatar">
                 </div>
-                <div class="agent-message flex items-center h-12 typing-indicator">
-                    <span></span><span></span><span></span>
-                </div>
+                ${contentHtml}
             </div>
         `;
         chatFeed.appendChild(wrapper);
@@ -1449,8 +1557,8 @@ document.addEventListener('DOMContentLoaded', () => {
         document.querySelectorAll('.status-active').forEach(el => el.classList.remove('status-active'));
     }
 
-    // Enhanced markdown parser with tables and headers
-    function formatMarkdown(text) {
+    // Enhanced markdown parser with tables, headers, and citations
+    function formatMarkdown(text, citations = []) {
         if (!text) return '';
         
         // Headers
@@ -1459,6 +1567,24 @@ document.addEventListener('DOMContentLoaded', () => {
         
         // Bold
         html = html.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+        
+        // Citations [1], [2]
+        html = html.replace(/\[(\d+)\]/g, (match, id) => {
+            const idx = parseInt(id) - 1;
+            const cit = citations[idx];
+            if (cit) {
+                const tooltipText = (cit.text || '').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;').substring(0, 200);
+                return `<span class="relative group cursor-help text-sky-600 bg-sky-50 px-1 py-0.5 rounded text-[10px] font-bold mx-0.5 border border-sky-200 hover:bg-sky-100 transition-colors">
+                    [${id}]
+                    <span class="absolute bottom-full left-1/2 -translate-x-1/2 mb-1.5 hidden group-hover:block w-72 bg-slate-800 text-slate-100 text-[11px] p-2.5 rounded-lg shadow-2xl z-50 whitespace-normal text-left font-normal border border-slate-700 leading-relaxed pointer-events-none">
+                        <strong class="text-emerald-400 block mb-1 font-mono text-[10px]"><i class="fa-solid fa-scale-balanced mr-1"></i>Trích dẫn [${id}] • Điểm ReRank: ${cit.cross_encoder_score ? cit.cross_encoder_score.toFixed(2) : (cit.score ? cit.score.toFixed(2) : 'N/A')}</strong>
+                        ${tooltipText}...
+                        <span class="block mt-2 text-slate-400 text-[9px] border-t border-slate-700 pt-1 uppercase tracking-wider"><i class="fa-solid fa-book-bookmark mr-1"></i> ${cit.corpus_version || cit.citation_key || 'Dữ liệu Pháp lý'}</span>
+                    </span>
+                </span>`;
+            }
+            return `<span class="text-sky-600 bg-sky-50 px-1 rounded text-[10px] font-bold mx-0.5">[${id}]</span>`;
+        });
         
         // Tables (markdown-style)
         const tableRegex = /\|(.+)\|\n\|[-| ]+\|\n((\|.+\|\n?)+)/g;

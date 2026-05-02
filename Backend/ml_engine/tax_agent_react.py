@@ -51,7 +51,7 @@ MAX_ITERATIONS = 3                # Hard cap on reflection loops
 CONTRADICTION_THRESHOLD = 30.0    # Score gap (0-100) to flag contradiction
 LOW_CONFIDENCE_THRESHOLD = 0.4    # Below this → suggest retry
 MISSING_DATA_KEYWORDS = [         # Tool status values that indicate missing data
-    "not_found", "no_data", "error", "timeout", "empty",
+    "not_found", "no_data", "error", "timeout", "empty", "skipped",
 ]
 
 
@@ -108,6 +108,7 @@ class ReflectionAction_:
         return {
             "action": self.action.value,
             "tool": self.tool_name,
+            "params": self.params,
             "reason": self.reason,
         }
 
@@ -194,13 +195,26 @@ def _check_risk_score_contradiction(tool_results: dict) -> list[Observation]:
 def _check_missing_data(
     tool_results: dict,
     planned_tools: list[str],
+    evidence_contracts: dict[str, dict[str, Any]] | None = None,
 ) -> list[Observation]:
     """Check if any planned tools returned missing/error data."""
     observations = []
+    evidence_contracts = evidence_contracts or {}
 
     for tool_name in planned_tools:
         result = tool_results.get(tool_name, {})
         status = str(result.get("status", "")).lower()
+        contract = evidence_contracts.get(tool_name, {}) or {}
+
+        if tool_name == "knowledge_search" and result and not result.get("hits"):
+            observations.append(Observation(
+                observation_type=ReflectionType.MISSING_DATA,
+                severity="warning",
+                detail="knowledge_search không trả về citation/hit phù hợp. Cần retry hoặc mở rộng truy vấn.",
+                source_tools=[tool_name],
+                data={"status": status, "hits": 0, "reason": "empty_hits"},
+            ))
+            continue
 
         if status in MISSING_DATA_KEYWORDS or not result:
             observations.append(Observation(
@@ -209,6 +223,27 @@ def _check_missing_data(
                 detail=f"Tool '{tool_name}' không trả kết quả hợp lệ (status: {status}). Cần xem xét retry hoặc bỏ qua.",
                 source_tools=[tool_name],
                 data={"status": status},
+            ))
+            continue
+
+        missing_fields = [
+            field_name
+            for field_name in contract.get("required_fields", [])
+            if result.get(field_name) in (None, "", [], {})
+        ]
+        min_hits = int(contract.get("min_hits", 0) or 0)
+        if tool_name == "knowledge_search" and min_hits and len(result.get("hits", []) or []) < min_hits:
+            missing_fields.append("hits")
+        if missing_fields:
+            observations.append(Observation(
+                observation_type=ReflectionType.MISSING_DATA,
+                severity="warning",
+                detail=(
+                    f"Tool '{tool_name}' khong dat evidence contract "
+                    f"(missing: {', '.join(sorted(set(missing_fields)))})"
+                ),
+                source_tools=[tool_name],
+                data={"status": status, "missing_fields": sorted(set(missing_fields))},
             ))
 
     return observations
@@ -304,10 +339,18 @@ def _generate_actions(
         if obs.observation_type == ReflectionType.MISSING_DATA:
             # Retry the missing tool
             for tool_name in obs.source_tools:
-                if tool_name not in tool_results or tool_results[tool_name].get("status") in MISSING_DATA_KEYWORDS:
+                result = tool_results.get(tool_name, {})
+                status = str(result.get("status", "")).lower()
+                no_hits = tool_name == "knowledge_search" and not result.get("hits")
+                contract_missing = bool(obs.data.get("missing_fields"))
+                if tool_name not in tool_results or status in MISSING_DATA_KEYWORDS or no_hits or contract_missing:
+                    params = {}
+                    if tool_name == "knowledge_search":
+                        params = {"intent": "general_tax_query", "top_k": 10}
                     actions.append(ReflectionAction_(
                         action=ReflectionAction.RETRY_TOOL,
                         tool_name=tool_name,
+                        params=params,
                         reason=f"Tool '{tool_name}' trả về dữ liệu không hợp lệ, thử lại.",
                     ))
 
@@ -386,6 +429,7 @@ class ReActEngine:
         intent: str,
         iteration: int = 0,
         sub_agent_analysis: dict[str, Any] | None = None,
+        evidence_contracts: dict[str, dict[str, Any]] | None = None,
     ) -> ReflectionResult:
         """
         Perform one iteration of reflection on tool results.
@@ -420,7 +464,7 @@ class ReActEngine:
         observations.extend(_check_risk_score_contradiction(tool_results))
 
         # 2. Check for missing/failed data
-        observations.extend(_check_missing_data(tool_results, planned_tools))
+        observations.extend(_check_missing_data(tool_results, planned_tools, evidence_contracts))
 
         # 3. Check for anomaly signals
         observations.extend(_check_anomaly_signals(tool_results))
