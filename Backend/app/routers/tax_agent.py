@@ -52,12 +52,44 @@ except Exception:
 
 
 INTENT_RULES = {
-    "vat_refund_risk": ["hoan thue", "vat", "ho so hoan", "refund", "đề nghị hoàn"],
-    "invoice_risk": ["hoa don", "invoice", "xuat hoa don", "mua vao", "ban ra"],
-    "delinquency": ["no dong", "cham nop", "delinquency", "qua han", "thu no"],
-    "osint_ownership": ["offshore", "so huu", "ubo", "phoenix", "cong ty me"],
-    "transfer_pricing": ["chuyen gia", "transfer pricing", "gia giao dich lien ket", "mispricing"],
-    "audit_selection": ["thanh tra", "audit", "kiem tra", "xep hang ho so"],
+    "vat_refund_risk": [
+        "hoan thue", "vat", "ho so hoan", "refund", "đề nghị hoàn",
+        "hoàn thuế", "thuế gtgt", "thuế giá trị gia tăng", "giảm thuế",
+        "thuế suất 8", "thuế suất 10", "khấu trừ", "đầu vào", "đầu ra",
+        "nghị định 72", "nd 72", "72/2024", "thuế suất", "phương pháp khấu trừ",
+        "tỷ lệ % trên doanh thu",
+    ],
+    "invoice_risk": [
+        "hoa don", "invoice", "xuat hoa don", "mua vao", "ban ra",
+        "hóa đơn", "hóa đơn điện tử", "máy tính tiền", "xuất hóa đơn",
+        "hóa đơn không hợp pháp", "hóa đơn bất hợp pháp", "hóa đơn giả",
+        "thông tư 78", "nghị định 123",
+    ],
+    "delinquency": [
+        "no dong", "cham nop", "delinquency", "qua han", "thu no",
+        "nợ đọng", "chậm nộp", "quá hạn", "thu nợ", "cưỡng chế",
+        "tiền chậm nộp", "tiền phạt", "nhắc nợ",
+    ],
+    "osint_ownership": [
+        "offshore", "so huu", "ubo", "phoenix", "cong ty me",
+        "sở hữu", "công ty mẹ", "cấu trúc sở hữu", "người hưởng lợi",
+        "pháp nhân nước ngoài", "singapore", "bvi", "cayman",
+    ],
+    "transfer_pricing": [
+        "chuyen gia", "transfer pricing", "gia giao dich lien ket", "mispricing",
+        "chuyển giá", "giá giao dịch liên kết", "giao dịch liên kết",
+        "nghị định 132", "bên liên kết", "arm's length",
+    ],
+    "audit_selection": [
+        "thanh tra", "audit", "kiem tra", "xep hang ho so",
+        "kiểm tra", "xếp hạng hồ sơ", "chọn thanh tra",
+    ],
+    "general_tax_query": [
+        "thuế tndn", "thuế thu nhập doanh nghiệp", "ưu đãi thuế",
+        "miễn thuế", "giảm thuế", "đầu tư mở rộng", "dự án đầu tư",
+        "khu công nghiệp", "luật thuế", "quy định", "chính sách thuế",
+        "quản lý thuế", "công văn",
+    ],
 }
 
 
@@ -71,6 +103,7 @@ class ModelMode(str, Enum):
     VAT = "vat"                  # Hoàn thuế VAT + Invoice Risk
     DELINQUENCY = "delinquency"  # Dự báo nợ động (Transformer + Delinquency)
     MACRO = "macro"              # Mô phỏng vĩ mô (Macro Hypothesis)
+    LEGAL = "legal"              # Tư vấn Pháp lý (GraphRAG)
     FULL = "full"                # Toàn diện (all tools)
 
 
@@ -628,7 +661,7 @@ async def chat_with_file(
     If a CSV file is attached, triggers inline batch analysis and merges results.
     """
     session_id = session_id or f"sess-{uuid.uuid4().hex[:10]}"
-    resolved_mode = model_mode if model_mode in ("fraud", "vat", "delinquency", "macro", "full") else "full"
+    resolved_mode = model_mode if model_mode in ("fraud", "vat", "delinquency", "macro", "legal", "full") else "full"
 
     from ml_engine.tax_agent_orchestrator import get_orchestrator
 
@@ -691,9 +724,13 @@ async def chat_tax_agent_v2_stream(payload: ChatRequest, db: Session = Depends(g
     loop = asyncio.get_running_loop()
 
     def run_orchestrator():
+        # Create a dedicated DB session for this thread to avoid
+        # race conditions with FastAPI's dependency-injection lifecycle.
+        from app.database import SessionLocal
+        thread_db = SessionLocal()
         try:
             for event in orchestrator.process_streaming(
-                db,
+                thread_db,
                 session_id=session_id,
                 message=payload.message,
                 user_id=payload.user_id,
@@ -714,6 +751,8 @@ async def chat_tax_agent_v2_stream(payload: ChatRequest, db: Session = Depends(g
             except Exception as e:
                 import logging
                 logging.getLogger(__name__).error("[TaxAgentRouter] flush_to_db failed: %s", e)
+            finally:
+                thread_db.close()
 
     threading.Thread(target=run_orchestrator, daemon=True).start()
 

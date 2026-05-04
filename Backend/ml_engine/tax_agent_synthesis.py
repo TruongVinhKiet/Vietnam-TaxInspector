@@ -19,10 +19,16 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 import time
 from dataclasses import dataclass, field
 from typing import Any, Optional
+
+from ml_engine.tax_agent_legal_intelligence import (
+    LegalFaithfulnessVerifier,
+    LegalSlotAnalyzer,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +60,9 @@ class SynthesisResult:
     reasoning_trace: str                # CoT from planner
     latency_ms: float = 0.0
     synthesis_tier: str = "template"    # "template" or "llm"
+    verification: dict[str, Any] = field(default_factory=dict)
+    clarification_needed: bool = False
+    clarification_questions: list[str] = field(default_factory=list)
     citation_map: dict[str, str] = field(default_factory=dict)  # [1] → source
 
 
@@ -158,13 +167,45 @@ class TaxAgentSynthesizer:
             ev.citation_key = f"[{i + 1}]"
             citation_map[ev.citation_key] = f"{ev.source_tool}: {ev.title}"
 
+        missing_slots: list[str] = []
+        slot_analyzer = LegalSlotAnalyzer()
+        if self._is_legal_consultation_intent(intent, evidence):
+            missing_slots = slot_analyzer.missing_slots(query, intent=intent)
+            legal_hits = [ev for ev in evidence if ev.source_type == "legal"]
+            if len(missing_slots) >= 3 and not legal_hits:
+                return self._build_clarification_response(
+                    query=query,
+                    intent=intent,
+                    reasoning_trace=reasoning_trace,
+                    t0=t0,
+                    missing_slots=missing_slots,
+                    prompt=slot_analyzer.clarification_prompt(missing_slots),
+                )
+
         # 3. Generate summary
         summary = self._generate_summary(intent, evidence, tax_code)
 
+        synthesis_tier = "template"
+
         # 4. Generate detailed analysis with citations
-        detailed = self._generate_detailed_analysis(
-            intent, evidence, tool_results, tax_code,
-        )
+        if self._is_legal_consultation_intent(intent, evidence):
+            llm_text, llm_tier = self._try_llm_legal_synthesis(
+                query=query,
+                intent=intent,
+                evidence=evidence,
+                tool_results=tool_results,
+            )
+            if llm_text:
+                detailed = llm_text
+                synthesis_tier = llm_tier
+            else:
+                detailed = self._generate_grounded_legal_consultation(
+                    intent, evidence, tool_results, tax_code,
+                )
+        else:
+            detailed = self._generate_detailed_analysis(
+                intent, evidence, tool_results, tax_code,
+            )
 
         # 5. Generate recommendations
         recommendations = self._generate_recommendations(
@@ -176,6 +217,22 @@ class TaxAgentSynthesizer:
 
         # 7. Identify limitations
         limitations = self._identify_limitations(tool_results, evidence)
+
+        verification = self._verify_synthesis(detailed, evidence)
+        if verification.get("requires_abstain"):
+            detailed = self._generate_grounded_legal_consultation(
+                intent, evidence, tool_results, tax_code,
+                verification=verification,
+            )
+            synthesis_tier = "template_verified_fallback"
+            verification = self._verify_synthesis(detailed, evidence)
+        if verification.get("status") == "review":
+            confidence = round(max(0.05, confidence * 0.72), 4)
+            limitations = (
+                f"{limitations}; một số kết luận cần kiểm chứng trích dẫn"
+                if limitations else
+                "Một số kết luận cần kiểm chứng trích dẫn"
+            )
 
         # 8. Check if escalation is needed
         escalation_needed = escalate or confidence < 0.3
@@ -195,8 +252,11 @@ class TaxAgentSynthesizer:
             tools_used=tools_used,
             reasoning_trace=reasoning_trace,
             latency_ms=latency,
-            synthesis_tier="template",
+            synthesis_tier=synthesis_tier,
             citation_map=citation_map,
+            verification=verification,
+            clarification_needed=bool(missing_slots),
+            clarification_questions=missing_slots,
         )
 
     def _extract_evidence(
@@ -215,7 +275,17 @@ class TaxAgentSynthesizer:
                 content=str(hit.get("text", "")),
                 title=str(hit.get("title", "")),
                 score=float(hit.get("score", 0)),
-                metadata={"chunk_key": hit.get("chunk_key"), "doc_type": hit.get("doc_type")},
+                metadata={
+                    "chunk_key": hit.get("chunk_key"),
+                    "doc_type": hit.get("doc_type"),
+                    "citation_spans": hit.get("citation_spans", []),
+                    "authority_path": hit.get("authority_path", []),
+                    "effective_status": hit.get("effective_status", {}),
+                    "official_letter_scope": hit.get("official_letter_scope", {}),
+                    "relation_path": hit.get("relation_path", []),
+                    "legal_metadata": hit.get("legal_metadata", {}),
+                    "full_text": hit.get("full_text", ""),
+                },
             ))
 
         # Company risk → analytics evidence
@@ -400,6 +470,196 @@ class TaxAgentSynthesizer:
 
         return "\n".join(parts)
 
+    def _is_legal_consultation_intent(self, intent: str, evidence: list[Evidence]) -> bool:
+        if intent in {"general_tax_query", "vat_refund_risk", "invoice_risk", "transfer_pricing"}:
+            return True
+        return any(ev.source_type == "legal" for ev in evidence)
+
+    def _evidence_dicts(self, evidence: list[Evidence]) -> list[dict[str, Any]]:
+        return [
+            {
+                "source_tool": ev.source_tool,
+                "source_type": ev.source_type,
+                "content": ev.content,
+                "title": ev.title,
+                "score": ev.score,
+                "citation_key": ev.citation_key,
+                **(ev.metadata or {}),
+            }
+            for ev in evidence
+        ]
+
+    def _try_llm_legal_synthesis(
+        self,
+        *,
+        query: str,
+        intent: str,
+        evidence: list[Evidence],
+        tool_results: dict[str, dict[str, Any]],
+    ) -> tuple[str | None, str]:
+        """Use local TaxAgentLLM when an adapter/base is explicitly available."""
+        enable = os.getenv("TAX_AGENT_ENABLE_LLM", "").strip().lower() in {"1", "true", "yes"}
+        adapter = os.getenv("TAX_AGENT_LLM_ADAPTER")
+        default_adapter = os.path.join(
+            os.path.dirname(os.path.dirname(__file__)),
+            "data",
+            "models",
+            "tax_llm_lora",
+        )
+        has_adapter = os.path.exists(os.path.join(adapter or default_adapter, "adapter_model.safetensors"))
+        if not enable and not has_adapter:
+            return None, "template"
+
+        legal_evidence = [ev for ev in evidence if ev.source_type == "legal"]
+        if not legal_evidence:
+            return None, "template"
+
+        context_parts = [
+            f"{ev.citation_key} {ev.title}: {ev.content[:700]}"
+            for ev in legal_evidence[:5]
+        ]
+        try:
+            from ml_engine.tax_agent_llm_model import get_tax_llm
+
+            llm = get_tax_llm()
+            response = llm.generate(
+                query=query,
+                context="\n".join(context_parts),
+                intent=intent,
+                evidence=self._evidence_dicts(legal_evidence),
+                max_new_tokens=420,
+            )
+            if response.tier.value == "template" or not response.text.strip():
+                return None, "template"
+            return response.text.strip(), f"llm_{response.tier.value}"
+        except Exception as exc:
+            logger.debug("[Synthesis] local LLM unavailable, using template: %s", exc)
+            return None, "template"
+
+    def _generate_grounded_legal_consultation(
+        self,
+        intent: str,
+        evidence: list[Evidence],
+        tool_results: dict[str, dict[str, Any]],
+        tax_code: str | None,
+        *,
+        verification: dict[str, Any] | None = None,
+    ) -> str:
+        legal_evidence = [e for e in evidence if e.source_type == "legal"]
+        parts = ["## Tư vấn pháp lý có căn cứ\n"]
+        if legal_evidence:
+            strongest = max(legal_evidence, key=lambda ev: ev.score)
+            parts.append(
+                f"**Kết luận ngắn:** Có căn cứ liên quan trong {strongest.title} {strongest.citation_key}. "
+                "Cần đối chiếu hồ sơ thực tế trước khi áp dụng."
+            )
+            parts.append("\n### Điều kiện áp dụng")
+            for ev in legal_evidence[:4]:
+                metadata = ev.metadata or {}
+                effective = metadata.get("effective_status") or {}
+                official_scope = metadata.get("official_letter_scope") or {}
+                state = effective.get("dominant_state") or effective.get("state") or "chưa xác định"
+                state_vi = {
+                    "active": "còn hiệu lực",
+                    "expired": "hết hiệu lực",
+                    "pending": "chờ hiệu lực",
+                    "unknown": "chưa xác định",
+                }.get(state, state)
+                scope_note = ""
+                if official_scope.get("has_official_letter") or official_scope.get("is_official_letter"):
+                    scope_note = " **Lưu ý:** Công văn chỉ có giá trị hướng dẫn theo phạm vi cụ thể."
+                parts.append(
+                    f"- {ev.title} {ev.citation_key}: {ev.content[:260]}... "
+                    f"Hiệu lực: **{state_vi}**.{scope_note}"
+                )
+
+            parts.append("\n### Căn cứ và chuỗi quan hệ pháp lý")
+            graph_context = tool_results.get("knowledge_search", {}).get("graph_context") or {}
+            authority_path = graph_context.get("authority_path") or []
+            if authority_path:
+                for item in authority_path[:5]:
+                    entity_type_vi = {
+                        "law": "Luật",
+                        "decree": "Nghị định",
+                        "circular": "Thông tư",
+                        "decision": "Quyết định",
+                        "official_letter": "Công văn",
+                        "article": "Điều",
+                        "clause": "Khoản",
+                    }.get(item.get("entity_type", ""), item.get("entity_type", ""))
+                    parts.append(
+                        f"- {item.get('display_name')} "
+                        f"({entity_type_vi}, thẩm quyền={item.get('authority_rank')})"
+                    )
+            else:
+                for ev in legal_evidence[:3]:
+                    parts.append(f"- {ev.title} {ev.citation_key}")
+
+            parts.append("\n### Ngoại lệ / Rủi ro pháp lý")
+            official_rollup = graph_context.get("official_letter_scope") or {}
+            if official_rollup.get("warnings"):
+                for warning in official_rollup["warnings"][:3]:
+                    warning_vi = warning
+                    if "Official letters are guidance" in warning:
+                        warning_vi = (
+                            "Công văn chỉ mang tính chất hướng dẫn cho trường hợp cụ thể hoặc giải thích hành chính; "
+                            "không được coi là văn bản quy phạm pháp luật có hiệu lực cao hơn."
+                        )
+                    parts.append(f"- {warning_vi}")
+            effective_rollup = graph_context.get("effective_status") or {}
+            if effective_rollup.get("has_non_usable"):
+                parts.append(
+                    "- Có văn bản hết hiệu lực hoặc chờ hiệu lực trong chuỗi trích dẫn; "
+                    "cần ưu tiên áp dụng văn bản còn hiệu lực."
+                )
+            if verification and verification.get("unsupported_claims"):
+                parts.append(
+                    "- Đã hạ mức câu trả lời về template có căn cứ vì bộ xác minh phát hiện "
+                    "một số lập luận chưa được trích dẫn hỗ trợ."
+                )
+        else:
+            parts.append("Chưa có trích dẫn pháp lý đủ mạnh để đưa ra kết luận.")
+
+        parts.append("\n### Bước xử lý tiếp theo")
+        parts.append("- Xác định kỳ thuế, ngày chứng từ và loại giao dịch cụ thể.")
+        parts.append(
+            "- Ưu tiên văn bản theo thứ tự hiệu lực: "
+            "**Luật → Nghị định → Thông tư**; Công văn chỉ là hướng dẫn theo phạm vi."
+        )
+        return "\n".join(parts)
+
+    def _verify_synthesis(self, detailed: str, evidence: list[Evidence]) -> dict[str, Any]:
+        verifier = LegalFaithfulnessVerifier()
+        return verifier.verify(answer_text=detailed, evidence=self._evidence_dicts(evidence))
+
+    def _build_clarification_response(
+        self,
+        *,
+        query: str,
+        intent: str,
+        reasoning_trace: str,
+        t0: float,
+        missing_slots: list[str],
+        prompt: str,
+    ) -> SynthesisResult:
+        return SynthesisResult(
+            summary="Cần bổ sung thông tin trước khi tư vấn pháp lý.",
+            detailed_analysis=prompt,
+            evidence=[],
+            recommendations=["Bổ sung kỳ thuế/ngày chứng từ, loại người nộp thuế và loại giao dịch."],
+            confidence=0.0,
+            limitations="Thiếu thông tin bắt buộc để xác định văn bản và phạm vi áp dụng.",
+            escalation_needed=False,
+            intent=intent,
+            tools_used=[],
+            reasoning_trace=reasoning_trace,
+            latency_ms=(time.perf_counter() - t0) * 1000.0,
+            synthesis_tier="clarification",
+            verification={"status": "clarification", "missing_slots": missing_slots},
+            clarification_needed=True,
+            clarification_questions=missing_slots,
+        )
+
     def _generate_recommendations(
         self,
         intent: str,
@@ -578,6 +838,14 @@ class TaxAgentSynthesizer:
             f"| Công cụ: {', '.join(result.tools_used)} "
             f"| Tier: {result.synthesis_tier}_"
         )
+
+        verification = result.verification or {}
+        if verification and verification.get("status") in {"review", "clarification"}:
+            parts.append(
+                "\n_Verifier: "
+                f"{verification.get('status')} "
+                f"(faithfulness={verification.get('faithfulness_score', 'n/a')})._"
+            )
 
         # Limitations
         if result.limitations and "Không có" not in result.limitations:

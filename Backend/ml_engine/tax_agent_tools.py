@@ -465,14 +465,40 @@ def _tool_knowledge_search(
     top_k: int = 5,
     **kwargs,
 ) -> dict[str, Any]:
-    """Production RAG: pgvector candidates + BM25 + cross-encoder reranking."""
+    """Production RAG: GraphRAG + pgvector candidates + BM25 + cross-encoder reranking."""
     from ml_engine.tax_agent_retrieval import bm25_scores, tokenize
     from ml_engine.tax_agent_embeddings import get_embedding_engine, expand_query
     from sqlalchemy import text as sql_text
 
     t_start = time.perf_counter()
+
+    # ── Tier 0: GraphRAG — Knowledge Graph enhanced retrieval ─────────
+    graphrag_result = None
+    graphrag_latency_ms = 0.0
+    try:
+        from ml_engine.tax_agent_graphrag import get_graphrag_retriever
+        graphrag = get_graphrag_retriever()
+        if graphrag.is_available(db):
+            t_graph = time.perf_counter()
+            graphrag_query = str(kwargs.get("query_suffix") or kwargs.get("query_rewrite") or "").strip()
+            graphrag_query = f"{query} {graphrag_query}".strip() if graphrag_query else query
+            graphrag_result = graphrag.retrieve(
+                query=graphrag_query, db=db, intent=intent,
+                top_k=top_k, max_hops=2, anchor_count=5,
+            )
+            graphrag_latency_ms = (time.perf_counter() - t_graph) * 1000.0
+            if graphrag_result and graphrag_result.method == "graphrag":
+                logger.info(
+                    "[knowledge_search] GraphRAG yielded %d chunks, %d anchors in %.0fms",
+                    len(graphrag_result.chunks), len(graphrag_result.anchor_entities),
+                    graphrag_latency_ms,
+                )
+    except Exception as exc:
+        logger.warning("[knowledge_search] GraphRAG unavailable, falling back: %s", exc)
+    query_suffix = str(kwargs.get("query_suffix") or kwargs.get("query_rewrite") or "").strip()
+    effective_query = f"{query} {query_suffix}".strip() if query_suffix else query
     engine = get_embedding_engine()
-    expanded_query = expand_query(query)
+    expanded_query = expand_query(effective_query)
     query_embedding = engine.embed_query(expanded_query)
     query_embedding_hash = _hash_payload({
         "tier": engine.model_tier,
@@ -599,15 +625,62 @@ def _tool_knowledge_search(
     passage_texts: list[str] = []
     stored_vectors: list[list[float] | None] = []
 
+    # ── Merge GraphRAG chunks into the candidate pool ─────────────────
+    _graph_chunk_ids: set[int] = set()
+    if graphrag_result and graphrag_result.chunks:
+        for gc in graphrag_result.chunks:
+            cid = int(gc.get("chunk_id", 0))
+            _graph_chunk_ids.add(cid)
+            chunk_text = str(gc.get("text") or "")
+            candidates.append({
+                "chunk_id": cid,
+                "chunk_key": str(gc.get("chunk_key") or ""),
+                "title": str(gc.get("title") or ""),
+                "doc_type": str(gc.get("doc_type") or ""),
+                "text": chunk_text[:900],
+                "full_text": chunk_text,
+                "document_key": str(gc.get("document_key") or ""),
+                "version_tag": str(gc.get("version_tag") or ""),
+                "content_hash": "",
+                "citation_key": None,
+                "legal_reference": None,
+                "citation_text": None,
+                "citation_confidence": None,
+                "citation_spans": [],
+                "vector_distance": None,
+                "_source": "graphrag",
+                "_graph_score": float(gc.get("graph_score", 0)),
+                "_graph_entities": gc.get("graph_entities", []),
+                "_authority_rank": int(gc.get("authority_rank", 50)),
+                "authority_path": gc.get("authority_path", []),
+                "effective_status": gc.get("effective_status", {}),
+                "official_letter_scope": gc.get("official_letter_scope", {}),
+                "relation_path": gc.get("relation_path", []),
+            })
+            passage_texts.append(chunk_text)
+            stored_vectors.append(None)
+
     for row in rows:
+        cid = int(row["chunk_id"])
+        if cid in _graph_chunk_ids:
+            continue  # Already added from GraphRAG, avoid duplicates
         chunk_text = str(row.get("chunk_text") or "")
         citation_text = row.get("citation_text")
+        
+        meta = row.get("metadata_json") or {}
+        if isinstance(meta, str):
+            try:
+                meta = json.loads(meta)
+            except Exception:
+                meta = {}
+                
         candidates.append({
-            "chunk_id": int(row["chunk_id"]),
+            "chunk_id": cid,
             "chunk_key": str(row["chunk_key"]),
             "title": str(row.get("title") or ""),
             "doc_type": str(row.get("doc_type") or ""),
             "text": chunk_text[:900],
+            "full_text": chunk_text,
             "document_key": str(row.get("document_key") or ""),
             "version_tag": str(row.get("version_tag") or ""),
             "content_hash": str(row.get("content_hash") or ""),
@@ -617,6 +690,10 @@ def _tool_knowledge_search(
             "citation_confidence": row.get("citation_confidence"),
             "citation_spans": _citation_spans(chunk_text, citation_text),
             "vector_distance": row.get("vector_distance"),
+            "effective_status": meta.get("effective_status", {}),
+            "official_letter_scope": meta.get("official_letter_scope", {}),
+            "authority_path": meta.get("authority_path", []),
+            "relation_path": meta.get("relation_path", []),
         })
         passage_texts.append(chunk_text)
         stored_vectors.append(_parse_vector_json(row.get("embedding_json")))
@@ -657,7 +734,14 @@ def _tool_knowledge_search(
         lexical = len(query_token_set & doc_tokens_set) / max(len(query_token_set), 1)
         bm25_norm = float(bm25[i]) / max(bm25_max, 1e-9)
         dense = float(dense_scores[i])
-        score = 0.35 * bm25_norm + 0.50 * dense + 0.15 * lexical
+        base_score = 0.35 * bm25_norm + 0.50 * dense + 0.15 * lexical
+
+        # GraphRAG boost: candidates sourced from graph traversal get a bonus
+        graph_boost = 0.0
+        if cand.get("_source") == "graphrag":
+            graph_boost = float(cand.get("_graph_score", 0)) * 0.15
+        score = min(1.0, base_score + graph_boost)
+
         scored.append({
             **cand,
             "score": round(score, 6),
@@ -665,6 +749,7 @@ def _tool_knowledge_search(
                 "bm25": round(bm25_norm, 6),
                 "dense": round(dense, 6),
                 "lexical": round(lexical, 6),
+                "graph_boost": round(graph_boost, 6),
                 "vector_distance": cand.get("vector_distance"),
             },
         })
@@ -703,6 +788,7 @@ def _tool_knowledge_search(
             "title": rc.title,
             "doc_type": rc.doc_type,
             "text": rc.text,
+            "full_text": src.get("full_text", rc.text),
             "score": round(rc.rerank_score, 6),
             "rerank_tier": rc.rerank_tier,
             "components": src.get("components", {}),
@@ -712,6 +798,16 @@ def _tool_knowledge_search(
             "citation_key": src.get("citation_key"),
             "legal_reference": src.get("legal_reference"),
             "citation_spans": src.get("citation_spans", []),
+            "authority_path": src.get("authority_path", []),
+            "effective_status": src.get("effective_status", {}),
+            "official_letter_scope": src.get("official_letter_scope", {}),
+            "relation_path": src.get("relation_path", []),
+            "legal_metadata": {
+                "authority_path": src.get("authority_path", []),
+                "effective_status": src.get("effective_status", {}),
+                "official_letter_scope": src.get("official_letter_scope", {}),
+                "relation_path": src.get("relation_path", []),
+            },
         })
 
     latency_ms = (time.perf_counter() - t_start) * 1000.0
@@ -753,16 +849,36 @@ def _tool_knowledge_search(
         },
     )
 
+    # Build graph context for downstream consumers (Legal Agent, Frontend viz)
+    graph_context = None
+    if graphrag_result and graphrag_result.method == "graphrag":
+        graph_context = {
+            "subgraph": graphrag_result.subgraph,
+            "traversal_path": graphrag_result.traversal_path,
+            "anchor_entities": graphrag_result.anchor_entities,
+            "expansion_depth": graphrag_result.expansion_depth,
+            "total_entities": graphrag_result.total_entities,
+            "total_relations": graphrag_result.total_relations,
+            "communities_used": graphrag_result.communities_used,
+            "latency_ms": round(graphrag_latency_ms, 1),
+            "authority_path": graphrag_result.authority_path,
+            "effective_status": graphrag_result.effective_status,
+            "official_letter_scope": graphrag_result.official_letter_scope,
+            "relation_path": graphrag_result.relation_path,
+        }
+
     return {
         "status": "success",
         "hits": final,
         "total_candidates": len(candidates),
         "rerank_model": rerank_result.model_tier,
         "embedding_model": engine.model_tier,
-        "retrieval_tier": vector_tier,
+        "retrieval_tier": "graphrag+" + vector_tier if graph_context else vector_tier,
         "corpus_versions": corpus_versions,
         "query_embedding_hash": query_embedding_hash,
         "expanded_query": expanded_query if expanded_query != query else None,
+        "query_rewrite": query_suffix or None,
+        "graph_context": graph_context,
     }
 
 

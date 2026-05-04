@@ -1,0 +1,19 @@
+version: '3.8'
+
+services:
+  db:
+    image: pgvector/pgvector:pg18
+    container_name: taxinspector_db
+    restart: always
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: Kiet2004
+      POSTGRES_DB: TaxInspector
+    ports:
+      - "5433:5432"
+    volumes:
+      - taxinspector_pgdata:/var/lib/postgresql/data
+    shm_size: 1g
+
+volumes:
+  taxinspector_pgdata:

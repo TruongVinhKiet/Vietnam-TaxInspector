@@ -1090,6 +1090,51 @@ class RetrievalLog(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
+class LegalClaimVerification(Base):
+    __tablename__ = "legal_claim_verifications"
+
+    id = Column(Integer, primary_key=True, index=True)
+    session_id = Column(String(120), nullable=True, index=True)
+    turn_id = Column(Integer, nullable=True, index=True)
+    claim_text = Column(Text, nullable=False)
+    support_score = Column(Float, nullable=False, default=0.0)
+    evidence_ref = Column(String(200), nullable=True)
+    status = Column(String(30), nullable=False, default="review")
+    verifier_version = Column(String(80), nullable=False, default="legal-faithfulness-v1")
+    metadata_json = Column(JSON, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class AgentCaseWorkspace(Base):
+    __tablename__ = "agent_case_workspace"
+
+    id = Column(Integer, primary_key=True, index=True)
+    session_id = Column(String(120), nullable=False, index=True)
+    turn_id = Column(Integer, nullable=True, index=True)
+    facts_json = Column(JSON, nullable=True)
+    assumptions_json = Column(JSON, nullable=True)
+    open_questions_json = Column(JSON, nullable=True)
+    citations_json = Column(JSON, nullable=True)
+    claim_verification_json = Column(JSON, nullable=True)
+    escalation_reason = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class LegalKgExtractionRun(Base):
+    __tablename__ = "legal_kg_extraction_runs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    document_key = Column(String(120), nullable=False, index=True)
+    extractor_version = Column(String(80), nullable=False)
+    entities_count = Column(Integer, nullable=False, default=0)
+    relations_count = Column(Integer, nullable=False, default=0)
+    citations_count = Column(Integer, nullable=False, default=0)
+    status = Column(String(30), nullable=False, default="success")
+    metadata_json = Column(JSON, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
 class AgentSession(Base):
     __tablename__ = "agent_sessions"
 

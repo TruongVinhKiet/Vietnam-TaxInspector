@@ -93,6 +93,7 @@ class Observation:
             "severity": self.severity,
             "detail": self.detail,
             "source_tools": self.source_tools,
+            "data": self.data,
         }
 
 
@@ -215,6 +216,48 @@ def _check_missing_data(
                 data={"status": status, "hits": 0, "reason": "empty_hits"},
             ))
             continue
+
+        if tool_name == "knowledge_search" and result:
+            hits = result.get("hits", []) or []
+            quality_fields = set(contract.get("quality_fields", []) or [])
+            require_spans = "citation_spans" in quality_fields or bool(contract.get("require_citation_spans"))
+            if require_spans and hits and not any(hit.get("citation_spans") for hit in hits):
+                observations.append(Observation(
+                    observation_type=ReflectionType.MISSING_DATA,
+                    severity="warning",
+                    detail=(
+                        "knowledge_search co hit nhung thieu citation span; "
+                        "can rewrite query de lay can cu co vi tri trich dan."
+                    ),
+                    source_tools=[tool_name],
+                    data={"status": status, "missing_fields": ["citation_spans"], "reason": "weak_citation_spans"},
+                ))
+
+            graph_context = result.get("graph_context") or {}
+            effective_status = graph_context.get("effective_status") or {}
+            if effective_status.get("has_non_usable"):
+                observations.append(Observation(
+                    observation_type=ReflectionType.CONTRADICTION,
+                    severity="warning",
+                    detail=(
+                        "GraphRAG phat hien van ban het hieu luc/cho hieu luc trong subgraph; "
+                        "can retry voi truy van ve hieu luc hien hanh."
+                    ),
+                    source_tools=[tool_name],
+                    data={"reason": "non_usable_legal_document", "effective_status": effective_status},
+                ))
+
+            official_scope = graph_context.get("official_letter_scope") or {}
+            if official_scope.get("warnings"):
+                observations.append(Observation(
+                    observation_type=ReflectionType.CONTRADICTION,
+                    severity="info",
+                    detail=(
+                        "GraphRAG co cong van huong dan; can gioi han ket luan theo pham vi cong van."
+                    ),
+                    source_tools=[tool_name],
+                    data={"reason": "official_letter_scope", "warnings": official_scope.get("warnings", [])},
+                ))
 
         if status in MISSING_DATA_KEYWORDS or not result:
             observations.append(Observation(
@@ -346,7 +389,14 @@ def _generate_actions(
                 if tool_name not in tool_results or status in MISSING_DATA_KEYWORDS or no_hits or contract_missing:
                     params = {}
                     if tool_name == "knowledge_search":
-                        params = {"intent": "general_tax_query", "top_k": 10}
+                        params = {
+                            "intent": "general_tax_query",
+                            "top_k": 10,
+                            "query_suffix": (
+                                "hieu luc hien hanh van ban sua doi thay the "
+                                "pham vi cong van dieu khoan can cu citation"
+                            ),
+                        }
                     actions.append(ReflectionAction_(
                         action=ReflectionAction.RETRY_TOOL,
                         tool_name=tool_name,
@@ -355,6 +405,25 @@ def _generate_actions(
                     ))
 
         elif obs.observation_type == ReflectionType.CONTRADICTION:
+            if "knowledge_search" in obs.source_tools and obs.data.get("reason") in {
+                "non_usable_legal_document",
+                "official_letter_scope",
+            }:
+                actions.append(ReflectionAction_(
+                    action=ReflectionAction.RETRY_TOOL,
+                    tool_name="knowledge_search",
+                    params={
+                        "intent": "general_tax_query",
+                        "top_k": 10,
+                        "query_suffix": (
+                            "van ban con hieu luc thu tu uu tien luat nghi dinh "
+                            "thong tu pham vi cong van citation"
+                        ),
+                    },
+                    reason="Retry GraphRAG voi query rewrite de kiem tra hieu luc/pham vi van ban.",
+                ))
+                continue
+
             if obs.severity == "critical":
                 # Trigger investigation for critical contradictions
                 actions.append(ReflectionAction_(

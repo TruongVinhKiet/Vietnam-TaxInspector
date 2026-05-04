@@ -67,7 +67,13 @@ INTENT_DEFINITIONS: dict[str, dict[str, Any]] = {
             "đánh giá rủi ro gian lận hoàn thuế VAT",
             "doanh nghiệp nào đủ điều kiện hoàn thuế GTGT",
         ],
-        "keywords": ["hoàn thuế", "vat", "hồ sơ hoàn", "refund", "đề nghị hoàn", "gtgt", "xuất khẩu"],
+        "keywords": [
+            "hoàn thuế", "vat", "hồ sơ hoàn", "refund", "đề nghị hoàn", "gtgt", "xuất khẩu",
+            "hoan thue", "thuế gtgt", "thuế giá trị gia tăng", "giảm thuế",
+            "thuế suất 8", "thuế suất 10", "khấu trừ", "đầu vào", "đầu ra",
+            "nghị định 72", "nd 72", "72/2024", "thuế suất", "phương pháp khấu trừ",
+            "tỷ lệ % trên doanh thu"
+        ],
     },
     "invoice_risk": {
         "description": "Rủi ro hóa đơn, hóa đơn giả, hóa đơn bất hợp pháp",
@@ -78,7 +84,12 @@ INTENT_DEFINITIONS: dict[str, dict[str, Any]] = {
             "doanh nghiệp sử dụng hóa đơn bất hợp pháp",
             "tỷ lệ hóa đơn rủi ro cao bất thường",
         ],
-        "keywords": ["hóa đơn", "invoice", "xuất hóa đơn", "mua vào", "bán ra", "HĐĐT"],
+        "keywords": [
+            "hóa đơn", "invoice", "xuất hóa đơn", "mua vào", "bán ra", "HĐĐT",
+            "hoa don", "hóa đơn điện tử", "máy tính tiền",
+            "hóa đơn không hợp pháp", "hóa đơn bất hợp pháp", "hóa đơn giả",
+            "thông tư 78", "nghị định 123"
+        ],
     },
     "delinquency": {
         "description": "Nợ đọng thuế, chậm nộp, quá hạn, cưỡng chế",
@@ -89,7 +100,11 @@ INTENT_DEFINITIONS: dict[str, dict[str, Any]] = {
             "biện pháp cưỡng chế nợ thuế áp dụng khi nào",
             "tình hình tuân thủ thời hạn nộp thuế",
         ],
-        "keywords": ["nợ đọng", "chậm nộp", "delinquency", "quá hạn", "thu nợ", "cưỡng chế"],
+        "keywords": [
+            "nợ đọng", "chậm nộp", "delinquency", "quá hạn", "thu nợ", "cưỡng chế",
+            "no dong", "cham nop", "qua han", "thu no",
+            "tiền chậm nộp", "tiền phạt", "nhắc nợ"
+        ],
     },
     "osint_ownership": {
         "description": "Sở hữu, UBO, offshore, công ty mẹ, liên kết",
@@ -100,7 +115,11 @@ INTENT_DEFINITIONS: dict[str, dict[str, Any]] = {
             "doanh nghiệp có liên kết với công ty nước ngoài",
             "phân tích mối quan hệ giữa các công ty trong nhóm",
         ],
-        "keywords": ["offshore", "sở hữu", "ubo", "phoenix", "công ty mẹ", "liên kết", "cổ đông"],
+        "keywords": [
+            "offshore", "sở hữu", "ubo", "phoenix", "công ty mẹ", "liên kết", "cổ đông",
+            "so huu", "cong ty me", "cấu trúc sở hữu", "người hưởng lợi",
+            "pháp nhân nước ngoài", "singapore", "bvi", "cayman"
+        ],
     },
     "transfer_pricing": {
         "description": "Chuyển giá, giao dịch liên kết, giá thị trường",
@@ -111,7 +130,11 @@ INTENT_DEFINITIONS: dict[str, dict[str, Any]] = {
             "tỷ suất lợi nhuận thấp bất thường so với ngành",
             "doanh nghiệp FDI lỗ liên tục nhiều năm",
         ],
-        "keywords": ["chuyển giá", "transfer pricing", "giao dịch liên kết", "GDLK", "FDI"],
+        "keywords": [
+            "chuyển giá", "transfer pricing", "giao dịch liên kết", "GDLK", "FDI",
+            "chuyen gia", "gia giao dich lien ket", "mispricing",
+            "giá giao dịch liên kết", "nghị định 132", "bên liên kết", "arm's length"
+        ],
     },
     "audit_selection": {
         "description": "Lựa chọn thanh tra, kiểm tra thuế, rủi ro thanh tra",
@@ -122,7 +145,10 @@ INTENT_DEFINITIONS: dict[str, dict[str, Any]] = {
             "đánh giá rủi ro thanh tra cho kỳ thuế này",
             "danh sách doanh nghiệp cần kiểm tra thuế",
         ],
-        "keywords": ["thanh tra", "audit", "kiểm tra", "xếp hạng hồ sơ", "lựa chọn"],
+        "keywords": [
+            "thanh tra", "audit", "kiểm tra", "xếp hạng hồ sơ", "lựa chọn",
+            "kiem tra", "xep hang ho so", "chọn thanh tra"
+        ],
     },
     "top_n_query": {
         "description": "Truy vấn top N doanh nghiệp theo tiêu chí rủi ro",
@@ -167,7 +193,33 @@ INTENT_DEFINITIONS: dict[str, dict[str, Any]] = {
             "quy định về khấu trừ thuế GTGT đầu vào",
             "hướng dẫn kê khai thuế trực tuyến",
         ],
-        "keywords": ["thuế suất", "thủ tục", "đăng ký", "kê khai", "quy định", "hướng dẫn"],
+        "keywords": [
+            "thuế suất", "thủ tục", "đăng ký", "kê khai", "quy định", "hướng dẫn",
+            "thuế tndn", "thuế thu nhập doanh nghiệp", "ưu đãi thuế",
+            "miễn thuế", "đầu tư mở rộng", "dự án đầu tư",
+            "khu công nghiệp", "luật thuế", "chính sách thuế",
+            "quản lý thuế", "công văn",
+            # PIT / Thuế TNCN
+            "thuế tncn", "thuế thu nhập cá nhân", "lương", "tiền lương", "tiền công",
+            "giảm trừ gia cảnh", "người phụ thuộc", "biểu thuế lũy tiến",
+            "khấu trừ thuế tncn", "quyết toán thuế", "hoàn thuế tncn",
+            "bậc thuế", "thuế lũy tiến",
+            # Hộ kinh doanh / Cá nhân
+            "hộ kinh doanh", "cá nhân kinh doanh", "100 triệu", "doanh thu",
+            "tạp hóa", "tiệm", "quán", "cửa hàng", "freelance", "tự do",
+            "bán hàng online", "shopee", "lazada", "tiktok", "facebook",
+            # Cho thuê tài sản
+            "cho thuê nhà", "cho thuê", "thuê tài sản", "thu nhập cho thuê",
+            # Chi phí được trừ TNDN
+            "chi phí được trừ", "chi phí hợp lý", "chi phí không được trừ",
+            "tiếp khách", "chứng từ thanh toán", "tiền mặt", "20 triệu",
+            # Hóa đơn & Xử phạt
+            "hóa đơn điện tử", "xuất hóa đơn", "quên xuất hóa đơn",
+            "phạt", "xử phạt", "vi phạm", "nghị định 125", "mức phạt",
+            "chậm nộp tờ khai", "nộp trễ", "trễ hạn",
+            # Thuế môn bài
+            "thuế môn bài", "lệ phí môn bài",
+        ],
     },
 }
 
@@ -296,13 +348,28 @@ class EnhancedIntentClassifier:
             self.load()
 
         t0 = time.perf_counter()
-
+        
+        # Always run keyword extraction first as a strong prior
+        kw_result = self._classify_keyword(query)
+        kw_primary = kw_result.primary_intent
+        kw_conf = kw_result.primary_confidence
+        
         if self._tier == "semantic":
             result = self._classify_semantic(query, context_intents, multi_intent_threshold)
+            # Override semantic if keyword has a strong hit (coverage > 0)
+            # Since kw_conf starts at 0.22, anything above 0.25 means actual hits
+            if kw_conf > 0.35:
+                result.primary_intent = kw_primary
+                result.primary_confidence = kw_conf
+                result.classification_source = "keyword_override"
         elif self._tier == "model":
             result = self._classify_trained(query)
+            if kw_conf > 0.35:
+                result.primary_intent = kw_primary
+                result.primary_confidence = kw_conf
+                result.classification_source = "keyword_override"
         else:
-            result = self._classify_keyword(query)
+            result = kw_result
 
         result.latency_ms = (time.perf_counter() - t0) * 1000.0
 
@@ -386,15 +453,19 @@ class EnhancedIntentClassifier:
         for intent_key, intent_def in INTENT_DEFINITIONS.items():
             keywords = intent_def.get("keywords", [])
             hit_count = sum(1 for kw in keywords if kw.lower() in query_lower)
-            keyword_coverage = hit_count / max(len(keywords), 1)
-            scores[intent_key] = keyword_coverage
+            # Use hit_count directly rather than coverage, 
+            # since one strong keyword is often a solid indicator.
+            score = min(1.0, hit_count * 0.4)
+            scores[intent_key] = score
 
         ranked = sorted(scores.items(), key=lambda x: x[1], reverse=True)
 
-        primary = ranked[0] if ranked else ("general_tax_query", 0.2)
-        conf = min(0.85, 0.25 + primary[1] * 0.5)
+        primary = ranked[0] if ranked else ("general_tax_query", 0.0)
+        conf = min(0.95, 0.25 + primary[1] * 0.7)
 
-        if primary[0] == "general_tax_query" or primary[1] < 0.1:
+        # Only suppress general_tax_query if there were NO actual keyword hits.
+        if primary[1] <= 0.0:
+            primary = ("general_tax_query", 0.0)
             conf = 0.22
 
         return MultiIntentResult(

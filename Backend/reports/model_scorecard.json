@@ -359,8 +359,8 @@
   {
     "model_key": "tax_agent_router",
     "domain": "TaxAgent",
-    "purpose": "Offline/internal tax assistant: intent routing + retrieval + policy gating + trace ledger.",
-    "model_type": "Rule intent + hash-TF embedding retrieval + template synthesis + policy thresholds.",
+    "purpose": "Offline/internal tax assistant: legal consulting, multi-agent planning, GraphRAG retrieval, policy gating, trace ledger.",
+    "model_type": "Enhanced intent + Legal GraphRAG/pgvector/BM25/cross-encoder + local TaxAgentLLM tier + verified template fallback + policy thresholds.",
     "training_paths": [
       "Backend/app/scripts/ingest_tax_knowledge.py"
     ],
@@ -373,47 +373,55 @@
       "knowledge_document_versions",
       "knowledge_chunks",
       "knowledge_chunk_embeddings",
+      "kg_entities",
+      "kg_relations",
+      "kg_communities",
       "retrieval_logs",
       "agent_sessions",
       "agent_turns",
       "agent_tool_calls",
       "agent_decision_traces",
+      "agent_execution_plans",
+      "agent_case_workspace",
+      "legal_claim_verifications",
       "policy_rules",
       "policy_execution_logs",
       "agent_eval_suites",
       "agent_eval_runs"
     ],
     "api_endpoints": [
-      "/api/tax-agent/chat"
+      "/api/tax-agent/chat",
+      "/api/tax-agent/chat/v2",
+      "/api/tax-agent/chat/v2/with-file"
     ],
-    "fallback": "Rules are primary; missing learned intent/rerank/synthesis components.",
+    "fallback": "Local LLM is optional; verified template synthesis remains as auditable fallback.",
     "maturity": {
       "data": {
         "score": 3,
-        "notes": "KB versioning exists; missing relevance/grounding labels and adjudication."
+        "notes": "KB versioning, KG extraction runs and citation metadata exist; still needs larger adjudicated legal QA labels."
       },
       "model_quality": {
-        "score": 2,
-        "notes": "Routing/retrieval/synthesis are prototype-grade; needs ML upgrades."
+        "score": 4,
+        "notes": "Planner DAG, ReAct retries, debate persistence, GraphRAG metadata and claim verifier are integrated; needs calibrated legal QA gates."
       },
       "serving": {
-        "score": 3,
-        "notes": "Endpoint works; retrieval currently scans limited rows and scores in Python."
+        "score": 4,
+        "notes": "Streaming endpoint, with-file routing, hybrid retrieval, GraphRAG and audit persistence are available."
       },
       "monitoring": {
         "score": 4,
-        "notes": "Trace logs exist; needs eval harness + dashboards."
+        "notes": "Trace logs, retrieval logs, workspace and claim verification tables exist; dashboards/gate automation remain."
       },
       "governance": {
         "score": 3,
-        "notes": "Policy logs exist; missing policy version history and prompt registry."
+        "notes": "Policy logs, debate adjudication, execution plans and claim verification exist; prompt/model registry can be tightened."
       }
     },
     "key_gaps": [
-      "Intent classifier + calibration + OOD",
-      "Hybrid retrieval + ANN + reranker",
-      "Grounded synthesis model (local) and citation faithfulness gates",
-      "Red-team and safety regression suite"
+      "Adjudicated legal QA labels for amended/expired/official-letter conflicts",
+      "Automated gates for faithfulness, invalid-law rate, abstain correctness and p95 latency",
+      "Prompt/model registry with rollback policy",
+      "Red-team and no-citation trap regression suite"
     ]
   }
 ]

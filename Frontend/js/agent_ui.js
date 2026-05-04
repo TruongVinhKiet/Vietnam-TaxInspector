@@ -38,6 +38,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const MODE_CONFIG = {
         full:        { label: 'Toàn diện',   icon: 'fa-bolt',                     color: 'text-amber-500' },
+        legal:       { label: 'Tư vấn Pháp lý', icon: 'fa-scale-balanced',        color: 'text-teal-500' },
         fraud:       { label: 'Gian lận',    icon: 'fa-user-secret',              color: 'text-red-500' },
         vat:         { label: 'VAT & HĐ',    icon: 'fa-file-invoice-dollar',      color: 'text-blue-500' },
         delinquency: { label: 'Dự báo Nợ',   icon: 'fa-chart-line',               color: 'text-violet-500' },
@@ -67,8 +68,51 @@ document.addEventListener('DOMContentLoaded', () => {
             document.querySelectorAll('.model-option').forEach(o => o.classList.remove('bg-sky-50', 'ring-1', 'ring-sky-300'));
             opt.classList.add('bg-sky-50', 'ring-1', 'ring-sky-300');
             modelDropdown.classList.add('hidden');
+
+            // Instead of auto-opening, just show the toggle button if in legal mode
+            const lwToggleBtn = document.getElementById('lwToggleBtn');
+            if (lwToggleBtn) {
+                if (currentModelMode === 'legal') {
+                    lwToggleBtn.classList.remove('hidden');
+                } else {
+                    lwToggleBtn.classList.add('hidden');
+                    // Hide panel if it's open
+                    const lwPanel = document.getElementById('legalWorkspacePanel');
+                    if (lwPanel && !lwPanel.classList.contains('hidden')) {
+                        lwPanel.classList.add('translate-x-full', 'opacity-0');
+                        setTimeout(() => lwPanel.classList.add('hidden'), 300);
+                    }
+                }
+            }
         });
     });
+
+    const closeLwBtn = document.getElementById('closeLegalWorkspaceBtn');
+    if (closeLwBtn) {
+        closeLwBtn.addEventListener('click', () => {
+            const lwPanel = document.getElementById('legalWorkspacePanel');
+            if (lwPanel) {
+                lwPanel.classList.add('translate-x-full', 'opacity-0');
+                setTimeout(() => lwPanel.classList.add('hidden'), 300);
+            }
+        });
+    }
+
+    const lwToggleBtn = document.getElementById('lwToggleBtn');
+    if (lwToggleBtn) {
+        lwToggleBtn.addEventListener('click', () => {
+            const lwPanel = document.getElementById('legalWorkspacePanel');
+            if (lwPanel) {
+                if (lwPanel.classList.contains('hidden')) {
+                    lwPanel.classList.remove('hidden');
+                    setTimeout(() => lwPanel.classList.remove('translate-x-full', 'opacity-0'), 10);
+                } else {
+                    lwPanel.classList.add('translate-x-full', 'opacity-0');
+                    setTimeout(() => lwPanel.classList.add('hidden'), 300);
+                }
+            }
+        });
+    }
 
     // File Upload Logic
     if (attachmentBtn) {
@@ -84,17 +128,28 @@ document.addEventListener('DOMContentLoaded', () => {
         fileChipRemove.addEventListener('click', () => clearPendingFile());
     }
 
-    // Drag & Drop
-    document.addEventListener('dragover', (e) => {
+    // Drag & Drop — depth counter avoids overlay stuck when drag crosses child elements
+    let fileDragDepth = 0;
+    function hideFileDropOverlay() {
+        fileDragDepth = 0;
+        fileDropOverlay?.classList.add('hidden');
+    }
+    document.addEventListener('dragenter', (e) => {
         e.preventDefault();
+        fileDragDepth++;
         fileDropOverlay?.classList.remove('hidden');
     });
     document.addEventListener('dragleave', (e) => {
-        if (e.relatedTarget === null) fileDropOverlay?.classList.add('hidden');
+        e.preventDefault();
+        fileDragDepth--;
+        if (fileDragDepth <= 0) hideFileDropOverlay();
+    });
+    document.addEventListener('dragover', (e) => {
+        e.preventDefault();
     });
     document.addEventListener('drop', (e) => {
         e.preventDefault();
-        fileDropOverlay?.classList.add('hidden');
+        hideFileDropOverlay();
         const file = e.dataTransfer?.files[0];
         if (file && file.name.toLowerCase().endsWith('.csv')) {
             setPendingFile(file);
@@ -340,6 +395,20 @@ document.addEventListener('DOMContentLoaded', () => {
         audioVisualizer.classList.add('opacity-0');
     }
 
+    document.addEventListener('visibilitychange', () => {
+        if (!document.hidden) return;
+        if (recognition && isRecording) {
+            try { recognition.stop(); } catch (_) { /* noop */ }
+        }
+        stopRecording();
+    });
+    window.addEventListener('pagehide', () => {
+        if (recognition && isRecording) {
+            try { recognition.stop(); } catch (_) { /* noop */ }
+        }
+        stopRecording();
+    });
+
     // --- Message Handling ---
 
     async function sendMessage() {
@@ -403,7 +472,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // Create response bubble (will be populated incrementally)
         const responseWrapper = document.createElement('div');
-        responseWrapper.className = 'w-full flex mb-6 chat-message';
+        responseWrapper.className = 'max-w-4xl mx-auto w-full flex mb-6 chat-message';
         responseWrapper.innerHTML = `
             <div class="flex gap-4 w-full">
                 <div class="w-10 h-10 rounded-full flex-shrink-0 overflow-hidden border border-slate-200 mt-1">
@@ -470,9 +539,13 @@ document.addEventListener('DOMContentLoaded', () => {
                             // Store final data
                             if (currentEventType === 'done') {
                                 fullData = data;
-                            } else if (data.citations) {
-                                // Capture citations if they arrive early in the stream
+                            }
+                            // Capture citations whenever they appear (not else-if!)
+                            if (data.citations && data.citations.length) {
                                 window.currentCitations = data.citations;
+                            }
+                            if (data.legal_workspace) {
+                                renderLegalWorkspace(data.legal_workspace);
                             }
                         } catch (e) { /* skip malformed */ }
                     }
@@ -489,9 +562,20 @@ document.addEventListener('DOMContentLoaded', () => {
         if (responseWrapper.style.display === 'none') {
             responseWrapper.style.display = '';
             if (fullData?.answer) {
-                streamTextEl.innerHTML = formatMarkdown(fullData.answer, fullData.citations || window.currentCitations || []);
+                streamTextEl._rawText = fullData.answer;
             }
             chatFeed.appendChild(responseWrapper);
+        }
+
+        // Ensure citations from fullData are captured before final re-render
+        if (fullData && fullData.citations && fullData.citations.length) {
+            window.currentCitations = fullData.citations;
+        }
+
+        // Final re-render of markdown to guarantee citation badges are clickable
+        if (streamTextEl._rawText) {
+            streamTextEl.innerHTML = formatMarkdown(streamTextEl._rawText, window.currentCitations || []);
+            streamTextEl.classList.add('stream-done');
         }
 
         // Final: add viz + meta if available from done event
@@ -562,13 +646,15 @@ document.addEventListener('DOMContentLoaded', () => {
                     stepEl.className = 'thinking-step special-step mt-1 animate-fadeIn';
                     
                     if (step === 'react') {
+                        const isContradiction = data.is_contradiction || (typeof detail === 'string' && (detail.toLowerCase().includes('hết hiệu lực') || detail.toLowerCase().includes('xung đột') || detail.toLowerCase().includes('không áp dụng')));
+                        
                         stepEl.innerHTML = `
                             <div class="flex items-start gap-2">
-                                <i class="fa-solid ${icon} text-amber-500 text-xs mt-[3px]"></i> 
+                                <i class="fa-solid ${icon} ${isContradiction ? 'text-red-500' : 'text-amber-500'} text-xs mt-[3px]"></i> 
                                 <div>
-                                    <span class="step-detail text-slate-500 font-semibold">Tự đánh giá & Điều chỉnh</span>
-                                    <div class="mt-1 text-[11px] px-2 py-1 bg-amber-50 text-amber-700 rounded border border-amber-200 inline-block">
-                                        <i class="fa-solid fa-arrows-rotate mr-1"></i> ${detail}
+                                    <span class="step-detail text-slate-500 font-semibold">${isContradiction ? 'Cảnh báo Pháp lý' : 'Tự đánh giá & Điều chỉnh'}</span>
+                                    <div class="mt-1 text-[11px] px-2 py-1 ${isContradiction ? 'bg-red-50 text-red-700 border-red-200' : 'bg-amber-50 text-amber-700 border-amber-200'} rounded border inline-block">
+                                        <i class="fa-solid ${isContradiction ? 'fa-triangle-exclamation' : 'fa-arrows-rotate'} mr-1"></i> ${detail}
                                     </div>
                                 </div>
                             </div>
@@ -709,7 +795,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function createThinkingBubble() {
         const wrapper = document.createElement('div');
-        wrapper.className = 'w-full flex mb-4 chat-message thinking-bubble-wrapper';
+        wrapper.className = 'max-w-4xl mx-auto w-full flex mb-4 chat-message thinking-bubble-wrapper';
         wrapper.innerHTML = `
             <div class="flex gap-4 w-full">
                 <div class="w-10 h-10 rounded-full flex-shrink-0 overflow-hidden border border-slate-200 mt-1">
@@ -804,6 +890,32 @@ document.addEventListener('DOMContentLoaded', () => {
                 <div class="viz-card-header"><i class="fa-solid fa-circle-nodes"></i> Đồ Thị Quan Hệ Doanh Nghiệp (HGT)</div>
                 <div class="viz-card-body"><svg id="${graphId}" width="100%" height="200" viewBox="0 0 400 200"></svg></div>
                 ${ng.architecture ? `<div class="viz-card-footer"><i class="fa-solid fa-microchip"></i> ${ng.architecture}</div>` : ''}
+            </div>`;
+        }
+
+        // 4.5 Knowledge Graph (GraphRAG)
+        if (viz.knowledge_graph) {
+            const kg = viz.knowledge_graph;
+            const graphId = `kg-${++chartCounter}`;
+            pendingCharts.push({ type: 'knowledge_graph', id: graphId, data: kg });
+            // Store KG data globally for fullscreen re-render
+            window._lastKgData = kg;
+            html += `
+            <div class="viz-card" style="background: linear-gradient(145deg, #1e1b4b, #312e81); border: 1px solid #4338ca; color: white; cursor: pointer;" onclick="window._openKgFullscreen && window._openKgFullscreen()">
+                <div class="viz-card-header" style="color: #c7d2fe; border-bottom: 1px solid #3730a3;">
+                    <i class="fa-solid fa-diagram-project text-indigo-400"></i> Đồ Thị Tri Thức Pháp Luật (GraphRAG)
+                </div>
+                <div class="viz-card-body" style="padding: 0; position: relative;">
+                    <div style="position: absolute; top: 10px; left: 10px; z-index: 10; font-size: 10px; color: #a5b4fc; background: rgba(0,0,0,0.4); padding: 4px 8px; border-radius: 4px; backdrop-filter: blur(4px);">
+                        <i class="fa-solid fa-circle-nodes mr-1"></i> ${kg.total_entities} Nodes • ${kg.total_relations} Edges • Độ sâu: ${kg.expansion_depth}
+                    </div>
+                    <svg id="${graphId}" width="100%" height="320" viewBox="-350 -220 700 440"></svg>
+                    <div class="kg-click-hint"><i class="fa-solid fa-expand mr-1"></i> Bấm để phóng to</div>
+                </div>
+                <div class="viz-card-footer" style="background: rgba(30, 27, 75, 0.8); color: #818cf8; border-top: 1px solid #3730a3;">
+                    <i class="fa-solid fa-bolt text-amber-400 mr-1"></i> Engine: <span class="font-mono text-xs uppercase ml-1">${kg.retrieval_tier || 'GraphRAG'}</span>
+                    <span class="ml-auto"><i class="fa-solid fa-clock mr-1"></i> ${kg.latency_ms}ms</span>
+                </div>
             </div>`;
         }
 
@@ -927,6 +1039,73 @@ document.addEventListener('DOMContentLoaded', () => {
                     </div>` : ''}
                 </div>
             </div>`;
+        }
+
+        // 9.5 OCR Extraction Results
+        if (viz.ocr_extraction) {
+            const ocr = viz.ocr_extraction;
+            const tables = ocr.tables || [];
+            const fields = ocr.extracted_fields || {};
+            
+            let badgeClass = ocr.table_extraction_method === 'table_transformer' 
+                ? 'bg-purple-100 text-purple-700 border-purple-200' 
+                : 'bg-slate-100 text-slate-600 border-slate-200';
+            let methodLabel = ocr.table_extraction_method === 'table_transformer' 
+                ? 'AI DETR Transformer' 
+                : (ocr.table_extraction_method === 'pdfplumber' ? 'PDF Plumber' : 'Heuristic Alignment');
+
+            html += `
+            <div class="viz-card viz-card-wide">
+                <div class="viz-card-header"><i class="fa-solid fa-file-invoice text-sky-500"></i> Dữ liệu Trích xuất OCR</div>
+                <div class="viz-card-body p-4">
+                    <div class="mb-4 flex flex-wrap gap-2">`;
+            
+            for (const [key, val] of Object.entries(fields)) {
+                if (!val || typeof val === 'object') continue;
+                html += `<div class="bg-slate-50 px-3 py-2 rounded border border-slate-100 min-w-[120px]">
+                            <p class="text-[10px] text-slate-400 uppercase tracking-wider">${key}</p>
+                            <p class="text-sm font-bold text-slate-700">${val}</p>
+                         </div>`;
+            }
+
+            html += `</div>`;
+
+            if (tables.length > 0) {
+                html += `
+                    <div class="mt-4 pt-4 border-t border-slate-100">
+                        <div class="flex items-center justify-between mb-3">
+                            <h4 class="text-xs font-bold text-slate-600 uppercase">Bảng Dữ Liệu (${tables.length})</h4>
+                            <span class="text-[10px] font-bold px-2 py-0.5 rounded border ${badgeClass}">Engine: ${methodLabel}</span>
+                        </div>`;
+                
+                tables.forEach(table => {
+                    html += `<div class="mb-4 overflow-x-auto border border-slate-200 rounded">
+                        <table class="w-full text-left text-[11px] whitespace-nowrap">`;
+                    
+                    if (table.headers && table.headers.length > 0) {
+                        html += `<thead class="bg-slate-50 text-slate-600 border-b border-slate-200"><tr>`;
+                        table.headers.forEach(h => {
+                            html += `<th class="px-3 py-1.5 font-semibold">${h}</th>`;
+                        });
+                        html += `</tr></thead>`;
+                    }
+                    
+                    if (table.rows && table.rows.length > 0) {
+                        html += `<tbody class="divide-y divide-slate-100">`;
+                        table.rows.forEach(row => {
+                            html += `<tr class="hover:bg-sky-50/50">`;
+                            row.forEach(cell => {
+                                html += `<td class="px-3 py-1.5 text-slate-700">${cell || ''}</td>`;
+                            });
+                            html += `</tr>`;
+                        });
+                        html += `</tbody>`;
+                    }
+                    html += `</table></div>`;
+                });
+                html += `</div>`;
+            }
+            html += `</div></div>`;
         }
 
         // 10. Company Name Search Results
@@ -1194,6 +1373,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 else if (cfg.type === 'delinquency') renderDelinquencyChart(el, cfg.data);
                 else if (cfg.type === 'anomaly') renderAnomalyChart(el, cfg.data);
                 else if (cfg.type === 'network') renderNetworkGraph(el, cfg.data);
+                else if (cfg.type === 'knowledge_graph') renderKnowledgeGraph(el, cfg.data);
                 else if (cfg.type === 'uplift') renderUpliftChart(el, cfg.data);
                 else if (cfg.type === 'shap_waterfall') renderShapWaterfall(el, cfg.data);
             } catch (e) { console.warn('Chart render error:', e); }
@@ -1339,6 +1519,84 @@ document.addEventListener('DOMContentLoaded', () => {
         svg.innerHTML = svgHtml;
     }
 
+    function renderKnowledgeGraph(svg, data) {
+        const nodes = data.nodes || [];
+        const edges = data.edges || [];
+        if (!nodes.length) return;
+
+        // Distribute all nodes evenly using Archimedean spiral
+        nodes.forEach((n, i) => {
+            if (i === 0) {
+                n.x = 0; n.y = 0;
+            } else {
+                const angle = i * 2.39996; // Golden angle (137.5 degrees)
+                const radius = 65 + Math.pow(i, 0.65) * 25; // Increased spacing
+                n.x = Math.cos(angle) * radius;
+                n.y = Math.sin(angle) * radius * 0.8;
+            }
+        });
+
+        const nodeMap = {};
+        nodes.forEach(n => nodeMap[n.id] = n);
+
+        let svgHtml = `
+        <defs>
+            <filter id="kg-glow" x="-20%" y="-20%" width="140%" height="140%">
+                <feGaussianBlur stdDeviation="3" result="blur" />
+                <feMerge>
+                    <feMergeNode in="blur"/>
+                    <feMergeNode in="SourceGraphic"/>
+                </feMerge>
+            </filter>
+        </defs>`;
+
+        edges.forEach((e, i) => {
+            const src = nodeMap[e.source];
+            const tgt = nodeMap[e.target];
+            if (src && tgt) {
+                const isAmends = e.relation === 'amends' || e.relation === 'replaces' || e.relation === 'supplements';
+                const strokeColor = isAmends ? '#f43f5e' : '#6366f1'; 
+                svgHtml += `
+                <g opacity="0">
+                    <line x1="${src.x}" y1="${src.y}" x2="${tgt.x}" y2="${tgt.y}" 
+                          stroke="${strokeColor}" stroke-width="1.5" stroke-opacity="0.5"
+                          stroke-dasharray="4" stroke-dashoffset="100">
+                        <animate attributeName="stroke-dashoffset" from="100" to="0" dur="1s" fill="freeze" />
+                    </line>
+                    <animate attributeName="opacity" from="0" to="1" dur="0.5s" begin="${i * 0.05}s" fill="freeze" />
+                </g>`;
+            }
+        });
+
+        const typeColors = {
+            'law': '#ec4899',
+            'decree': '#8b5cf6',
+            'circular': '#3b82f6',
+            'decision': '#0ea5e9',
+            'default': '#94a3b8'
+        };
+
+        nodes.forEach((n, i) => {
+            const color = typeColors[n.type] || typeColors['default'];
+            const r = n.is_anchor ? 16 : 8;
+            const filter = n.is_anchor ? 'filter="url(#kg-glow)"' : '';
+            
+            svgHtml += `
+            <g opacity="0" style="transform-origin: ${n.x}px ${n.y}px">
+                <circle cx="${n.x}" cy="${n.y}" r="${r}" fill="${color}" fill-opacity="0.2" stroke="${color}" stroke-width="2" ${filter}>
+                </circle>
+                ${n.is_anchor ? `<circle cx="${n.x}" cy="${n.y}" r="${r+4}" fill="none" stroke="${color}" stroke-width="1.5" stroke-dasharray="2 4" opacity="0.6">
+                    <animateTransform attributeName="transform" type="rotate" from="0 ${n.x} ${n.y}" to="360 ${n.x} ${n.y}" dur="8s" repeatCount="indefinite"/>
+                </circle>` : ''}
+                <text x="${n.x}" y="${n.y + r + 14}" text-anchor="middle" font-size="9" fill="#e2e8f0" font-weight="bold"><title>${n.label}</title>${n.label.length > 30 ? n.label.substring(0, 27) + '...' : n.label}</text>
+                <text x="${n.x}" y="${n.y + r + 26}" text-anchor="middle" font-size="7" fill="#818cf8" style="text-transform: uppercase;">${n.type || 'unknown'}</text>
+                <animate attributeName="opacity" from="0" to="1" dur="0.4s" begin="${i * 0.05}s" fill="freeze" />
+            </g>`;
+        });
+
+        svg.innerHTML = svgHtml;
+    }
+
     function renderShapWaterfall(canvas, data) {
         const attrs = data.attributions || [];
         const labels = attrs.map(a => a.label || a.feature);
@@ -1416,7 +1674,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function addMessageToFeed(role, contentHTML, agentData = null) {
         const wrapper = document.createElement('div');
-        wrapper.className = 'w-full flex mb-6 chat-message';
+        wrapper.className = 'max-w-4xl mx-auto w-full flex mb-6 chat-message';
 
         if (role === 'user') {
             wrapper.innerHTML = `
@@ -1531,7 +1789,8 @@ document.addEventListener('DOMContentLoaded', () => {
     function triggerAgentIndicators(text) {
         const lowerText = text.toLowerCase();
         
-        if (lowerText.includes('luật') || lowerText.includes('quy định') || lowerText.includes('điều')) {
+        if (lowerText.includes('luật') || lowerText.includes('quy định') || lowerText.includes('điều') || 
+            lowerText.includes('thuế') || lowerText.includes('phạt') || lowerText.includes('lương') || lowerText.includes('hóa đơn')) {
             document.getElementById('status-legal').classList.add('status-active');
         }
         if (lowerText.includes('phân tích') || lowerText.includes('trễ hạn') || lowerText.includes('dự báo') || /\d{10}/.test(text)) {
@@ -1568,20 +1827,34 @@ document.addEventListener('DOMContentLoaded', () => {
         // Bold
         html = html.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
         
-        // Citations [1], [2]
+        // Citations [1], [2] — clickable to open modal
         html = html.replace(/\[(\d+)\]/g, (match, id) => {
             const idx = parseInt(id) - 1;
             const cit = citations[idx];
             if (cit) {
                 const tooltipText = (cit.text || '').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;').substring(0, 200);
-                return `<span class="relative group cursor-help text-sky-600 bg-sky-50 px-1 py-0.5 rounded text-[10px] font-bold mx-0.5 border border-sky-200 hover:bg-sky-100 transition-colors">
-                    [${id}]
-                    <span class="absolute bottom-full left-1/2 -translate-x-1/2 mb-1.5 hidden group-hover:block w-72 bg-slate-800 text-slate-100 text-[11px] p-2.5 rounded-lg shadow-2xl z-50 whitespace-normal text-left font-normal border border-slate-700 leading-relaxed pointer-events-none">
-                        <strong class="text-emerald-400 block mb-1 font-mono text-[10px]"><i class="fa-solid fa-scale-balanced mr-1"></i>Trích dẫn [${id}] • Điểm ReRank: ${cit.cross_encoder_score ? cit.cross_encoder_score.toFixed(2) : (cit.score ? cit.score.toFixed(2) : 'N/A')}</strong>
-                        ${tooltipText}...
-                        <span class="block mt-2 text-slate-400 text-[9px] border-t border-slate-700 pt-1 uppercase tracking-wider"><i class="fa-solid fa-book-bookmark mr-1"></i> ${cit.corpus_version || cit.citation_key || 'Dữ liệu Pháp lý'}</span>
-                    </span>
-                </span>`;
+                const rawStatus = cit.effective_status || 'chưa xác định';
+                const status = (typeof rawStatus === 'string' ? rawStatus : (rawStatus.status || 'chưa xác định')).toLowerCase();
+                const statusColor = status.includes('còn hiệu lực') || status.includes('hiệu lực') && !status.includes('hết') ? 'text-emerald-400' : 
+                                   (status.includes('hết hiệu lực') ? 'text-red-400' : 'text-slate-400');
+                const statusIcon = status.includes('còn hiệu lực') || status.includes('hiệu lực') && !status.includes('hết') ? 'fa-check-circle' : 
+                                  (status.includes('hết hiệu lực') ? 'fa-circle-xmark' : 'fa-circle-question');
+
+                return `<span class="relative group citation-badge-clickable text-sky-600 bg-sky-50 px-1 py-0.5 rounded text-[10px] font-bold mx-0.5 border border-sky-200 hover:bg-sky-100 transition-colors" data-citation-idx="${idx}" onclick="event.stopPropagation(); window._openCitationModal && window._openCitationModal(${idx})">` +
+                    `[${id}]` +
+                    `<span class="absolute bottom-full left-1/2 -translate-x-1/2 mb-1.5 hidden group-hover:block w-72 bg-slate-800 text-slate-100 text-[11px] p-2.5 rounded-lg shadow-2xl z-50 whitespace-normal text-left font-normal border border-slate-700 leading-relaxed pointer-events-none">` +
+                        `<div class="flex justify-between items-start mb-1.5">` +
+                            `<strong class="text-emerald-400 block font-mono text-[10px]"><i class="fa-solid fa-scale-balanced mr-1"></i>Trích dẫn [${id}] • Rerank: ${cit.cross_encoder_score ? cit.cross_encoder_score.toFixed(2) : (cit.score ? cit.score.toFixed(2) : 'N/A')}</strong>` +
+                            `<span class="${statusColor} text-[9px] font-bold uppercase tracking-tighter flex items-center gap-1">` +
+                                `<i class="fa-solid ${statusIcon}"></i> ${status}` +
+                            `</span>` +
+                        `</div>` +
+                        `<div class="text-slate-200">${tooltipText}...</div>` +
+                        `<span class="block mt-2 text-sky-300 text-[9px] border-t border-slate-700 pt-1">` +
+                            `<i class="fa-solid fa-hand-pointer mr-1"></i> Bấm để xem toàn bộ văn bản` +
+                        `</span>` +
+                    `</span>` +
+                `</span>`;
             }
             return `<span class="text-sky-600 bg-sky-50 px-1 rounded text-[10px] font-bold mx-0.5">[${id}]</span>`;
         });
@@ -1696,4 +1969,350 @@ document.addEventListener('DOMContentLoaded', () => {
             });
         });
     }
+    function renderLegalWorkspace(wsData) {
+        const lwPanel = document.getElementById('legalWorkspacePanel');
+        if (!lwPanel) return;
+
+        // Auto-show ONLY if in legal mode and it was hidden
+        if (currentModelMode === 'legal' && lwPanel.classList.contains('hidden')) {
+            lwPanel.classList.remove('hidden');
+            setTimeout(() => {
+                lwPanel.classList.remove('translate-x-full', 'opacity-0');
+            }, 10);
+        }
+
+        // Facts
+        const factsEl = document.getElementById('lw-facts');
+        if (factsEl && wsData.facts) {
+            factsEl.innerHTML = wsData.facts.length ? wsData.facts.map(f => `<li>${f}</li>`).join('') : `<li class="italic text-slate-400 list-none -ml-4">Chưa có sự kiện</li>`;
+        }
+        
+        // Assumptions
+        const assumpEl = document.getElementById('lw-assumptions');
+        if (assumpEl && wsData.assumptions) {
+            assumpEl.innerHTML = wsData.assumptions.length ? wsData.assumptions.map(a => `<li>${a}</li>`).join('') : `<li class="italic text-slate-400 list-none -ml-4">Chưa có giả định</li>`;
+        }
+
+        // Open Questions
+        const qEl = document.getElementById('lw-open-questions');
+        if (qEl && wsData.open_questions) {
+            qEl.innerHTML = wsData.open_questions.length ? wsData.open_questions.map(q => `<li>${q}</li>`).join('') : `<li class="italic text-slate-400 list-none -ml-4">Chưa có câu hỏi</li>`;
+        }
+
+        // Verifications
+        const verEl = document.getElementById('lw-verifications');
+        if (verEl && wsData.verifications) {
+            if (!wsData.verifications.length) {
+                verEl.innerHTML = `<div class="italic text-slate-400">Chưa có xác minh</div>`;
+            } else {
+                verEl.innerHTML = wsData.verifications.map(v => `
+                    <div class="bg-slate-50 border border-slate-200 rounded p-2 text-[11px]">
+                        <div class="font-bold text-slate-700">${v.claim || 'Nhận định'}</div>
+                        <div class="mt-1 flex items-center gap-1 ${v.is_verified ? 'text-emerald-600' : 'text-amber-600'}">
+                            <i class="fa-solid ${v.is_verified ? 'fa-check-circle' : 'fa-circle-exclamation'}"></i> 
+                            ${v.is_verified ? 'Đã xác minh' : 'Chưa xác minh'}
+                        </div>
+                    </div>
+                `).join('');
+            }
+        }
+
+        // Escalations
+        const escCont = document.getElementById('lw-escalations-container');
+        const escEl = document.getElementById('lw-escalations');
+        if (escCont && escEl && wsData.escalations) {
+            if (wsData.escalations.length) {
+                escCont.classList.remove('hidden');
+                escEl.innerHTML = wsData.escalations.map(e => `<li><i class="fa-solid fa-triangle-exclamation mr-1"></i> ${e}</li>`).join('');
+            } else {
+                escCont.classList.add('hidden');
+            }
+        }
+
+        // Cited Documents List
+        const docsEl = document.getElementById('lw-documents');
+        const citations = window.currentCitations || [];
+        if (docsEl && citations.length) {
+            docsEl.innerHTML = citations.map((c, idx) => {
+                const status = (c.effective_status || 'chưa xác định').toLowerCase();
+                const isEffective = status.includes('còn hiệu lực') || status.includes('hiệu lực') && !status.includes('hết');
+                const isExpired = status.includes('hết hiệu lực');
+                const statusColor = isEffective ? 'bg-emerald-50 text-emerald-600 border-emerald-200' : (isExpired ? 'bg-red-50 text-red-600 border-red-200' : 'bg-slate-50 text-slate-500 border-slate-200');
+                const statusIcon = isEffective ? 'fa-check-circle' : (isExpired ? 'fa-circle-xmark' : 'fa-circle-question');
+
+                return `
+                    <div class="p-2.5 rounded-lg border bg-white shadow-sm hover:shadow-md transition-shadow group cursor-pointer border-slate-200 hover:border-sky-300">
+                        <div class="flex justify-between items-start mb-1">
+                            <span class="w-5 h-5 flex items-center justify-center rounded bg-sky-100 text-sky-700 font-bold text-[9px]">[${idx+1}]</span>
+                            <span class="text-[9px] px-1.5 py-0.5 rounded border ${statusColor} font-bold uppercase tracking-tighter flex items-center gap-1">
+                                <i class="fa-solid ${statusIcon} text-[8px]"></i> ${status}
+                            </span>
+                        </div>
+                        <div class="text-[11px] font-bold text-slate-700 leading-tight group-hover:text-sky-700 transition-colors">${c.title || c.citation_key}</div>
+                        <div class="mt-1.5 flex items-center justify-between text-[9px] text-slate-400">
+                            <span><i class="fa-solid fa-dna mr-1 opacity-60"></i>Tương quan: ${(c.score * 100).toFixed(0)}%</span>
+                            <i class="fa-solid fa-arrow-up-right-from-square opacity-0 group-hover:opacity-100 transition-opacity"></i>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    //  CITATION MODAL — Show full document on click
+    // ═══════════════════════════════════════════════════════════
+
+    window._openCitationModal = function(idx) {
+        const citations = window.currentCitations || [];
+        const cit = citations[idx];
+        if (!cit) return;
+
+        const statusRaw = cit.effective_status || 'chưa xác định';
+        const status = (typeof statusRaw === 'string' ? statusRaw : (statusRaw.status || 'chưa xác định')).toLowerCase();
+        
+        const isEffective = status.includes('còn hiệu lực') || status.includes('hiệu lực') && !status.includes('hết');
+        const isExpired = status.includes('hết hiệu lực');
+        
+        const badgeClass = isEffective ? 'bg-emerald-100 text-emerald-700 border-emerald-200' : 
+                          (isExpired ? 'bg-red-100 text-red-700 border-red-200' : 'bg-slate-100 text-slate-700 border-slate-200');
+        const statusLabel = isEffective ? 'Còn hiệu lực' : (isExpired ? 'Hết hiệu lực' : 'Chưa xác định');
+
+        // Extract metadata if available
+        let docType = cit.doc_type || 'Văn bản pháp luật';
+        let authority = cit.official_letter_scope?.agency || 'Bộ Tài chính > Tổng cục Thuế';
+        if (cit.authority_path && cit.authority_path.length > 0) {
+            authority = cit.authority_path.join(' > ');
+        }
+        let docNumber = cit.citation_key || '';
+        if (docNumber.includes(':cite')) docNumber = docNumber.split(':cite')[0];
+
+        // Format body text
+        // Use full_text if available, else fallback to text
+        let rawBody = cit.full_text || cit.text || cit.chunk_text || 'Không có nội dung chi tiết.';
+        let targetText = cit.text || cit.chunk_text || '';
+        
+        // Escape HTML
+        rawBody = rawBody.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        targetText = targetText.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+        // Highlight the specific chunk within the full text
+        let bodyHtml = rawBody;
+        if (targetText && targetText.length > 20 && rawBody !== targetText) {
+            // Find the snippet in the full text and wrap it
+            // We use a simple indexOf after stripping some whitespace variations
+            const snippet = targetText.substring(0, 100); 
+            const idx = rawBody.indexOf(snippet);
+            if (idx !== -1) {
+                const endIdx = rawBody.indexOf(targetText.substring(targetText.length - 100), idx) + 100;
+                if (endIdx > 100 && endIdx <= rawBody.length) {
+                    const before = rawBody.substring(0, idx);
+                    const match = rawBody.substring(idx, endIdx);
+                    const after = rawBody.substring(endIdx);
+                    bodyHtml = before + `<span class="bg-blue-100 text-blue-900 px-1 py-0.5 rounded shadow-sm inline-block my-1 border border-blue-200">` + match + `</span>` + after;
+                }
+            }
+        } else if (rawBody === targetText) {
+            // If the whole thing is the chunk, just highlight it all or don't
+            bodyHtml = `<span class="bg-blue-100 text-blue-900 px-1 py-0.5 rounded shadow-sm block my-1 border border-blue-200">` + rawBody + `</span>`;
+        }
+
+        // Convert newlines to paragraphs
+        bodyHtml = bodyHtml.split('\n').map(p => p.trim() ? `<p class="mb-3 leading-relaxed text-justify">${p}</p>` : '').join('');
+
+        // Get user's last query for keyword highlighting within the text
+        const lastUserMsg = document.querySelector('.user-message:last-of-type');
+        const queryText = lastUserMsg ? lastUserMsg.textContent.trim() : '';
+        const keywords = queryText.split(/[\s,]+/).filter(w => w.length > 2 && !/^(cho|của|với|các|những|không|được|bao|nhiêu|thì|vậy|phải|hay|nào|ạ|dạ|anh|chị|em|ơi|tôi|mà)$/i.test(w));
+        keywords.forEach(kw => {
+            const regex = new RegExp(`(${kw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi');
+            bodyHtml = bodyHtml.replace(regex, '<mark class="bg-yellow-200 text-yellow-900 font-medium px-0.5 rounded">$1</mark>');
+        });
+
+        const score = cit.cross_encoder_score ? cit.cross_encoder_score.toFixed(2) : (cit.score ? cit.score.toFixed(2) : 'N/A');
+
+        const overlay = document.createElement('div');
+        overlay.className = 'fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[999] flex items-center justify-center p-4 sm:p-6 opacity-0 transition-opacity duration-300';
+        overlay.onclick = (e) => { if (e.target === overlay) close(); };
+
+        const modalHtml = `
+            <div class="bg-white rounded-xl shadow-2xl w-full max-w-4xl max-h-[90vh] flex flex-col transform scale-95 transition-transform duration-300 overflow-hidden relative">
+                <!-- Header Actions -->
+                <div class="absolute top-4 right-4 flex items-center gap-2 z-10">
+                    <button class="w-8 h-8 flex items-center justify-center rounded-full bg-slate-100 hover:bg-slate-200 text-slate-500 transition-colors" onclick="this.closest('.fixed').remove()">
+                        <i class="fa-solid fa-xmark"></i>
+                    </button>
+                </div>
+
+                <!-- Document Header -->
+                <div class="px-8 pt-8 pb-4 border-b border-slate-100 bg-slate-50/50">
+                    <div class="flex flex-wrap items-center gap-2 mb-6 text-[11px] font-medium font-mono">
+                        <span class="px-2.5 py-1 rounded border ${badgeClass}">
+                            <i class="fa-solid ${isEffective ? 'fa-check-circle' : (isExpired ? 'fa-xmark-circle' : 'fa-question-circle')} mr-1"></i>${statusLabel}
+                        </span>
+                        <span class="px-2.5 py-1 rounded border bg-sky-50 text-sky-700 border-sky-200">
+                            Phạm vi: Toàn quốc
+                        </span>
+                        <span class="px-2.5 py-1 rounded border bg-slate-100 text-slate-600 border-slate-200">
+                            ${authority}
+                        </span>
+                        <div class="flex-1"></div>
+                        <span class="text-slate-400">
+                            <i class="fa-solid fa-scale-balanced mr-1"></i> Điểm Rerank: ${score}
+                        </span>
+                    </div>
+
+                    <div class="flex justify-between items-start text-center mb-6">
+                        <div class="w-1/3">
+                            <div class="font-bold text-slate-800 uppercase mb-1">Bộ Tài Chính</div>
+                            <div class="w-12 h-[1px] bg-slate-800 mx-auto mb-2"></div>
+                            <div class="text-sm text-slate-600">Số: ${docNumber.split('/').pop()}</div>
+                        </div>
+                        <div class="w-2/3">
+                            <div class="font-bold text-slate-800 uppercase mb-1">Cộng Hòa Xã Hội Chủ Nghĩa Việt Nam</div>
+                            <div class="font-bold text-slate-800 mb-1">Độc lập - Tự do - Hạnh phúc</div>
+                            <div class="w-32 h-[1px] bg-slate-800 mx-auto"></div>
+                        </div>
+                    </div>
+
+                    <div class="text-center mb-4">
+                        <h2 class="text-xl font-bold text-slate-900 uppercase tracking-wide mb-2">${docType}</h2>
+                        <h3 class="text-base font-bold text-slate-700 max-w-2xl mx-auto leading-snug">${cit.title || 'Hướng dẫn thực hiện pháp luật thuế'}</h3>
+                    </div>
+                </div>
+
+                <!-- Document Body -->
+                <div class="p-8 overflow-y-auto flex-1 bg-white text-slate-800 font-serif text-[15px]">
+                    <div class="max-w-3xl mx-auto">
+                        ${bodyHtml}
+                    </div>
+                </div>
+            </div>`;
+        
+        overlay.innerHTML = modalHtml;
+        document.body.appendChild(overlay);
+        
+        // Animate in
+        requestAnimationFrame(() => {
+            overlay.classList.remove('opacity-0');
+            overlay.querySelector('div').classList.remove('scale-95');
+        });
+
+        // Close on Escape
+        const close = () => {
+            overlay.classList.add('opacity-0');
+            overlay.querySelector('div').classList.add('scale-95');
+            setTimeout(() => overlay.remove(), 300);
+            document.removeEventListener('keydown', esc);
+        };
+        const esc = (e) => { if (e.key === 'Escape') close(); };
+        document.addEventListener('keydown', esc);
+    };
+
+    // ═══════════════════════════════════════════════════════════
+    //  GRAPHRAG FULLSCREEN — Expand graph to full viewport
+    // ═══════════════════════════════════════════════════════════
+
+    window._openKgFullscreen = function() {
+        const kg = window._lastKgData;
+        if (!kg) return;
+
+        const overlay = document.createElement('div');
+        overlay.className = 'kg-fullscreen-overlay';
+        overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
+
+        const graphId = 'kg-fullscreen-svg';
+        overlay.innerHTML = `
+            <div class="kg-fullscreen-modal" onclick="event.stopPropagation()">
+                <div class="kg-fullscreen-header">
+                    <div>
+                        <i class="fa-solid fa-diagram-project mr-2"></i> Đồ Thị Tri Thức Pháp Luật
+                        <span style="font-size:11px; color:#a5b4fc; margin-left:12px;">${kg.total_entities} Nodes • ${kg.total_relations} Edges</span>
+                    </div>
+                    <button class="kg-fullscreen-close" onclick="this.closest('.kg-fullscreen-overlay').remove()">
+                        <i class="fa-solid fa-xmark"></i>
+                    </button>
+                </div>
+                <div class="kg-fullscreen-body">
+                    <svg id="${graphId}" width="100%" height="100%" viewBox="-500 -350 1000 700"></svg>
+                    <div class="kg-legend">
+                        <div style="font-weight:700; margin-bottom:8px; font-size:11px;"><i class="fa-solid fa-palette mr-1"></i> Chú giải</div>
+                        <div class="kg-legend-item"><div class="kg-legend-dot" style="border-color:#ec4899; background:rgba(236,72,153,0.2)"></div> Luật</div>
+                        <div class="kg-legend-item"><div class="kg-legend-dot" style="border-color:#8b5cf6; background:rgba(139,92,246,0.2)"></div> Nghị định</div>
+                        <div class="kg-legend-item"><div class="kg-legend-dot" style="border-color:#3b82f6; background:rgba(59,130,246,0.2)"></div> Thông tư</div>
+                        <div class="kg-legend-item"><div class="kg-legend-dot" style="border-color:#0ea5e9; background:rgba(14,165,233,0.2)"></div> Quyết định</div>
+                        <div class="kg-legend-item"><div class="kg-legend-dot" style="border-color:#94a3b8; background:rgba(148,163,184,0.2)"></div> Điều khoản</div>
+                        <div style="margin-top:8px; padding-top:8px; border-top:1px solid rgba(255,255,255,0.15);">
+                            <div class="kg-legend-item"><div style="width:20px;height:2px;background:#6366f1;border-radius:2px;flex-shrink:0"></div> Tham chiếu</div>
+                            <div class="kg-legend-item"><div style="width:20px;height:2px;background:#f43f5e;border-radius:2px;flex-shrink:0"></div> Sửa đổi/Thay thế</div>
+                        </div>
+                    </div>
+                </div>
+                <div class="kg-fullscreen-footer">
+                    <span><i class="fa-solid fa-bolt text-amber-400 mr-1"></i> Engine: ${kg.retrieval_tier || 'GraphRAG'}</span>
+                    <span><i class="fa-solid fa-clock mr-1"></i> ${kg.latency_ms}ms</span>
+                </div>
+            </div>`;
+        document.body.appendChild(overlay);
+
+        // Render the graph at larger scale
+        setTimeout(() => {
+            const svg = document.getElementById(graphId);
+            if (svg) renderKgFullscreen(svg, kg);
+        }, 50);
+
+        const esc = (e) => { if (e.key === 'Escape') { overlay.remove(); document.removeEventListener('keydown', esc); } };
+        document.addEventListener('keydown', esc);
+    };
+
+    function renderKgFullscreen(svg, data) {
+        const nodes = data.nodes || [];
+        const edges = data.edges || [];
+        if (!nodes.length) return;
+
+        nodes.forEach((n, i) => {
+            if (i === 0) {
+                n.x = 0; n.y = 0;
+            } else {
+                const angle = i * 2.39996; // Golden angle
+                const radius = 120 + Math.pow(i, 0.7) * 45; // Significantly increased spacing
+                n.x = Math.cos(angle) * radius;
+                n.y = Math.sin(angle) * radius * 0.75;
+            }
+        });
+
+        const nodeMap = {};
+        nodes.forEach(n => nodeMap[n.id] = n);
+
+        const typeColors = { 'law':'#ec4899','decree':'#8b5cf6','circular':'#3b82f6','decision':'#0ea5e9','article':'#10b981','default':'#94a3b8' };
+
+        let h = `<defs>
+            <filter id="kg-glow2" x="-30%" y="-30%" width="160%" height="160%">
+                <feGaussianBlur stdDeviation="4" result="blur"/><feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+            </filter>
+        </defs>`;
+
+        edges.forEach((e, i) => {
+            const s = nodeMap[e.source], t = nodeMap[e.target];
+            if (s && t) {
+                const isA = e.relation==='amends'||e.relation==='replaces'||e.relation==='supplements';
+                h += `<g opacity="0"><line x1="${s.x}" y1="${s.y}" x2="${t.x}" y2="${t.y}" stroke="${isA?'#f43f5e':'#6366f1'}" stroke-width="1.5" stroke-opacity="0.5" stroke-dasharray="${isA?'6 3':'4'}"><animate attributeName="stroke-dashoffset" from="100" to="0" dur="1.2s" fill="freeze"/></line><animate attributeName="opacity" from="0" to="1" dur="0.5s" begin="${i*0.03}s" fill="freeze"/></g>`;
+            }
+        });
+
+        nodes.forEach((n, i) => {
+            const c = typeColors[n.type]||typeColors.default;
+            const r = n.is_anchor ? 32 : 18;
+            const f = n.is_anchor ? 'filter="url(#kg-glow2)"' : '';
+            const label = n.label.length > 50 ? n.label.substring(0, 47) + '...' : n.label;
+            h += `<g opacity="0"><circle cx="${n.x}" cy="${n.y}" r="${r}" fill="${c}" fill-opacity="0.25" stroke="${c}" stroke-width="3" ${f}/>`;
+            if (n.is_anchor) h += `<circle cx="${n.x}" cy="${n.y}" r="${r+8}" fill="none" stroke="${c}" stroke-width="2" stroke-dasharray="4 6" opacity="0.6"><animateTransform attributeName="transform" type="rotate" from="0 ${n.x} ${n.y}" to="360 ${n.x} ${n.y}" dur="12s" repeatCount="indefinite"/></circle>`;
+            h += `<text x="${n.x}" y="${n.y+r+18}" text-anchor="middle" font-size="12" fill="#e2e8f0" font-weight="700"><title>${n.label}</title>${label}</text>`;
+            h += `<text x="${n.x}" y="${n.y+r+32}" text-anchor="middle" font-size="9" fill="${c}" style="text-transform:uppercase;font-weight:600;opacity:0.9">${n.type||'unknown'}</text>`;
+            h += `<animate attributeName="opacity" from="0" to="1" dur="0.4s" begin="${i*0.04}s" fill="freeze"/></g>`;
+        });
+
+        svg.innerHTML = h;
+    }
+
 });

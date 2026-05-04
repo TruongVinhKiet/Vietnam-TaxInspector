@@ -35,6 +35,7 @@ from .routers import (
     case_triage,
     tax_agent,
     ml_api,
+    legal,
 )
 from .security import limiter, SecurityHeadersMiddleware, rate_limit_exceeded_handler
 
@@ -239,6 +240,43 @@ async def lifespan(app: FastAPI):
                 "user_feedback TEXT, "
                 "created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP"
                 ");"
+            ))
+            conn.execute(text(
+                "CREATE TABLE IF NOT EXISTS agent_case_workspace ("
+                "id SERIAL PRIMARY KEY, "
+                "session_id VARCHAR(120) NOT NULL, "
+                "turn_id INT, "
+                "facts_json JSONB NOT NULL DEFAULT '{}'::jsonb, "
+                "assumptions_json JSONB NOT NULL DEFAULT '[]'::jsonb, "
+                "open_questions_json JSONB NOT NULL DEFAULT '[]'::jsonb, "
+                "citations_json JSONB NOT NULL DEFAULT '[]'::jsonb, "
+                "claim_verification_json JSONB NOT NULL DEFAULT '{}'::jsonb, "
+                "escalation_reason TEXT, "
+                "created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP, "
+                "updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP"
+                ");"
+            ))
+            conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS idx_agent_case_workspace_session "
+                "ON agent_case_workspace (session_id, created_at DESC);"
+            ))
+            conn.execute(text(
+                "CREATE TABLE IF NOT EXISTS legal_claim_verifications ("
+                "id SERIAL PRIMARY KEY, "
+                "session_id VARCHAR(120), "
+                "turn_id INT, "
+                "claim_text TEXT NOT NULL, "
+                "support_score FLOAT NOT NULL DEFAULT 0.0, "
+                "evidence_ref VARCHAR(200), "
+                "status VARCHAR(30) NOT NULL DEFAULT 'review', "
+                "verifier_version VARCHAR(80) NOT NULL DEFAULT 'legal-faithfulness-v1', "
+                "metadata_json JSONB NOT NULL DEFAULT '{}'::jsonb, "
+                "created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP"
+                ");"
+            ))
+            conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS idx_legal_claim_verifications_session "
+                "ON legal_claim_verifications (session_id, turn_id);"
             ))
 
             conn.execute(text(
@@ -866,6 +904,73 @@ async def lifespan(app: FastAPI):
                                 pass
                         print(f"[WARN] pgvector ANN index skipped: {index_exc}")
             conn.execute(text(
+                "CREATE TABLE IF NOT EXISTS kg_entities ("
+                "id SERIAL PRIMARY KEY, "
+                "entity_key VARCHAR(200) NOT NULL UNIQUE, "
+                "entity_type VARCHAR(60) NOT NULL, "
+                "display_name VARCHAR(500) NOT NULL, "
+                "description TEXT, "
+                "authority_rank INTEGER DEFAULT 50, "
+                "effective_from DATE, "
+                "effective_to DATE, "
+                "status VARCHAR(30) DEFAULT 'active', "
+                "chunk_ids INTEGER[], "
+                "attributes_json JSONB DEFAULT '{}'::jsonb, "
+                "embedding_json JSONB, "
+                "created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP"
+                ");"
+            ))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS idx_kg_entities_type ON kg_entities(entity_type);"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS idx_kg_entities_status ON kg_entities(status);"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS idx_kg_entities_authority ON kg_entities(authority_rank DESC);"))
+            conn.execute(text(
+                "CREATE TABLE IF NOT EXISTS kg_relations ("
+                "id SERIAL PRIMARY KEY, "
+                "source_entity_id INTEGER NOT NULL REFERENCES kg_entities(id) ON DELETE CASCADE, "
+                "target_entity_id INTEGER NOT NULL REFERENCES kg_entities(id) ON DELETE CASCADE, "
+                "relation_type VARCHAR(60) NOT NULL, "
+                "weight FLOAT DEFAULT 1.0, "
+                "confidence FLOAT DEFAULT 0.8, "
+                "evidence_text TEXT, "
+                "attributes_json JSONB DEFAULT '{}'::jsonb, "
+                "created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, "
+                "UNIQUE(source_entity_id, target_entity_id, relation_type)"
+                ");"
+            ))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS idx_kg_relations_source ON kg_relations(source_entity_id);"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS idx_kg_relations_target ON kg_relations(target_entity_id);"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS idx_kg_relations_type ON kg_relations(relation_type);"))
+            conn.execute(text(
+                "CREATE TABLE IF NOT EXISTS kg_communities ("
+                "id SERIAL PRIMARY KEY, "
+                "community_key VARCHAR(120) NOT NULL UNIQUE, "
+                "level INTEGER NOT NULL DEFAULT 0, "
+                "title VARCHAR(400), "
+                "summary TEXT, "
+                "entity_ids INTEGER[], "
+                "parent_community_id INTEGER REFERENCES kg_communities(id), "
+                "created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP"
+                ");"
+            ))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS idx_kg_communities_level ON kg_communities(level);"))
+            conn.execute(text(
+                "CREATE TABLE IF NOT EXISTS legal_kg_extraction_runs ("
+                "id SERIAL PRIMARY KEY, "
+                "document_key VARCHAR(120) NOT NULL, "
+                "extractor_version VARCHAR(80) NOT NULL, "
+                "entities_count INTEGER NOT NULL DEFAULT 0, "
+                "relations_count INTEGER NOT NULL DEFAULT 0, "
+                "citations_count INTEGER NOT NULL DEFAULT 0, "
+                "status VARCHAR(30) NOT NULL DEFAULT 'success', "
+                "metadata_json JSONB NOT NULL DEFAULT '{}'::jsonb, "
+                "created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP"
+                ");"
+            ))
+            conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS idx_legal_kg_extraction_runs_doc_created "
+                "ON legal_kg_extraction_runs (document_key, created_at DESC);"
+            ))
+            conn.execute(text(
                 "CREATE TABLE IF NOT EXISTS vector_index_registry ("
                 "id SERIAL PRIMARY KEY, "
                 "index_key VARCHAR(120) NOT NULL UNIQUE, "
@@ -1398,6 +1503,7 @@ app.include_router(collections.router)
 app.include_router(case_triage.router)
 app.include_router(tax_agent.router)
 app.include_router(ml_api.router)
+app.include_router(legal.router)
 
 
 @app.get("/", tags=["Health"])

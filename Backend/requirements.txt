@@ -38,9 +38,10 @@ geopy==2.4.1
 # AI Agent Phase 1+2: Multi-Agent Orchestration
 sentence-transformers>=3.0.0
 sse-starlette>=1.6.0
-# Optional: CPU-optimized inference for embeddings
+# CPU inference + Table Transformer (DETR)
 # onnxruntime>=1.17.0
-# transformers>=4.40.0
+transformers>=4.40.0
+timm>=0.9.0
 
 # AI Agent Phase 6: Custom LLM (LoRA fine-tuning)
 peft>=0.12.0

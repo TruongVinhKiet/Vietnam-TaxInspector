@@ -82,6 +82,8 @@ class TableStructure:
     rows: list[list[str]] = field(default_factory=list)
     page_index: int = 0
     confidence: float = 0.0
+    bbox: list[float] = field(default_factory=list)
+    extraction_method: str = "heuristic"
 
 
 @dataclass
@@ -97,6 +99,7 @@ class DocumentResult:
     total_processing_ms: float = 0.0
     status: str = "success"
     errors: list[str] = field(default_factory=list)
+    table_extraction_method: str = "none"
 
 
 # ════════════════════════════════════════════════════════════════
@@ -153,6 +156,7 @@ class ImagePreprocessor:
             import cv2
         except ImportError:
             return img
+        img = img.copy()
         hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
         # Red hue ranges (0-10 and 160-180)
         mask1 = cv2.inRange(hsv, np.array([0, 70, 50]), np.array([10, 255, 255]))
@@ -740,6 +744,384 @@ class TableDetector:
 
 
 # ════════════════════════════════════════════════════════════════
+#  4b. Table Transformer Pipeline (AI-powered)
+# ════════════════════════════════════════════════════════════════
+
+TATR_MODEL_DIR = MODEL_DIR / "table_transformer"
+
+
+class TableTransformerPipeline:
+    """
+    AI-powered table detection & structure recognition using
+    Microsoft Table Transformer (DETR-based, ~110M params each).
+
+    Two-stage pipeline:
+        Stage 1 – Detection:  Locate table bounding boxes on full page.
+        Stage 2 – Structure:  Identify rows, columns, headers in cropped table.
+
+    Models (auto-downloaded from HuggingFace on first use):
+        - microsoft/table-transformer-detection       (~220 MB)
+        - microsoft/table-transformer-structure-recognition (~220 MB)
+
+    Designed for CPU inference on i7 + 12 GB RAM.
+    Lazy-loaded to avoid startup penalty.
+    Falls back gracefully when `transformers` / `timm` are missing.
+    """
+
+    DETECTION_MODEL = "microsoft/table-transformer-detection"
+    STRUCTURE_MODEL = "microsoft/table-transformer-structure-recognition"
+    DETECTION_THRESHOLD = 0.7
+    STRUCTURE_THRESHOLD = 0.6
+
+    # Label maps from model config
+    STRUCTURE_LABELS = {
+        0: "table",
+        1: "table column",
+        2: "table row",
+        3: "table column header",
+        4: "table projected row header",
+        5: "table spanning cell",
+    }
+
+    def __init__(self):
+        self._det_model = None
+        self._det_processor = None
+        self._str_model = None
+        self._str_processor = None
+        self._lock = threading.Lock()
+        self._available: bool | None = None  # None = not checked yet
+
+    # ── public API ──────────────────────────────────────────────
+
+    @property
+    def available(self) -> bool:
+        """Check whether required deps exist (without loading models)."""
+        if self._available is not None:
+            return self._available
+        try:
+            import transformers  # noqa: F401
+            import timm  # noqa: F401
+            import torch  # noqa: F401
+            self._available = True
+        except ImportError:
+            self._available = False
+            logger.info(
+                "[TableTransformer] transformers/timm not installed; "
+                "AI table extraction disabled."
+            )
+        return self._available
+
+    def detect_and_recognize(
+        self,
+        page_images: list,
+        ocr_results: list[OCRResult],
+    ) -> list[TableStructure]:
+        """
+        End-to-end: detect tables on each page, recognize structure,
+        then map OCR text into cells.
+
+        Args:
+            page_images:  list of numpy arrays (one per page).
+            ocr_results:  corresponding OCR results with bounding boxes.
+
+        Returns:
+            List of TableStructure with headers/rows populated.
+        """
+        if not self.available:
+            return []
+
+        self._ensure_loaded()
+        if self._det_model is None:
+            return []
+
+        tables: list[TableStructure] = []
+        for page_idx, page_img in enumerate(page_images):
+            page_ocr = (
+                ocr_results[page_idx] if page_idx < len(ocr_results) else None
+            )
+            page_tables = self._process_page(page_img, page_idx, page_ocr)
+            tables.extend(page_tables)
+
+        return tables
+
+    # ── lazy loading ────────────────────────────────────────────
+
+    def _ensure_loaded(self) -> None:
+        if self._det_model is not None:
+            return
+        with self._lock:
+            if self._det_model is not None:
+                return
+            try:
+                self._load_models()
+            except Exception as exc:
+                logger.warning(
+                    "[TableTransformer] Model load failed: %s", exc
+                )
+                self._available = False
+
+    def _load_models(self) -> None:
+        import torch  # noqa: F811
+        from transformers import (  # type: ignore
+            DetrImageProcessor,
+            TableTransformerForObjectDetection,
+        )
+
+        cache_dir = str(TATR_MODEL_DIR)
+
+        logger.info("[TableTransformer] Loading detection model …")
+        self._det_processor = DetrImageProcessor.from_pretrained(
+            self.DETECTION_MODEL, cache_dir=cache_dir
+        )
+        self._det_model = TableTransformerForObjectDetection.from_pretrained(
+            self.DETECTION_MODEL,
+            cache_dir=cache_dir,
+            low_cpu_mem_usage=True,
+        )
+        self._det_model.eval()
+
+        logger.info("[TableTransformer] Loading structure model …")
+        self._str_processor = DetrImageProcessor.from_pretrained(
+            self.STRUCTURE_MODEL, cache_dir=cache_dir
+        )
+        self._str_model = TableTransformerForObjectDetection.from_pretrained(
+            self.STRUCTURE_MODEL,
+            cache_dir=cache_dir,
+            low_cpu_mem_usage=True,
+        )
+        self._str_model.eval()
+
+        logger.info("[TableTransformer] ✓ Both models loaded (CPU).")
+
+    # ── per-page processing ─────────────────────────────────────
+
+    def _process_page(
+        self,
+        page_img,
+        page_idx: int,
+        page_ocr: OCRResult | None,
+    ) -> list[TableStructure]:
+        """Detect tables on one page, then recognize structure for each."""
+        import torch
+        from PIL import Image
+        import numpy as np
+
+        if not isinstance(page_img, np.ndarray):
+            page_img = np.array(page_img)
+
+        pil_img = Image.fromarray(page_img).convert("RGB")
+
+        # Stage 1 – Detection
+        detected = self._detect_tables(pil_img)
+        if not detected:
+            return []
+
+        ocr_boxes = page_ocr.boxes if page_ocr else []
+        results: list[TableStructure] = []
+
+        for det in detected:
+            bbox = det["bbox"]  # [x1, y1, x2, y2]
+            score = det["score"]
+
+            # Crop table region (with 10px padding)
+            x1 = max(0, int(bbox[0]) - 10)
+            y1 = max(0, int(bbox[1]) - 10)
+            x2 = min(pil_img.width, int(bbox[2]) + 10)
+            y2 = min(pil_img.height, int(bbox[3]) + 10)
+            cropped = pil_img.crop((x1, y1, x2, y2))
+
+            # Stage 2 – Structure recognition
+            structure = self._recognize_structure(cropped)
+
+            # Stage 3 – Map OCR text into cell grid
+            table = self._build_grid(
+                structure, ocr_boxes,
+                table_offset=(x1, y1),
+                page_idx=page_idx,
+                detection_score=score,
+            )
+            if table is not None:
+                results.append(table)
+
+        return results
+
+    def _detect_tables(self, pil_image) -> list[dict]:
+        """Stage 1: Find table bounding boxes on a full page."""
+        import torch
+
+        inputs = self._det_processor(
+            images=pil_image, return_tensors="pt"
+        )
+        with torch.no_grad():
+            outputs = self._det_model(**inputs)
+
+        target_sizes = [list(reversed(pil_image.size))]  # [h, w]
+        raw = self._det_processor.post_process_object_detection(
+            outputs,
+            threshold=self.DETECTION_THRESHOLD,
+            target_sizes=target_sizes,
+        )[0]
+
+        detections = []
+        for score, label, box in zip(
+            raw["scores"], raw["labels"], raw["boxes"]
+        ):
+            detections.append({
+                "bbox": [round(float(c), 1) for c in box.tolist()],
+                "score": round(float(score), 4),
+                "label": self._det_model.config.id2label.get(
+                    label.item(), "table"
+                ),
+            })
+
+        logger.debug(
+            "[TableTransformer] Detected %d table(s) on page.",
+            len(detections),
+        )
+        return detections
+
+    def _recognize_structure(self, cropped_pil) -> dict:
+        """
+        Stage 2: Identify rows, columns, headers inside a cropped table.
+
+        Returns dict with keys:
+            rows:    list of [y1, y2] pairs
+            columns: list of [x1, x2] pairs
+            headers: list of [y1, y2] pairs (column header rows)
+        """
+        import torch
+
+        inputs = self._str_processor(
+            images=cropped_pil, return_tensors="pt"
+        )
+        with torch.no_grad():
+            outputs = self._str_model(**inputs)
+
+        target_sizes = [list(reversed(cropped_pil.size))]
+        raw = self._str_processor.post_process_object_detection(
+            outputs,
+            threshold=self.STRUCTURE_THRESHOLD,
+            target_sizes=target_sizes,
+        )[0]
+
+        rows = []
+        columns = []
+        headers = []
+
+        for score, label, box in zip(
+            raw["scores"], raw["labels"], raw["boxes"]
+        ):
+            coords = [round(float(c), 1) for c in box.tolist()]
+            label_name = self._str_model.config.id2label.get(
+                label.item(), "unknown"
+            )
+
+            if "row" in label_name and "header" not in label_name:
+                rows.append(coords)  # [x1, y1, x2, y2]
+            elif "column" in label_name and "header" not in label_name:
+                columns.append(coords)
+            elif "header" in label_name:
+                headers.append(coords)
+
+        # Sort rows top-to-bottom, columns left-to-right
+        rows.sort(key=lambda b: b[1])
+        columns.sort(key=lambda b: b[0])
+
+        return {"rows": rows, "columns": columns, "headers": headers}
+
+    def _build_grid(
+        self,
+        structure: dict,
+        ocr_boxes: list[dict],
+        table_offset: tuple[int, int],
+        page_idx: int,
+        detection_score: float,
+    ) -> TableStructure | None:
+        """
+        Stage 3: Combine row/column grid with OCR text to build
+        a structured table.
+
+        For each cell (row_i × col_j intersection), find OCR boxes
+        whose center falls inside the cell, concatenate their text.
+        """
+        rows = structure.get("rows", [])
+        cols = structure.get("columns", [])
+        header_boxes = structure.get("headers", [])
+
+        if not rows or not cols:
+            return None
+
+        ox, oy = table_offset
+
+        def _cell_text(row_bbox, col_bbox) -> str:
+            """Find OCR texts whose center falls within the cell."""
+            # Cell = intersection of row and column bounding boxes
+            cell_x1 = col_bbox[0] + ox
+            cell_y1 = row_bbox[1] + oy
+            cell_x2 = col_bbox[2] + ox
+            cell_y2 = row_bbox[3] + oy
+
+            texts = []
+            for box in ocr_boxes:
+                bbox = box.get("bbox", [])
+                if not bbox:
+                    continue
+                # OCR bbox can be [[x1,y1],[x2,y2],[x3,y3],[x4,y4]]
+                # or [x1,y1,x2,y2]. Handle both.
+                if isinstance(bbox[0], (list, tuple)):
+                    xs = [p[0] for p in bbox]
+                    ys = [p[1] for p in bbox]
+                    cx = sum(xs) / len(xs)
+                    cy = sum(ys) / len(ys)
+                else:
+                    cx = (bbox[0] + bbox[2]) / 2
+                    cy = (bbox[1] + bbox[3]) / 2
+
+                if cell_x1 <= cx <= cell_x2 and cell_y1 <= cy <= cell_y2:
+                    texts.append(box.get("text", ""))
+
+            return " ".join(texts).strip()
+
+        # Determine which rows are headers
+        header_y_centers = set()
+        for hb in header_boxes:
+            header_y_centers.add(round((hb[1] + hb[3]) / 2, 0))
+
+        header_row_texts: list[str] = []
+        data_rows: list[list[str]] = []
+
+        for row_bbox in rows:
+            row_center_y = round((row_bbox[1] + row_bbox[3]) / 2, 0)
+            is_header = any(
+                abs(row_center_y - hy) < 20 for hy in header_y_centers
+            )
+
+            row_cells = [_cell_text(row_bbox, col) for col in cols]
+
+            if is_header and not header_row_texts:
+                header_row_texts = row_cells
+            else:
+                data_rows.append(row_cells)
+
+        # If no explicit header detected, use first row
+        if not header_row_texts and data_rows:
+            header_row_texts = data_rows.pop(0)
+
+        # Need at least 1 header + 1 data row
+        if not header_row_texts or not data_rows:
+            return None
+
+        return TableStructure(
+            headers=header_row_texts,
+            rows=data_rows,
+            page_index=page_idx,
+            confidence=round(detection_score, 4),
+            bbox=[],
+            extraction_method="table_transformer",
+        )
+
+
+# ════════════════════════════════════════════════════════════════
 #  5. Main Document OCR Engine
 # ════════════════════════════════════════════════════════════════
 
@@ -759,6 +1141,7 @@ class DocumentOCREngine:
         self._extractor = DocumentExtractor()
         self._field_extractor = InvoiceFieldExtractor()
         self._table_detector = TableDetector()
+        self._table_transformer = TableTransformerPipeline()
         self._lock = threading.Lock()
 
     def process(
@@ -798,6 +1181,8 @@ class DocumentOCREngine:
         if file_path.suffix.lower() == ".pdf":
             direct_text = self._extractor.extract_text_pdf(file_path)
 
+        pages_for_ai: list = []  # page images for AI table detection
+
         if direct_text and len(direct_text.strip()) > 50:
             # PDF có text layer → không cần OCR
             result.full_text = direct_text
@@ -806,10 +1191,14 @@ class DocumentOCREngine:
                 page_index=0, raw_text=direct_text,
                 confidence=0.95, processing_time_ms=0.0,
             ))
+            # Still extract page images for AI table detection
+            if self._table_transformer.available:
+                pages_for_ai = self._extractor.extract_pages(file_path)
         else:
             # Cần OCR
             pages = self._extractor.extract_pages(file_path)
             result.num_pages = len(pages)
+            pages_for_ai = pages  # Keep reference for AI table detection
 
             all_text_parts = []
             for idx, page_img in enumerate(pages):
@@ -824,17 +1213,47 @@ class DocumentOCREngine:
         if extract_fields and result.full_text:
             result.invoice_fields = self._field_extractor.extract(result.full_text)
 
-        # Extract tables
+        # Extract tables — Fallback chain:
+        #   1. Table Transformer AI (highest quality)
+        #   2. pdfplumber (text-based PDF only)
+        #   3. Heuristic OCR box alignment (lowest quality)
         if extract_tables:
-            if file_path.suffix.lower() == ".pdf":
+            # Tier 1: AI-powered table detection + structure recognition
+            if (
+                self._table_transformer.available
+                and pages_for_ai
+            ):
+                try:
+                    ai_tables = self._table_transformer.detect_and_recognize(
+                        pages_for_ai, result.ocr_results
+                    )
+                    if ai_tables:
+                        result.tables = ai_tables
+                        result.table_extraction_method = "table_transformer"
+                        logger.info(
+                            "[OCR] AI Table Transformer extracted %d table(s).",
+                            len(ai_tables),
+                        )
+                except Exception as exc:
+                    logger.warning(
+                        "[OCR] Table Transformer failed, falling back: %s", exc
+                    )
+
+            # Tier 2: pdfplumber (text-based PDF)
+            if not result.tables and file_path.suffix.lower() == ".pdf":
                 result.tables = self._table_detector.extract_tables_from_pdf(file_path)
+                if result.tables:
+                    result.table_extraction_method = "pdfplumber"
+
+            # Tier 3: Heuristic alignment from OCR boxes
             if not result.tables and result.ocr_results:
-                # Fallback: table detection từ OCR boxes
                 all_boxes = []
                 for ocr_r in result.ocr_results:
                     all_boxes.extend(ocr_r.boxes)
                 if all_boxes:
                     result.tables = self._table_detector.extract_tables_from_ocr(all_boxes)
+                    if result.tables:
+                        result.table_extraction_method = "heuristic"
 
         result.total_processing_ms = round(
             (time.perf_counter() - t0) * 1000, 1

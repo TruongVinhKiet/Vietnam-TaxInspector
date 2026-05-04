@@ -221,6 +221,7 @@ class LegalResearchAgent:
         intent: str = "general_tax_query",
         *,
         tax_code: str | None = None,
+        graph_context: dict[str, Any] | None = None,
     ) -> LegalOpinion:
         """
         Conduct multi-pass legal research on the query.
@@ -230,6 +231,7 @@ class LegalResearchAgent:
             retrieval_results: Knowledge search results from tool executor
             intent: Classified intent
             tax_code: Optional tax code for entity-specific analysis
+            graph_context: Optional graph context from GraphRAG retrieval
 
         Returns:
             LegalOpinion with structured analysis
@@ -242,20 +244,36 @@ class LegalResearchAgent:
         # Pass 2: Extract legal references from evidence
         all_refs = self._extract_references(ranked_evidence)
 
-        # Pass 3: Detect cross-references
+        # Pass 3: Detect cross-references (enhanced with KG if available)
         cross_refs = self._detect_cross_references(all_refs)
+        if graph_context and graph_context.get("subgraph"):
+            graph_cross_refs = self._extract_graph_cross_refs(graph_context["subgraph"])
+            cross_refs = self._merge_cross_refs(cross_refs, graph_cross_refs)
 
         # Pass 4: Check temporal validity
         temporal = self._check_temporal_validity(ranked_evidence)
 
-        # Pass 5: Build citation chain
+        # Pass 5: Build citation chain (enriched with KG traversal)
         citation_chain = self._build_citation_chain(ranked_evidence, all_refs)
+        if graph_context:
+            citation_chain = self._enrich_citation_chain_with_graph(
+                citation_chain, graph_context,
+            )
 
         # Pass 6: Enrich with known law references
         applicable_laws = self._enrich_with_known_laws(ranked_evidence, intent)
 
+        # Pass 6.5: Enrich with KG entity info
+        if graph_context and graph_context.get("subgraph"):
+            applicable_laws = self._enrich_laws_with_graph(
+                applicable_laws, graph_context["subgraph"],
+            )
+
         # Pass 7: Generate analysis and conclusion
-        analysis = self._generate_analysis(query, ranked_evidence, intent, tax_code)
+        analysis = self._generate_analysis(
+            query, ranked_evidence, intent, tax_code,
+            graph_context=graph_context,
+        )
         conclusion = self._generate_conclusion(query, ranked_evidence, intent)
 
         # Pass 8: Identify caveats
@@ -264,17 +282,22 @@ class LegalResearchAgent:
         # Compute authority score
         authority_score = self._compute_authority_score(ranked_evidence)
 
-        # Compute confidence
+        # Compute confidence (boost if graph context available)
         confidence = self._compute_confidence(
             ranked_evidence, authority_score, len(citation_chain),
         )
+        if graph_context and graph_context.get("subgraph"):
+            # KG-backed research is more reliable
+            graph_boost = min(0.10, len(graph_context.get("traversal_path", [])) * 0.02)
+            confidence = min(0.98, confidence + graph_boost)
 
         latency = (time.perf_counter() - t0) * 1000.0
         logger.info(
             "[LegalAgent] Research completed: intent=%s, evidence=%d, "
-            "refs=%d, cross_refs=%d, conf=%.2f in %.0fms",
+            "refs=%d, cross_refs=%d, conf=%.2f, graph=%s in %.0fms",
             intent, len(ranked_evidence), len(all_refs),
-            len(cross_refs), confidence, latency,
+            len(cross_refs), confidence,
+            "yes" if graph_context else "no", latency,
         )
 
         return LegalOpinion(
@@ -462,6 +485,8 @@ class LegalResearchAgent:
         evidence: list[dict[str, Any]],
         intent: str,
         tax_code: str | None,
+        *,
+        graph_context: dict[str, Any] | None = None,
     ) -> str:
         """
         Generate structured legal analysis.
@@ -475,6 +500,19 @@ class LegalResearchAgent:
             f"### Phân tích pháp lý{entity_str}\n"
         )
 
+        # GraphRAG context banner
+        if graph_context and graph_context.get("subgraph"):
+            subgraph = graph_context["subgraph"]
+            n_nodes = len(subgraph.get("nodes", []))
+            n_edges = len(subgraph.get("edges", []))
+            depth = graph_context.get("expansion_depth", 0)
+            anchors = graph_context.get("anchor_entities", [])
+            parts.append(
+                f"**🔗 Phân tích đồ thị pháp lý:** Đã duyệt {n_nodes} thực thể, "
+                f"{n_edges} quan hệ qua {depth} bước mở rộng "
+                f"(khởi điểm: {', '.join(anchors[:3])})\n"
+            )
+
         # Legal basis
         known = self.TAX_LAW_REFERENCES.get(intent, {})
         if known.get("primary"):
@@ -487,6 +525,16 @@ class LegalResearchAgent:
             for article in known["key_articles"][:3]:
                 parts.append(f"- {article}")
 
+        # Graph-derived relations
+        if graph_context and graph_context.get("subgraph"):
+            relations_summary = self._summarize_graph_relations(
+                graph_context["subgraph"],
+            )
+            if relations_summary:
+                parts.append("\n**Chuỗi quan hệ pháp lý (Knowledge Graph):**")
+                for rel_line in relations_summary[:5]:
+                    parts.append(f"  ↳ {rel_line}")
+
         # Retrieved evidence
         if evidence:
             parts.append("\n**Trích dẫn từ hệ thống tri thức:**")
@@ -494,7 +542,8 @@ class LegalResearchAgent:
                 title = ev.get("title", "")
                 text = str(ev.get("text", ""))[:200]
                 score = float(ev.get("score") or 0)
-                parts.append(f"[{i}] **{title}** (điểm: {score:.2f})")
+                source_tag = " 🔗" if ev.get("_source") == "graphrag" else ""
+                parts.append(f"[{i}] **{title}**{source_tag} (điểm: {score:.2f})")
                 parts.append(f"  > {text}...")
 
         return "\n".join(parts)
@@ -599,3 +648,174 @@ class LegalResearchAgent:
         factors.append(min(1.0, citation_count / 5.0) * 0.20)
 
         return round(min(1.0, sum(factors)), 4)
+
+    # ─── Graph-Aware Research Helpers ──────────────────────────────────────
+
+    def _extract_graph_cross_refs(
+        self,
+        subgraph: dict[str, Any],
+    ) -> list[LegalCrossRef]:
+        """
+        Extract cross-references directly from the Knowledge Graph subgraph.
+        This is far more reliable than regex-only detection.
+        """
+        cross_refs: list[LegalCrossRef] = []
+        edges = subgraph.get("edges", [])
+        node_map = {n["id"]: n for n in subgraph.get("nodes", [])}
+
+        # Relation type → relationship mapping
+        rel_mapping = {
+            "implements": "interprets",
+            "interprets": "interprets",
+            "amends": "amends",
+            "supplements": "supplements",
+            "replaces": "replaces",
+            "cites": "cites",
+            "contains": "cites",
+            "requires": "cites",
+            "conflicts_with": "cites",
+            "related_to": "cites",
+        }
+
+        for edge in edges:
+            src_key = str(edge.get("source", ""))
+            tgt_key = str(edge.get("target", ""))
+            rel_type = str(edge.get("relation", "related_to"))
+
+            src_node = node_map.get(src_key)
+            tgt_node = node_map.get(tgt_key)
+            if not src_node or not tgt_node:
+                continue
+
+            source_ref = LegalReference(
+                ref_type="graph_entity",
+                ref_text=str(src_node.get("label", src_key)),
+                document_number=src_key,
+            )
+            target_ref = LegalReference(
+                ref_type="graph_entity",
+                ref_text=str(tgt_node.get("label", tgt_key)),
+                document_number=tgt_key,
+            )
+
+            relationship = rel_mapping.get(rel_type, "cites")
+            confidence = float(edge.get("weight", 0.8))
+
+            cross_refs.append(LegalCrossRef(
+                source_ref=source_ref,
+                target_ref=target_ref,
+                relationship=relationship,
+                confidence=confidence,
+            ))
+
+        return cross_refs
+
+    def _merge_cross_refs(
+        self,
+        regex_refs: list[LegalCrossRef],
+        graph_refs: list[LegalCrossRef],
+    ) -> list[LegalCrossRef]:
+        """Merge regex-detected and graph-detected cross-references, deduplicating."""
+        merged = list(regex_refs)
+        existing_pairs: set[tuple[str, str]] = set()
+
+        for ref in regex_refs:
+            key = (
+                str(ref.source_ref.document_number or ref.source_ref.ref_text[:50]),
+                str(ref.target_ref.document_number or ref.target_ref.ref_text[:50]),
+            )
+            existing_pairs.add(key)
+
+        for ref in graph_refs:
+            key = (
+                str(ref.source_ref.document_number or ref.source_ref.ref_text[:50]),
+                str(ref.target_ref.document_number or ref.target_ref.ref_text[:50]),
+            )
+            if key not in existing_pairs:
+                merged.append(ref)
+                existing_pairs.add(key)
+
+        return merged
+
+    def _enrich_citation_chain_with_graph(
+        self,
+        chain: list[str],
+        graph_context: dict[str, Any],
+    ) -> list[str]:
+        """Enrich the citation chain with traversal path from KG."""
+        subgraph = graph_context.get("subgraph", {})
+        nodes = subgraph.get("nodes", [])
+        seen = set(chain)
+
+        # Add anchor entities first (they are the starting points)
+        for node in nodes:
+            if node.get("is_anchor"):
+                label = str(node.get("label", ""))
+                if label and label not in seen:
+                    chain.insert(0, f"⚓ {label}")  # anchor marker
+                    seen.add(label)
+
+        # Then add traversal path entities
+        for path_key in graph_context.get("traversal_path", [])[:10]:
+            node = next((n for n in nodes if n["id"] == path_key), None)
+            if node:
+                label = str(node.get("label", path_key))
+                if label and label not in seen:
+                    chain.append(f"↳ {label}")  # traversal marker
+                    seen.add(label)
+
+        return chain[:15]  # Cap at 15
+
+    def _enrich_laws_with_graph(
+        self,
+        applicable_laws: list[dict[str, Any]],
+        subgraph: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        """Add entity info from KG to applicable laws."""
+        existing_refs = {law.get("reference", "") for law in applicable_laws}
+
+        for node in subgraph.get("nodes", []):
+            label = str(node.get("label", ""))
+            if label and label not in existing_refs and node.get("is_anchor"):
+                entity_type = str(node.get("type", "unknown"))
+                applicable_laws.append({
+                    "source": "knowledge_graph",
+                    "type": entity_type,
+                    "reference": label,
+                    "authority_rank": int(node.get("authority_rank", 50)),
+                    "authority": "high" if int(node.get("authority_rank", 50)) >= 80 else "medium",
+                })
+                existing_refs.add(label)
+
+        return applicable_laws
+
+    def _summarize_graph_relations(
+        self,
+        subgraph: dict[str, Any],
+    ) -> list[str]:
+        """Summarize graph relations into human-readable lines."""
+        edges = subgraph.get("edges", [])
+        node_map = {n["id"]: n.get("label", n["id"]) for n in subgraph.get("nodes", [])}
+
+        rel_labels_vi = {
+            "implements": "hướng dẫn thi hành",
+            "interprets": "giải thích",
+            "amends": "sửa đổi",
+            "supplements": "bổ sung",
+            "replaces": "thay thế",
+            "cites": "trích dẫn",
+            "contains": "bao gồm",
+            "requires": "yêu cầu tuân thủ",
+            "conflicts_with": "mâu thuẫn với",
+            "related_to": "liên quan đến",
+        }
+
+        lines: list[str] = []
+        for edge in edges[:8]:
+            src = node_map.get(edge["source"], edge["source"])
+            tgt = node_map.get(edge["target"], edge["target"])
+            rel = str(edge.get("relation", "related_to"))
+            rel_vi = rel_labels_vi.get(rel, rel)
+            lines.append(f"**{src}** → _{rel_vi}_ → **{tgt}**")
+
+        return lines

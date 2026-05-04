@@ -775,6 +775,11 @@ def analyze_invoice_document_upload(
             "text_preview": str(payload.get("full_text") or "")[:1200],
             "extracted_fields": fields,
             "tables": payload.get("tables") or [],
+            "tables_ai_detected": sum(
+                1 for t in (payload.get("tables") or [])
+                if t.get("extraction_method") == "table_transformer"
+            ),
+            "table_extraction_method": payload.get("table_extraction_method", "none"),
             "ocr_pages": payload.get("ocr_results") or [],
             "invoice_risk": _jsonable(asdict(risk)),
             "graph_linkage_candidates": linkage,

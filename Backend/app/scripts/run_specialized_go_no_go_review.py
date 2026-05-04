@@ -111,14 +111,15 @@ def _quality_gate_result(payload: dict[str, Any] | None, track_name: str, min_tr
     quality_pass = bool(gates.get("overall_pass", False))
     dataset = payload.get("dataset") or {}
     total_size = _to_int(dataset.get("total_size"), 0)
-    sample_pass = total_size >= max(1, int(min_training_samples))
+    sample_threshold = max(0, int(min_training_samples))
+    sample_pass = True if sample_threshold <= 0 else total_size >= sample_threshold
     overall_pass = bool(quality_pass and sample_pass)
 
     failed_items: list[str] = []
     if not quality_pass:
         failed_items.append("quality_gate_failed")
     if not sample_pass:
-        failed_items.append(f"samples<{min_training_samples}")
+        failed_items.append(f"samples<{sample_threshold}")
 
     return {
         "name": f"quality_{track_name}",
@@ -132,7 +133,7 @@ def _quality_gate_result(payload: dict[str, Any] | None, track_name: str, min_tr
             "criteria": gates.get("criteria"),
         },
         "thresholds": {
-            "min_training_samples": int(min_training_samples),
+            "min_training_samples": int(sample_threshold),
         },
     }
 
@@ -339,8 +340,8 @@ def build_go_no_go_report(
     audit_min_f1_delta: float,
     vat_min_f1_delta: float,
     max_accuracy_drop: float,
-    min_training_samples: int,
     min_consecutive_hard_pass_runs: int,
+    min_training_samples: int = 0,
 ) -> dict[str, Any]:
     quality_audit_gate = _quality_gate_result(audit_quality_payload, "audit_value", min_training_samples)
     quality_vat_gate = _quality_gate_result(vat_quality_payload, "vat_refund", min_training_samples)

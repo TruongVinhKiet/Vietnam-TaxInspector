@@ -255,15 +255,13 @@ class TaxAgentCrossEncoder:
             scores = self._cross_encoder.predict(batch)
             all_scores.extend(scores.tolist() if hasattr(scores, 'tolist') else list(scores))
 
-        # Normalize scores to [0, 1]
-        min_s = min(all_scores) if all_scores else 0.0
-        max_s = max(all_scores) if all_scores else 1.0
-        range_s = max_s - min_s if max_s > min_s else 1.0
-
         pref = set(preferred_doc_types or [])
 
         for i, c in enumerate(candidates):
-            base_score = (all_scores[i] - min_s) / range_s
+            # Apply sigmoid to raw logits from cross-encoder to get absolute probability
+            raw_score = all_scores[i]
+            base_score = 1.0 / (1.0 + np.exp(-raw_score))
+            
             # Small bonus for preferred doc types
             doc_bonus = 0.02 if (pref and c.doc_type in pref) else 0.0
             c.rerank_score = float(base_score + doc_bonus)

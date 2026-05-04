@@ -87,6 +87,12 @@ MODE_TOOL_PROFILES: dict[str, dict[str, Any]] = {
         "sub_agents": ["legal"],
         "label": "🌐 Mô phỏng Vĩ mô",
     },
+    "legal": {
+        "required_tools": ["knowledge_search", "company_risk_lookup"],
+        "optional_tools": ["nlp_red_flag_scan"],
+        "sub_agents": ["legal"],
+        "label": "⚖️ Tư vấn Pháp lý",
+    },
     "full": {
         "required_tools": None,  # Use all tools from planner
         "optional_tools": [],
@@ -126,9 +132,12 @@ class OrchestratorResponse:
     latency_breakdown: dict[str, float]
     tool_results: dict[str, dict[str, Any]]
     synthesis_tier: str
+    verification: dict[str, Any] = field(default_factory=dict)
+    clarification_needed: bool = False
+    clarification_questions: list[str] = field(default_factory=list)
     # Full traces for audit
-    policy_traces: list[dict[str, Any]]
-    plan_steps: list[dict[str, Any]]
+    policy_traces: list[dict[str, Any]] = field(default_factory=list)
+    plan_steps: list[dict[str, Any]] = field(default_factory=list)
     # Chart-ready visualization data for frontend
     visualization_data: dict[str, Any] = field(default_factory=dict)
     # Model mode used
@@ -306,6 +315,9 @@ class TaxAgentOrchestrator:
             latency_breakdown=done_payload.get("latency_breakdown", {}),
             tool_results=done_payload.get("tool_results", {}),
             synthesis_tier=done_payload.get("synthesis_tier", "template"),
+            verification=done_payload.get("verification", {}),
+            clarification_needed=bool(done_payload.get("clarification_needed", False)),
+            clarification_questions=done_payload.get("clarification_questions", []),
             policy_traces=done_payload.get("policy_traces", []),
             plan_steps=done_payload.get("plan_steps", []),
             visualization_data=done_payload.get("visualization_data", {}),
@@ -679,17 +691,23 @@ class TaxAgentOrchestrator:
         sub_agent_analysis = {}
 
         try:
-            ks_hits = all_tool_results.get("knowledge_search", {}).get("hits", [])
+            ks_result = all_tool_results.get("knowledge_search", {})
+            ks_hits = ks_result.get("hits", [])
+            ks_graph_context = ks_result.get("graph_context")  # GraphRAG subgraph
             if ks_hits and "legal" in allowed_sub_agents:
-                yield {"event": "sub_agent", "data": {"agent": "legal", "status": "running", "detail": "Phân tích pháp lý..."}}
+                graphrag_tag = " (GraphRAG)" if ks_graph_context else ""
+                yield {"event": "sub_agent", "data": {"agent": "legal", "status": "running", "detail": f"Phân tích pháp lý{graphrag_tag}..."}}
                 legal_opinion = self._legal_agent.research(
-                    query=message, retrieval_results=ks_hits, intent=intent, tax_code=context.active_tax_code,
+                    query=message, retrieval_results=ks_hits, intent=intent,
+                    tax_code=context.active_tax_code,
+                    graph_context=ks_graph_context,
                 )
                 sub_agent_analysis["legal_research"] = {
                     "analysis": legal_opinion.analysis, "conclusion": legal_opinion.conclusion,
                     "citation_chain": legal_opinion.citation_chain[:5], "authority_score": legal_opinion.authority_score,
                     "confidence": legal_opinion.confidence, "caveats": legal_opinion.caveats,
                     "applicable_laws": legal_opinion.applicable_laws[:5],
+                    "graph_enhanced": bool(ks_graph_context),
                 }
                 yield {"event": "sub_agent", "data": {"agent": "legal", "status": "done"}}
 
@@ -739,6 +757,14 @@ class TaxAgentOrchestrator:
             except Exception as exc:
                 logger.warning("[Orchestrator:stream] Debate error: %s", exc)
 
+        legal_review = self._legal_contradiction_review(all_tool_results)
+        if legal_review.get("disagreements"):
+            debate_result_dict = self._merge_legal_review_into_debate(
+                debate_result_dict,
+                legal_review,
+            )
+            yield {"event": "debate", "data": debate_result_dict}
+
         # ─── Step 5: Synthesis ──────────────────────────────────────────
         yield {"event": "thinking", "data": {"step": "synthesis", "detail": "Đang tổng hợp câu trả lời..."}}
         t0 = time.perf_counter()
@@ -748,7 +774,7 @@ class TaxAgentOrchestrator:
             enriched_tool_results[f"_sub_agent_{agent_name}"] = analysis
 
         synthesis_result = self._synthesizer.synthesize(
-            query=message, intent=intent, tool_results=all_tool_results,
+            query=message, intent=intent, tool_results=enriched_tool_results,
             reasoning_trace=plan.reasoning, tax_code=context.active_tax_code,
         )
         answer = self._synthesizer.format_response_text(synthesis_result)
@@ -823,6 +849,12 @@ class TaxAgentOrchestrator:
                 citations.append({
                     "chunk_key": ev.metadata.get("chunk_key", ""),
                     "title": ev.title, "score": round(ev.score, 4), "citation_key": ev.citation_key,
+                    "citation_spans": ev.metadata.get("citation_spans", []),
+                    "authority_path": ev.metadata.get("authority_path", []),
+                    "effective_status": ev.metadata.get("effective_status", {}),
+                    "official_letter_scope": ev.metadata.get("official_letter_scope", {}),
+                    "text": ev.content,
+                    "full_text": ev.metadata.get("full_text", ""),
                 })
 
         db.execute(sql_text("""
@@ -855,6 +887,8 @@ class TaxAgentOrchestrator:
                 },
                 "react": react_reflections,
                 "debate": debate_result_dict,
+                "legal_review": legal_review,
+                "synthesis_verification": synthesis_result.verification,
                 "compliance": {
                     "decision": compliance.overall_decision.value,
                     "warnings": compliance_warnings,
@@ -896,6 +930,26 @@ class TaxAgentOrchestrator:
             debate_result=debate_result_dict,
             final_escalate=final_escalate,
         )
+        self._persist_agent_workspace(
+            db,
+            session_id=session_id,
+            turn_id=assistant_turn_id,
+            query_text=message,
+            intent=intent,
+            tool_results=all_tool_results,
+            synthesis_result=synthesis_result,
+            react_reflections=react_reflections,
+            debate_result=debate_result_dict,
+            legal_review=legal_review,
+            final_escalate=final_escalate,
+            escalation_domain=final_escalation_domain,
+        )
+        self._persist_legal_claim_verifications(
+            db,
+            session_id=session_id,
+            turn_id=assistant_turn_id,
+            synthesis_result=synthesis_result,
+        )
 
         self._memory.persist_entities(session_id, context.active_entities)
         db.commit()
@@ -906,6 +960,8 @@ class TaxAgentOrchestrator:
         viz_data = self._build_visualization_data(all_tool_results, sub_agent_analysis, plan, latency_breakdown)
         if debate_result_dict:
             viz_data["agent_debate"] = debate_result_dict
+        if legal_review.get("disagreements"):
+            viz_data["legal_review"] = legal_review
         if viz_data:
             yield {"event": "viz_data", "data": viz_data}
 
@@ -935,6 +991,9 @@ class TaxAgentOrchestrator:
                 latency_breakdown=latency_breakdown,
                 tool_results=all_tool_results,
                 synthesis_tier=synthesis_result.synthesis_tier,
+                verification=synthesis_result.verification,
+                clarification_needed=synthesis_result.clarification_needed,
+                clarification_questions=synthesis_result.clarification_questions,
                 policy_traces=[],
                 plan_steps=[{"tool": s.tool_name, "description": s.description, "optional": getattr(s, 'optional', False)} for s in plan.steps],
                 visualization_data=viz_data,
@@ -945,6 +1004,39 @@ class TaxAgentOrchestrator:
             logger.error(f"[Orchestrator:stream] Telemetry logging failed: {e}")
 
         retrieval_context = all_tool_results.get("knowledge_search", {}).get("hits", [])
+        
+        # Build Legal Workspace
+        ks = all_tool_results.get("knowledge_search") or {}
+        facts = [f"Tra cứu và phân tích {len(ks.get('hits', []) or [])} tài liệu."]
+        assumptions = []
+        if legal_review.get("disagreements"):
+            assumptions.append("Cảnh báo: Có rủi ro xung đột hoặc văn bản hết hiệu lực.")
+        
+        open_questions = list(getattr(synthesis_result, "clarification_questions", []) or [])
+        verification = getattr(synthesis_result, "verification", {}) or {}
+        for claim in verification.get("unsupported_claims", [])[:5]:
+            open_questions.append(f"Cần xác minh: {claim.get('claim', '')[:100]}")
+            
+        verifications = []
+        for item in verification.get("verified_claims", []) or []:
+            verifications.append({"claim": item.get("claim"), "is_verified": True})
+        for item in verification.get("unsupported_claims", []) or []:
+            verifications.append({"claim": item.get("claim"), "is_verified": False})
+            
+        escalations = []
+        if final_escalate:
+            escalations.append(f"Cần chuyên gia xem xét (Mức: {final_escalation_domain})")
+            if legal_review.get("disagreements"):
+                escalations.append("Xung đột pháp lý chưa giải quyết triệt để.")
+
+        legal_workspace = {
+            "facts": facts,
+            "assumptions": assumptions,
+            "open_questions": open_questions,
+            "verifications": verifications,
+            "escalations": escalations,
+        }
+
         yield {"event": "done", "data": {
             "session_id": session_id,
             "intent": intent,
@@ -966,6 +1058,9 @@ class TaxAgentOrchestrator:
             "latency_ms": round(total_latency, 1),
             "latency_breakdown": {k: round(v, 1) for k, v in latency_breakdown.items()},
             "synthesis_tier": synthesis_result.synthesis_tier,
+            "verification": synthesis_result.verification,
+            "clarification_needed": synthesis_result.clarification_needed,
+            "clarification_questions": synthesis_result.clarification_questions,
             "tool_results": all_tool_results,
             "policy_traces": [
                 {
@@ -984,6 +1079,8 @@ class TaxAgentOrchestrator:
             "evidence_contract": getattr(plan, "evidence_contract", {}),
             "react_reflections": react_reflections,
             "debate": debate_result_dict,
+            "legal_review": legal_review,
+            "legal_workspace": legal_workspace,
             "plan_steps": [
                 {
                     "tool": s.tool_name,
@@ -995,6 +1092,99 @@ class TaxAgentOrchestrator:
                 for s in plan.steps
             ],
         }}
+
+
+    def _legal_contradiction_review(self, tool_results: dict[str, Any]) -> dict[str, Any]:
+        """Turn GraphRAG legal quality signals into debate/adjudication inputs."""
+        ks = tool_results.get("knowledge_search") or {}
+        graph_context = ks.get("graph_context") or {}
+        disagreements: list[dict[str, Any]] = []
+
+        effective = graph_context.get("effective_status") or {}
+        if effective.get("has_non_usable"):
+            disagreements.append({
+                "topic": "legal_effective_status",
+                "severity": "major",
+                "stance_a": "Use only current, applicable legal documents.",
+                "stance_b": "Retrieved subgraph contains expired/repealed/pending documents.",
+                "evidence": effective,
+                "recommendation": "Retry GraphRAG with effective-date query and escalate if unresolved.",
+            })
+
+        scope = graph_context.get("official_letter_scope") or {}
+        if scope.get("warnings"):
+            disagreements.append({
+                "topic": "official_letter_scope",
+                "severity": "minor",
+                "stance_a": "Official letters can support interpretation.",
+                "stance_b": "Official letters should not be treated as general normative rules.",
+                "evidence": scope,
+                "recommendation": "State the scope limitation and prefer law/decree/circular when conflicting.",
+            })
+
+        authority_path = graph_context.get("authority_path") or []
+        has_official_letter = any(
+            str(item.get("entity_type", "")).lower() == "official_letter"
+            for item in authority_path
+        )
+        has_higher_authority = any(
+            str(item.get("entity_type", "")).lower() in {"law", "decree", "circular"}
+            for item in authority_path
+        )
+        if has_official_letter and has_higher_authority:
+            disagreements.append({
+                "topic": "authority_priority",
+                "severity": "minor",
+                "stance_a": "Higher-authority documents define the governing rule.",
+                "stance_b": "Official-letter evidence is present and may be case-specific.",
+                "evidence": {"authority_path": authority_path[:6]},
+                "recommendation": "Use official letter as interpretive support only.",
+            })
+
+        penalty = 0.0
+        for item in disagreements:
+            penalty += 0.18 if item.get("severity") == "major" else 0.07
+
+        return {
+            "status": "review" if disagreements else "clear",
+            "disagreements": disagreements,
+            "confidence_penalty": round(min(0.35, penalty), 4),
+            "summary": (
+                "Legal GraphRAG review found authority/effective-date concerns."
+                if disagreements else
+                "Legal GraphRAG review found no authority conflict."
+            ),
+        }
+
+    def _merge_legal_review_into_debate(
+        self,
+        debate_result: dict[str, Any] | None,
+        legal_review: dict[str, Any],
+    ) -> dict[str, Any]:
+        disagreements = list(legal_review.get("disagreements") or [])
+        if not debate_result:
+            consensus = round(max(0.45, 0.86 - float(legal_review.get("confidence_penalty", 0.0))), 4)
+            return {
+                "consensus_score": consensus,
+                "consensus_label": "legal_review_required" if consensus < 0.7 else "legal_grounded",
+                "consensus_stance": "Prefer current higher-authority law; limit official letters by scope.",
+                "disagreements": disagreements,
+                "recommendation": "Verify legal effect, authority priority, and citation spans before final action.",
+                "summary": legal_review.get("summary"),
+                "source": "legal_graphrag_review",
+            }
+
+        merged = dict(debate_result)
+        merged_disagreements = list(merged.get("disagreements") or [])
+        merged_disagreements.extend(disagreements)
+        penalty = float(legal_review.get("confidence_penalty", 0.0) or 0.0)
+        consensus = float(merged.get("consensus_score", 1.0) or 1.0)
+        merged["consensus_score"] = round(max(0.05, consensus - penalty), 4)
+        merged["disagreements"] = merged_disagreements
+        merged["legal_review"] = legal_review
+        if legal_review.get("summary"):
+            merged["summary"] = f"{merged.get('summary', '')} {legal_review['summary']}".strip()
+        return merged
 
 
     def _build_react_tool_requests(
@@ -1145,6 +1335,8 @@ class TaxAgentOrchestrator:
                     "confidence": synthesis_result.confidence,
                     "tier": synthesis_result.synthesis_tier,
                     "evidence_count": len(synthesis_result.evidence),
+                    "verification": getattr(synthesis_result, "verification", {}),
+                    "clarification_needed": getattr(synthesis_result, "clarification_needed", False),
                 }, default=str),
                 "compliance_json": json.dumps({
                     "decision": compliance.overall_decision.value,
@@ -1219,6 +1411,149 @@ class TaxAgentOrchestrator:
                     pass
             logger.debug("[Orchestrator] debate adjudication persist skipped: %s", exc)
 
+    def _persist_agent_workspace(
+        self,
+        db,
+        *,
+        session_id: str,
+        turn_id: int,
+        query_text: str,
+        intent: str,
+        tool_results: dict[str, Any],
+        synthesis_result,
+        react_reflections: list[dict[str, Any]],
+        debate_result: dict[str, Any] | None,
+        legal_review: dict[str, Any],
+        final_escalate: bool,
+        escalation_domain: str,
+    ) -> None:
+        nested = None
+        try:
+            if hasattr(db, "begin_nested"):
+                nested = db.begin_nested()
+            ks = tool_results.get("knowledge_search") or {}
+            facts = {
+                "query": query_text,
+                "intent": intent,
+                "tools_used": list(tool_results.keys()),
+                "retrieval_hits": len(ks.get("hits", []) or []),
+                "graph_context": ks.get("graph_context") or {},
+            }
+            assumptions = []
+            if legal_review.get("disagreements"):
+                assumptions.append({
+                    "type": "legal_quality",
+                    "detail": "Authority/effective-date/scope issues may affect the answer.",
+                    "review": legal_review,
+                })
+            open_questions = list(getattr(synthesis_result, "clarification_questions", []) or [])
+            verification = getattr(synthesis_result, "verification", {}) or {}
+            for claim in verification.get("unsupported_claims", [])[:6]:
+                open_questions.append(f"Verify unsupported claim: {claim.get('claim', '')[:180]}")
+            citations = []
+            for ev in getattr(synthesis_result, "evidence", [])[:8]:
+                if getattr(ev, "source_type", "") == "legal":
+                    citations.append({
+                        "citation_key": getattr(ev, "citation_key", ""),
+                        "title": getattr(ev, "title", ""),
+                        "score": getattr(ev, "score", 0.0),
+                        "metadata": getattr(ev, "metadata", {}) or {},
+                    })
+            escalation_reason = None
+            if final_escalate:
+                escalation_reason = (
+                    f"domain={escalation_domain}; verification={verification.get('status')}; "
+                    f"legal_review={legal_review.get('status')}; "
+                    f"debate={debate_result.get('consensus_score') if debate_result else 'none'}"
+                )
+            db.execute(sql_text("""
+                INSERT INTO agent_case_workspace
+                (session_id, turn_id, facts_json, assumptions_json, open_questions_json,
+                 citations_json, claim_verification_json, escalation_reason)
+                VALUES
+                (:session_id, :turn_id, CAST(:facts_json AS jsonb),
+                 CAST(:assumptions_json AS jsonb), CAST(:open_questions_json AS jsonb),
+                 CAST(:citations_json AS jsonb), CAST(:claim_verification_json AS jsonb),
+                 :escalation_reason)
+            """), {
+                "session_id": session_id,
+                "turn_id": turn_id,
+                "facts_json": json.dumps(facts, ensure_ascii=False, default=str),
+                "assumptions_json": json.dumps(assumptions, ensure_ascii=False, default=str),
+                "open_questions_json": json.dumps(open_questions, ensure_ascii=False, default=str),
+                "citations_json": json.dumps(citations, ensure_ascii=False, default=str),
+                "claim_verification_json": json.dumps({
+                    "verification": verification,
+                    "react": react_reflections,
+                    "debate": debate_result,
+                    "legal_review": legal_review,
+                }, ensure_ascii=False, default=str),
+                "escalation_reason": escalation_reason,
+            })
+            if nested is not None:
+                nested.commit()
+        except Exception as exc:
+            if nested is not None:
+                try:
+                    nested.rollback()
+                except Exception:
+                    pass
+            logger.debug("[Orchestrator] agent workspace persist skipped: %s", exc)
+
+    def _persist_legal_claim_verifications(
+        self,
+        db,
+        *,
+        session_id: str,
+        turn_id: int,
+        synthesis_result,
+    ) -> None:
+        verification = getattr(synthesis_result, "verification", {}) or {}
+        claims = []
+        for item in verification.get("verified_claims", []) or []:
+            claims.append((item, "supported"))
+        for item in verification.get("unsupported_claims", []) or []:
+            claims.append((item, "unsupported"))
+        if not claims:
+            return
+
+        nested = None
+        try:
+            if hasattr(db, "begin_nested"):
+                nested = db.begin_nested()
+            for item, status in claims[:32]:
+                db.execute(sql_text("""
+                    INSERT INTO legal_claim_verifications
+                    (session_id, turn_id, claim_text, support_score, evidence_ref,
+                     status, metadata_json)
+                    VALUES
+                    (:session_id, :turn_id, :claim_text, :support_score, :evidence_ref,
+                     :status, CAST(:metadata_json AS jsonb))
+                """), {
+                    "session_id": session_id,
+                    "turn_id": turn_id,
+                    "claim_text": str(item.get("claim", ""))[:1000],
+                    "support_score": float(item.get("support_score", 0.0) or 0.0),
+                    "evidence_ref": (
+                        None if item.get("evidence_index") in (None, -1)
+                        else str(item.get("evidence_index"))
+                    ),
+                    "status": status,
+                    "metadata_json": json.dumps({
+                        "verifier": "legal-faithfulness-v1",
+                        "synthesis_tier": getattr(synthesis_result, "synthesis_tier", ""),
+                    }, ensure_ascii=False, default=str),
+                })
+            if nested is not None:
+                nested.commit()
+        except Exception as exc:
+            if nested is not None:
+                try:
+                    nested.rollback()
+                except Exception:
+                    pass
+            logger.debug("[Orchestrator] legal claim verification persist skipped: %s", exc)
+
     def _enrich_with_sub_agents(
         self,
         answer: str,
@@ -1272,12 +1607,44 @@ class TaxAgentOrchestrator:
     # ─── Helpers ──────────────────────────────────────────────────────────
 
     INTENT_RULES = {
-        "vat_refund_risk": ["hoan thue", "vat", "ho so hoan", "refund", "đề nghị hoàn"],
-        "invoice_risk": ["hoa don", "invoice", "xuat hoa don", "mua vao", "ban ra"],
-        "delinquency": ["no dong", "cham nop", "delinquency", "qua han", "thu no"],
-        "osint_ownership": ["offshore", "so huu", "ubo", "phoenix", "cong ty me"],
-        "transfer_pricing": ["chuyen gia", "transfer pricing", "gia giao dich lien ket"],
-        "audit_selection": ["thanh tra", "audit", "kiem tra", "xep hang ho so"],
+        "vat_refund_risk": [
+            "hoan thue", "vat", "ho so hoan", "refund", "đề nghị hoàn",
+            "hoàn thuế", "thuế gtgt", "thuế giá trị gia tăng", "giảm thuế",
+            "thuế suất 8", "thuế suất 10", "khấu trừ", "đầu vào", "đầu ra",
+            "nghị định 72", "nd 72", "72/2024", "thuế suất", "phương pháp khấu trừ",
+            "tỷ lệ % trên doanh thu",
+        ],
+        "invoice_risk": [
+            "hoa don", "invoice", "xuat hoa don", "mua vao", "ban ra",
+            "hóa đơn", "hóa đơn điện tử", "máy tính tiền", "xuất hóa đơn",
+            "hóa đơn không hợp pháp", "hóa đơn bất hợp pháp", "hóa đơn giả",
+            "thông tư 78", "nghị định 123",
+        ],
+        "delinquency": [
+            "no dong", "cham nop", "delinquency", "qua han", "thu no",
+            "nợ đọng", "chậm nộp", "quá hạn", "thu nợ", "cưỡng chế",
+            "tiền chậm nộp", "tiền phạt", "nhắc nợ",
+        ],
+        "osint_ownership": [
+            "offshore", "so huu", "ubo", "phoenix", "cong ty me",
+            "sở hữu", "công ty mẹ", "cấu trúc sở hữu", "người hưởng lợi",
+            "pháp nhân nước ngoài", "singapore", "bvi", "cayman",
+        ],
+        "transfer_pricing": [
+            "chuyen gia", "transfer pricing", "gia giao dich lien ket", "mispricing",
+            "chuyển giá", "giá giao dịch liên kết", "giao dịch liên kết",
+            "nghị định 132", "bên liên kết", "arm's length",
+        ],
+        "audit_selection": [
+            "thanh tra", "audit", "kiem tra", "xep hang ho so",
+            "kiểm tra", "xếp hạng hồ sơ", "chọn thanh tra",
+        ],
+        "general_tax_query": [
+            "thuế tndn", "thuế thu nhập doanh nghiệp", "ưu đãi thuế",
+            "miễn thuế", "đầu tư mở rộng", "dự án đầu tư",
+            "khu công nghiệp", "luật thuế", "quy định", "chính sách thuế",
+            "quản lý thuế", "công văn",
+        ],
     }
 
     def _rule_based_intent(self, message: str) -> tuple[str, float]:
@@ -1395,6 +1762,16 @@ class TaxAgentOrchestrator:
         if models_used:
             viz["model_comparison"] = models_used
 
+        # 6.5 OCR Document Extraction
+        ocr_result = tool_results.get("_ocr_document_results")
+        if ocr_result and isinstance(ocr_result, dict):
+            viz["ocr_extraction"] = {
+                "tables": ocr_result.get("tables", []),
+                "extracted_fields": ocr_result.get("extracted_fields", {}),
+                "table_extraction_method": ocr_result.get("table_extraction_method", "none"),
+                "confidence": ocr_result.get("confidence", 0),
+            }
+
         # 7. Tool Execution Timeline
         timeline = []
         for step in plan.steps:
@@ -1482,6 +1859,24 @@ class TaxAgentOrchestrator:
                 viz.update(xai_data)
         except Exception as exc:
             logger.debug("[Orchestrator] XAI skipped: %s", exc)
+
+        # 12. Knowledge Graph Citation Subgraph — from GraphRAG
+        ks_result = tool_results.get("knowledge_search", {})
+        graph_context = ks_result.get("graph_context")
+        if graph_context and isinstance(graph_context, dict):
+            subgraph = graph_context.get("subgraph", {})
+            if subgraph.get("nodes"):
+                viz["knowledge_graph"] = {
+                    "nodes": subgraph.get("nodes", []),
+                    "edges": subgraph.get("edges", []),
+                    "anchor_entities": graph_context.get("anchor_entities", []),
+                    "traversal_path": graph_context.get("traversal_path", []),
+                    "expansion_depth": graph_context.get("expansion_depth", 0),
+                    "total_entities": graph_context.get("total_entities", 0),
+                    "total_relations": graph_context.get("total_relations", 0),
+                    "latency_ms": graph_context.get("latency_ms", 0),
+                    "retrieval_tier": ks_result.get("retrieval_tier", ""),
+                }
 
         return viz
 

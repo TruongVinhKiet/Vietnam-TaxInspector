@@ -197,7 +197,38 @@ async def ocr_upload(file: UploadFile = File(...), db: Session = Depends(get_db)
         logger.exception("OCR upload failed")
         return JSONResponse(status_code=500, content={"error": str(exc), "filename": file.filename})
 
-    # Trong production sẽ gọi PaddleOCR engine thật
+
+@router.get("/ocr/engine-status")
+def ocr_engine_status():
+    """Trạng thái của OCR engine và Table Transformer AI."""
+    try:
+        from ml_engine.document_ocr_engine import get_ocr_engine
+
+        engine = get_ocr_engine()
+        ocr_backend = engine._ocr.load()
+
+        tatr_available = engine._table_transformer.available
+        tatr_loaded = engine._table_transformer._det_model is not None
+
+        return {
+            "ocr_backend": ocr_backend,
+            "table_transformer": {
+                "available": tatr_available,
+                "loaded": tatr_loaded,
+                "detection_model": engine._table_transformer.DETECTION_MODEL,
+                "structure_model": engine._table_transformer.STRUCTURE_MODEL,
+                "detection_threshold": engine._table_transformer.DETECTION_THRESHOLD,
+                "structure_threshold": engine._table_transformer.STRUCTURE_THRESHOLD,
+            },
+            "fallback_chain": [
+                "table_transformer (AI)",
+                "pdfplumber (text-based PDF)",
+                "heuristic (OCR box alignment)",
+            ],
+        }
+    except Exception as exc:
+        return {"ocr_backend": "unknown", "error": str(exc)}
+
 # ═══════════════════════════════════════════
 #  3. Revenue Forecast
 # ═══════════════════════════════════════════

@@ -150,6 +150,9 @@ def _has_offshore_table(db: Session) -> bool:
         )).scalar()
         return bool(result)
     except Exception:
+        rollback = getattr(db, "rollback", None)
+        if callable(rollback):
+            rollback()
         return False
 
 
@@ -290,7 +293,13 @@ def _predict_osint_risk(tax_code: str, db: Session) -> Optional[Dict[str, Any]]:
     model, config = _load_osint_artifacts()
     if model is None:
         return None
-    features = _build_osint_feature_payload(tax_code, db)
+    try:
+        features = _build_osint_feature_payload(tax_code, db)
+    except Exception:
+        rollback = getattr(db, "rollback", None)
+        if callable(rollback):
+            rollback()
+        return None
     if not features:
         return None
     ordered = [float(features.get(name, 0.0)) for name in OSINT_FEATURE_NAMES]

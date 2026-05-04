@@ -71,8 +71,13 @@
                 title="Telemetry Dashboard">
                 <i class="fa-solid fa-chart-pie"></i>
             </a>
+            <button id="lwToggleBtn"
+                class="hidden ml-2 px-3 h-9 rounded-full bg-teal-50 border border-teal-200 hover:bg-teal-100 flex items-center justify-center text-teal-600 transition-colors font-medium text-xs"
+                title="Không gian Pháp lý">
+                <i class="fa-solid fa-briefcase mr-1.5"></i> Pháp lý
+            </button>
             <button id="themeSettingsBtn"
-                class="w-9 h-9 rounded-full bg-slate-100 hover:bg-slate-200 flex items-center justify-center text-slate-600 transition-colors"
+                class="ml-2 w-9 h-9 rounded-full bg-slate-100 hover:bg-slate-200 flex items-center justify-center text-slate-600 transition-colors"
                 title="Trang phục AI">
                 <i class="fa-solid fa-shirt"></i>
             </button>
@@ -86,10 +91,10 @@
             <!-- Chat Feed -->
             <div id="chatFeed" class="flex-1 overflow-y-auto px-4 pb-32 space-y-6 scroll-smooth">
                 <!-- Welcome Message -->
-                <div class="flex flex-col items-center justify-center h-full text-center space-y-4 opacity-50 transition-opacity"
+                <div class="flex flex-col items-center justify-center h-full text-center space-y-4 transition-opacity"
                     id="emptyState">
                     <img src="../assets/img/ai_avatar.png" id="emptyStateAvatar" alt="AI Agent"
-                        class="w-32 h-32 rounded-full shadow-xl opacity-80 mix-blend-multiply">
+                        class="w-32 h-32 rounded-full shadow-xl">
                     <h2 class="text-2xl font-bold text-slate-700">Xin chào! Tôi có thể giúp gì cho ngài?</h2>
                     <p class="text-slate-500 max-w-md">Tôi là Hệ thống Multi-Agent. Chọn chế độ phân tích, nhập MST/tên
                         DN, hoặc upload file CSV.</p>
@@ -115,20 +120,73 @@
             </div>
 
         </div>
+    </main>
 
-        <!-- Background Audio Visualizer Overlay (hidden mostly, active during mic voice) -->
-        <div id="audioVisualizer"
-            class="pointer-events-none absolute inset-0 flex items-center justify-center opacity-0 transition-opacity duration-300 z-0">
-            <!-- Render dynamic waves here -->
-            <div class="flex items-center gap-2">
-                <div class="wave wave-1"></div>
-                <div class="wave wave-2"></div>
-                <div class="wave wave-3"></div>
-                <div class="wave wave-4"></div>
-                <div class="wave wave-5"></div>
+    <!-- Legal Workspace Panel (Fixed overlay, toggled by button) — sibling of main, never a flex child -->
+    <div id="legalWorkspacePanel"
+        class="hidden flex fixed right-4 top-20 bottom-32 w-[360px] flex-col bg-white/95 backdrop-blur-xl border border-sky-200 rounded-2xl shadow-[0_20px_50px_rgba(14,165,233,0.15)] z-[100] transition-all duration-300 transform translate-x-full opacity-0">
+        <div
+            class="px-5 py-4 bg-gradient-to-r from-slate-50 to-white border-b border-slate-200 flex justify-between items-center rounded-t-2xl">
+            <h3 class="font-bold text-slate-700 text-sm flex items-center"><i
+                    class="fa-solid fa-briefcase text-teal-500 mr-2 text-lg"></i>Không gian Pháp lý</h3>
+            <button id="closeLegalWorkspaceBtn" class="text-slate-400 hover:text-red-500"><i
+                    class="fa-solid fa-xmark"></i></button>
+        </div>
+        <div class="flex-1 min-h-0 overflow-y-auto p-4 space-y-4 text-xs font-sans">
+            <!-- Facts -->
+            <div>
+                <h4 class="font-bold text-slate-600 mb-1 border-b pb-1">Sự thật (Facts)</h4>
+                <ul id="lw-facts" class="list-disc pl-4 text-slate-500 space-y-1">
+                    <li class="italic text-slate-400 list-none -ml-4">Chưa có sự kiện</li>
+                </ul>
+            </div>
+            <!-- Assumptions -->
+            <div>
+                <h4 class="font-bold text-slate-600 mb-1 border-b pb-1">Giả định (Assumptions)</h4>
+                <ul id="lw-assumptions" class="list-disc pl-4 text-slate-500 space-y-1">
+                    <li class="italic text-slate-400 list-none -ml-4">Chưa có giả định</li>
+                </ul>
+            </div>
+            <!-- Open Questions -->
+            <div>
+                <h4 class="font-bold text-slate-600 mb-1 border-b pb-1">Câu hỏi mở (Open Questions)</h4>
+                <ul id="lw-open-questions" class="list-disc pl-4 text-slate-500 space-y-1">
+                    <li class="italic text-slate-400 list-none -ml-4">Chưa có câu hỏi</li>
+                </ul>
+            </div>
+            <!-- Verifications -->
+            <div>
+                <h4 class="font-bold text-slate-600 mb-1 border-b pb-1">Xác minh (Verifications)</h4>
+                <div id="lw-verifications" class="space-y-2">
+                    <div class="italic text-slate-400">Chưa có xác minh</div>
+                </div>
+            </div>
+            <!-- Source Documents -->
+            <div>
+                <h4 class="font-bold text-slate-600 mb-1 border-b pb-1">Danh mục văn bản tra cứu</h4>
+                <div id="lw-documents" class="space-y-2">
+                    <div class="italic text-slate-400 text-[10px]">Đang chờ dữ liệu tra cứu...</div>
+                </div>
+            </div>
+            <!-- Escalations -->
+            <div id="lw-escalations-container" class="hidden">
+                <h4 class="font-bold text-red-600 mb-1 border-b border-red-100 pb-1">Cảnh báo (Escalations)</h4>
+                <ul id="lw-escalations" class="list-disc pl-4 text-red-600 font-semibold space-y-1"></ul>
             </div>
         </div>
-    </main>
+    </div>
+
+    <!-- Background Audio Visualizer Overlay -->
+    <div id="audioVisualizer"
+        class="pointer-events-none fixed inset-0 flex items-center justify-center opacity-0 transition-opacity duration-300 z-0">
+        <div class="flex items-center gap-2">
+            <div class="wave wave-1"></div>
+            <div class="wave wave-2"></div>
+            <div class="wave wave-3"></div>
+            <div class="wave wave-4"></div>
+            <div class="wave wave-5"></div>
+        </div>
+    </div>
 
     <!-- File Drop Overlay -->
     <div id="fileDropOverlay"
@@ -144,7 +202,7 @@
     <input type="file" id="fileUploadInput" accept=".csv, .png, .jpg, .jpeg, .pdf" class="hidden">
 
     <!-- Input Bar Fixed at Bottom -->
-    <div class="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-slate-50 via-slate-50 to-transparent p-6 z-20">
+    <div class="fixed bottom-0 left-0 right-0 bg-gradient-to-t from-slate-50 via-slate-50 to-transparent p-6 z-20">
         <!-- File preview chip (hidden by default) -->
         <div id="fileChipContainer" class="max-w-4xl mx-auto mb-2 hidden">
             <div id="fileChipWrapper"
@@ -188,6 +246,16 @@
                                 <p class="text-xs text-slate-400">Tất cả 11+ công cụ AI</p>
                             </div>
                             <span class="text-xs font-bold text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded">ALL</span>
+                        </div>
+                        <div class="model-option px-3 py-2.5 rounded-lg hover:bg-teal-50 cursor-pointer flex items-center gap-3 transition-colors"
+                            data-mode="legal">
+                            <div class="w-8 h-8 rounded-lg bg-teal-100 flex items-center justify-center"><i
+                                    class="fa-solid fa-scale-balanced text-teal-600"></i></div>
+                            <div class="flex-1">
+                                <p class="text-sm font-bold text-slate-700">Tư vấn Pháp lý</p>
+                                <p class="text-xs text-slate-400">GraphRAG & Knowledge</p>
+                            </div>
+                            <span class="text-xs font-bold text-teal-600 bg-teal-50 px-1.5 py-0.5 rounded">RAG</span>
                         </div>
                         <div class="model-option px-3 py-2.5 rounded-lg hover:bg-sky-50 cursor-pointer flex items-center gap-3 transition-colors"
                             data-mode="fraud">

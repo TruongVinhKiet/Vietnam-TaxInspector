@@ -6144,34 +6144,14 @@ async function processOCRFile(file) {
         const formData = new FormData();
         formData.append('file', file);
         
-        // 1. Upload file
+        // 1. Upload & Process file (Synchronous API call)
         const uploadRes = await fetch(`${API_BASE}/ml/ocr/upload`, {
             method: 'POST',
             body: formData
         });
         
-        if (!uploadRes.ok) throw new Error('Upload failed');
-        const uploadData = await uploadRes.json();
-        const fileId = uploadData.file_id;
-
-        // 2. Process OCR (Fallback to mock data if API fails/timeout)
-        let ocrData;
-        try {
-            const processRes = await fetch(`${API_BASE}/ml/ocr/process/${fileId}`);
-            if (!processRes.ok) throw new Error('OCR process failed');
-            ocrData = await processRes.json();
-        } catch (e) {
-            console.warn("OCR API failed, using fallback mock", e);
-            ocrData = {
-                confidence: 0.94,
-                entities: {
-                    invoice_number: "INV-" + Math.floor(Math.random() * 10000),
-                    date: new Date().toLocaleDateString('vi-VN'),
-                    total_amount: (Math.random() * 50000000 + 1000000).toFixed(0),
-                    tax_code: "010" + Math.floor(Math.random() * 10000000)
-                }
-            };
-        }
+        if (!uploadRes.ok) throw new Error('Upload & Process failed');
+        const ocrData = await uploadRes.json();
 
         // Display results
         if (progress) progress.classList.add('hidden');
@@ -6179,25 +6159,83 @@ async function processOCRFile(file) {
 
         document.getElementById('ocr-confidence').textContent = `Độ tin cậy: ${(ocrData.confidence * 100).toFixed(1)}%`;
         
-        const fields = ocrData.entities || {};
+        const fields = ocrData.extracted_fields || {};
+        const tables = ocrData.tables || [];
+        const tableMethod = ocrData.table_extraction_method || 'none';
+        
         const fieldsContainer = document.getElementById('ocr-fields');
         if (fieldsContainer) {
             fieldsContainer.innerHTML = '';
+            
+            // 1. Render Basic Fields
             const labels = {
                 invoice_number: "Số hóa đơn",
-                date: "Ngày lập",
+                invoice_date: "Ngày lập",
                 total_amount: "Tổng tiền (VNĐ)",
-                tax_code: "Mã số thuế",
+                seller_tax_code: "Mã số thuế bán",
+                buyer_tax_code: "Mã số thuế mua",
                 seller_name: "Tên người bán"
             };
 
+            let fieldsHtml = '<div class="grid grid-cols-2 lg:grid-cols-3 gap-4 mb-6">';
             for (const [key, val] of Object.entries(fields)) {
-                fieldsContainer.innerHTML += `
+                if (!val || typeof val === 'object') continue;
+                fieldsHtml += `
                     <div class="bg-surface-container-lowest p-3 rounded border border-outline-variant/10">
                         <p class="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">${labels[key] || key}</p>
                         <p class="text-sm font-bold text-primary-container">${val || '--'}</p>
                     </div>
                 `;
+            }
+            fieldsHtml += '</div>';
+            fieldsContainer.innerHTML += fieldsHtml;
+
+            // 2. Render Tables (if any)
+            if (tables.length > 0) {
+                let badgeClass = tableMethod === 'table_transformer' 
+                    ? 'bg-purple-100 text-purple-700 border-purple-200' 
+                    : 'bg-slate-100 text-slate-600 border-slate-200';
+                let methodLabel = tableMethod === 'table_transformer' 
+                    ? 'AI DETR Transformer' 
+                    : (tableMethod === 'pdfplumber' ? 'PDF Plumber' : 'Heuristic Alignment');
+
+                let tablesHtml = `
+                    <div class="mt-6 border-t border-slate-100 pt-6">
+                        <div class="flex items-center justify-between mb-4">
+                            <h4 class="text-sm font-bold text-slate-800">Bảng Dữ Liệu Trích Xuất (${tables.length})</h4>
+                            <span class="text-[10px] font-bold px-2 py-0.5 rounded border ${badgeClass}">Engine: ${methodLabel}</span>
+                        </div>
+                `;
+
+                tables.forEach((table, idx) => {
+                    tablesHtml += `<div class="mb-6 overflow-x-auto border border-slate-200 rounded-lg">
+                        <table class="w-full text-left text-xs whitespace-nowrap">`;
+                    
+                    if (table.headers && table.headers.length > 0) {
+                        tablesHtml += `<thead class="bg-slate-50 text-slate-600 border-b border-slate-200"><tr>`;
+                        table.headers.forEach(h => {
+                            tablesHtml += `<th class="px-3 py-2 font-semibold">${h}</th>`;
+                        });
+                        tablesHtml += `</tr></thead>`;
+                    }
+                    
+                    if (table.rows && table.rows.length > 0) {
+                        tablesHtml += `<tbody class="divide-y divide-slate-100">`;
+                        table.rows.forEach(row => {
+                            tablesHtml += `<tr class="hover:bg-sky-50/50">`;
+                            row.forEach(cell => {
+                                tablesHtml += `<td class="px-3 py-2 text-slate-700">${cell || ''}</td>`;
+                            });
+                            tablesHtml += `</tr>`;
+                        });
+                        tablesHtml += `</tbody>`;
+                    }
+                    
+                    tablesHtml += `</table></div>`;
+                });
+                
+                tablesHtml += `</div>`;
+                fieldsContainer.innerHTML += tablesHtml;
             }
         }
         showToast('Hoàn tất', 'Trích xuất dữ liệu thành công', 'success');

@@ -217,8 +217,8 @@ Quản trị toàn bộ bởi file lược đồ `Database/init_db.sql` và hệ
 - **Financial Data:** `tax_returns` (Tờ khai thuế định kỳ), `tax_payments` (Lịch sử nộp tiền vào ngân sách).
 - **Analytics & ML:** `fraud_risk_scores` (Lưu vết điểm rủi ro qua từng quý).
 - **Forensic Graph:** `vat_graph_nodes` (Trạng thái đỉnh đồ thị), `vat_graph_edges` (Liên kết giao dịch), `vat_graph_analysis_batches` (Tiến trình chạy Batch Graph).
-- **Agentic Brain:** `agent_execution_plans` (Lưu trữ cây DAG task), `adjudication_cases` (Lưu toàn bộ lịch sử Debate đa tác tử để Audit).
-- **Vector DB:** `tax_knowledge_chunks` (Lưu trữ text và vector của văn bản pháp luật cho RAG).
+- **Agentic Brain:** `agent_execution_plans` (Lưu trữ cây DAG task), `adjudication_cases` (Lưu toàn bộ lịch sử Debate đa tác tử để Audit), `agent_case_workspace` và `legal_claim_verifications` (facts, assumptions, citations, claim verification, escalation reason theo session).
+- **Vector DB / Legal KG:** `knowledge_chunks`, `knowledge_chunk_embeddings`, `kg_entities`, `kg_relations` (lưu text, vector, citation spans và quan hệ pháp lý cho Hybrid RAG + GraphRAG).
 
 ---
 
@@ -315,8 +315,9 @@ python -m pytest Backend/tests/test_monitoring_kpi_workflow.py -q
 
 ## 🏆 11. Tầm Nhìn & Lộ Trình Phát Triển (Future Roadmap)
 Vietnam TaxInspector được thiết kế để liên tục tiến hóa. Các chức năng dự kiến tích hợp trong Phase tiếp theo:
-- [ ] Chuyển đổi hoàn toàn kiến trúc RAG sang **GraphRAG** (Sử dụng Knowledge Graph để Agent tự suy luận mối liên hệ giữa các điều luật thay vì Vector matching truyền thống).
-- [ ] Nâng cấp Trích xuất Bảng biểu: Tích hợp mô hình AI chuyên dụng **LayoutLMv3 / Table Transformer** để quét cấu trúc lưới của Báo cáo tài chính cực kỳ phức tạp.
+- [x] Chuyển đổi kiến trúc RAG sang **Legal GraphRAG v2**: Knowledge Graph, authority path, effective-date reasoning, official-letter scope và relation path.
+- [x] Nâng cấp trích xuất bảng biểu với **Table Transformer**; LayoutLMv3 vẫn là tùy chọn nâng tiếp cho document understanding nhiều trang/phức tạp.
+- [x] Thêm **Legal Consultant Brain**: nối local `TaxAgentLLM` vào synthesizer khi artifact sẵn sàng, kèm verifier claim-to-citation, clarification slots và agent workspace audit.
 - [ ] Phát triển hệ sinh thái di động: Xây dựng ứng dụng **Mobile App PWA** (Progressive Web App) gọn nhẹ cho phép cán bộ thuế chụp ảnh chứng từ và query hệ thống Agent ngay tại hiện trường cơ sở doanh nghiệp.
 - [ ] Liên minh Dữ liệu (Federated Learning): Áp dụng kỹ thuật Học máy Liên kết để các Cục thuế Tỉnh/Thành phố có thể cùng nhau huấn luyện mô hình Fraud chung mà tuyệt đối không cần chia sẻ/sao chép cơ sở dữ liệu gốc của địa phương mình, đảm bảo bảo mật dữ liệu tuyệt đối.
 

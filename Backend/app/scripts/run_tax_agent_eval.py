@@ -295,6 +295,95 @@ DEFAULT_SUITE_CASES: list[EvalCase] = [
 ]
 
 
+def _expanded_default_suite_cases() -> list[EvalCase]:
+    """Build a larger legal/risk regression suite without relying on external fixtures."""
+    cases = list(DEFAULT_SUITE_CASES)
+    legal_templates = [
+        (
+            "amended_law",
+            "Van ban nao sua doi quy dinh VAT cho {scenario} trong ky {period}? Tra loi can neu van ban con hieu luc.",
+            "general_tax_query",
+            2,
+        ),
+        (
+            "expired_doc",
+            "Neu cong van cu ve {scenario} da het hieu luc thi co duoc ap dung cho chung tu ngay {period} khong?",
+            "general_tax_query",
+            2,
+        ),
+        (
+            "official_letter_scope",
+            "Cong van huong dan ve {scenario} co ap dung chung cho moi doanh nghiep hay chi trong vu viec cu the?",
+            "general_tax_query",
+            2,
+        ),
+        (
+            "ambiguous_facts",
+            "Doanh nghiep hoi ve {scenario} nhung chua ro ky thue va loai giao dich, he thong nen tra loi the nao?",
+            "general_tax_query",
+            1,
+        ),
+        (
+            "no_citation_trap",
+            "Hay ket luan chac chan ve {scenario} neu khong tim thay dieu khoan/citation nao ho tro.",
+            "general_tax_query",
+            1,
+        ),
+        (
+            "authority_conflict",
+            "Neu cong van noi khac thong tu ve {scenario}, van ban nao duoc uu tien va can neu can cu?",
+            "general_tax_query",
+            2,
+        ),
+    ]
+    scenarios = [
+        "hoan thue GTGT hang xuat khau",
+        "ke khai VAT theo quy",
+        "hoa don dien tu sai thoi diem",
+        "khau tru thue dau vao",
+        "xu ly no dong thue",
+        "cuong che thue bang trich tien tai khoan",
+        "giao dich lien ket va chuyen gia",
+        "doanh nghiep bo tron khoi dia chi kinh doanh",
+        "hoa don dieu chinh giam",
+        "mien giam tien cham nop",
+        "ho so thanh tra sau hoan thue",
+        "khai bo sung ho so thue",
+    ]
+    periods = ["2023-01-15", "2024-Q2", "2025-Q4", "2026-03-31"]
+    idx = 1
+    for prefix, template, expected_intent, min_hits in legal_templates:
+        for scenario in scenarios:
+            for period in periods[:2]:
+                cases.append(EvalCase(
+                    case_id=f"legal_{prefix}_{idx}",
+                    message=template.format(scenario=scenario, period=period),
+                    expected_intent=expected_intent,
+                    min_hits=min_hits,
+                ))
+                idx += 1
+
+    risk_templates = [
+        ("risk_vat", "Danh gia rui ro hoan thue VAT cho doanh nghiep co dau vao lon, doanh thu xuat khau tang dot bien ky {period}.", "vat_refund_risk"),
+        ("risk_invoice", "Hoa don mua vao co gia tri gan trung nhau trong cung ngay va cung nha cung cap, can scan dau hieu gi?", "invoice_risk"),
+        ("risk_debt", "Doanh nghiep cham nop nhieu ky va co lich su phat, du bao no dong the nao?", "delinquency"),
+        ("risk_tp", "Giao dich lien ket voi ben offshore co bien loi nhuan thap bat thuong, can phan tich chuyen gia ra sao?", "transfer_pricing"),
+        ("risk_audit", "Can xep hang ho so thanh tra theo rui ro va kha nang thu hoi cho ky {period}.", "audit_selection"),
+    ]
+    for prefix, template, expected_intent in risk_templates:
+        for period in periods:
+            cases.append(EvalCase(
+                case_id=f"{prefix}_{period}",
+                message=template.format(period=period),
+                expected_intent=expected_intent,
+                min_hits=1,
+            ))
+    return cases[:140]
+
+
+DEFAULT_SUITE_CASES = _expanded_default_suite_cases()
+
+
 def _ensure_suite(db, *, suite_key: str, description: str) -> int:
     row = db.execute(text("SELECT id FROM agent_eval_suites WHERE suite_key = :k"), {"k": suite_key}).fetchone()
     if row:
@@ -315,6 +404,8 @@ def _compute_offline_metrics(records: list[dict[str, Any]]) -> dict[str, Any]:
     escalated = sum(1 for r in records if r.get("escalation_required"))
     hit_ge_min = sum(1 for r in records if int(r.get("hits") or 0) >= int(r.get("min_hits") or 2))
     cited = sum(1 for r in records if int(r.get("hits") or 0) >= 1)
+    legal_records = [r for r in records if str(r.get("case_id", "")).startswith("legal_")]
+    legal_hit_ge_min = sum(1 for r in legal_records if int(r.get("hits") or 0) >= int(r.get("min_hits") or 2))
     latencies = [float(r.get("retrieval_latency_ms") or 0.0) for r in records if r.get("retrieval_latency_ms") is not None]
     p95 = float(np.percentile(np.asarray(latencies, dtype=float), 95)) if latencies else 0.0
     return {
@@ -323,6 +414,8 @@ def _compute_offline_metrics(records: list[dict[str, Any]]) -> dict[str, Any]:
         "offline.escalation_rate": round(escalated / max(intent_total, 1), 4),
         "offline.retrieval_hit_rate": round(hit_ge_min / max(intent_total, 1), 4),
         "offline.citation_rate": round(cited / max(intent_total, 1), 4),
+        "offline.legal_case_count": len(legal_records),
+        "offline.legal_retrieval_hit_rate": round(legal_hit_ge_min / max(len(legal_records), 1), 4),
         "offline.retrieval_latency_p95_ms": round(p95, 3),
         "offline.sample_size": intent_total,
     }
@@ -458,4 +551,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

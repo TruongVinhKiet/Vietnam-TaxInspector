@@ -29,6 +29,12 @@ def _to_date(value: Any) -> date | None:
     return None
 
 
+def _safe_rollback(db: Any) -> None:
+    rollback = getattr(db, "rollback", None)
+    if callable(rollback):
+        rollback()
+
+
 class GraphFeaturePipeline:
     """Compute forensic signals outside of GNN core inference."""
 
@@ -141,7 +147,7 @@ class GraphFeaturePipeline:
                 {"invoice_numbers": list(invoice_numbers)},
             ).fetchall()
         except Exception:
-            db.rollback()
+            _safe_rollback(db)
             return {}
         return {str(row[1]): int(row[0]) for row in rows}
 
@@ -160,7 +166,7 @@ class GraphFeaturePipeline:
                 {"invoice_ids": invoice_ids},
             ).fetchall()
         except Exception:
-            db.rollback()
+            _safe_rollback(db)
             return []
         return [
             {
@@ -189,7 +195,7 @@ class GraphFeaturePipeline:
                 {"invoice_ids": invoice_ids},
             ).fetchall()
         except Exception:
-            db.rollback()
+            _safe_rollback(db)
             return []
         return [
             {
@@ -217,7 +223,7 @@ class GraphFeaturePipeline:
                 {"invoice_ids": invoice_ids},
             ).fetchall()
         except Exception:
-            db.rollback()
+            _safe_rollback(db)
             return []
         return [
             {

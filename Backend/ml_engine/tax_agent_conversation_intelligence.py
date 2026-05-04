@@ -391,7 +391,23 @@ class ConversationIntelligence:
         has_analysis_keyword = any(kw in message.lower() for kw in company_analysis_keywords)
         has_mst = bool(MST_PATTERN.search(message))
 
-        if has_analysis_keyword and not has_mst and not active_tax_code:
+        # Legal/general questions that do NOT need a specific MST
+        legal_general_keywords = [
+            "thuế suất", "thuế gtgt", "thuế tncn", "thuế tndn", "thuế thu nhập",
+            "thuế vat", "thuế môn bài", "biểu thuế", "giảm trừ",
+            "quy định", "luật", "nghị định", "thông tư", "công văn",
+            "đóng thuế", "nộp thuế", "kê khai", "hoàn thuế",
+            "hộ kinh doanh", "cá nhân kinh doanh", "freelance",
+            "shopee", "lazada", "tiktok", "online", "bán hàng",
+            "cho thuê nhà", "cho thuê", "tiền lương", "lương",
+            "chi phí được trừ", "chi phí", "chứng từ", "tiền mặt",
+            "phạt", "xử phạt", "chậm nộp", "trễ hạn",
+            "khấu trừ", "người phụ thuộc", "gia cảnh",
+            "tạp hóa", "tiệm", "quán", "cửa hàng",
+        ]
+        is_legal_general = any(kw in message.lower() for kw in legal_general_keywords)
+
+        if has_analysis_keyword and not has_mst and not active_tax_code and not is_legal_general:
             return (
                 True,
                 "missing_tax_code",
