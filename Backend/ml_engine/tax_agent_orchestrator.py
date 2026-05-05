@@ -412,6 +412,7 @@ class TaxAgentOrchestrator:
                 recent_turns=context.recent_turns,
                 active_entities=context.active_entities,
                 intent_history=context.active_intent_history,
+                has_attachment=bool(attachment_analysis),
             )
             if conv_intel_result.resolved_message != message:
                 message = conv_intel_result.resolved_message
@@ -2153,10 +2154,12 @@ class TaxAgentOrchestrator:
 
         ocr_data = tool_results.get("_ocr_document_results", {})
         if ocr_data and isinstance(ocr_data, dict):
-            viz["ocr_invoice"] = {
+            viz["ocr_extraction"] = {
                 "filename": ocr_data.get("filename", ""),
                 "confidence": ocr_data.get("confidence", 0.0),
                 "extracted_fields": ocr_data.get("extracted_fields", {}),
+                "tables": ocr_data.get("tables", []),
+                "table_extraction_method": ocr_data.get("table_extraction_method", "none"),
                 "invoice_risk": ocr_data.get("invoice_risk", {}),
                 "graph_linkage_candidates": ocr_data.get("graph_linkage_candidates", []),
                 "warnings": ocr_data.get("warnings", []),

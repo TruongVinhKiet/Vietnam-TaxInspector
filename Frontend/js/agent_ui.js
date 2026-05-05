@@ -1,5 +1,6 @@
 // e:\TaxInspector\Frontend\js\agent_ui.js
 
+const API_BASE = window.API_BASE_URL || "http://localhost:8000/api";
 document.addEventListener('DOMContentLoaded', () => {
     const chatFeed = document.getElementById('chatFeed');
     const chatInput = document.getElementById('chatInput');
@@ -426,8 +427,8 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!text && !pendingFile) return;
 
         if (emptyState) emptyState.style.display = 'none';
-        const displayText = text || (pendingFile ? `📎 ${pendingFile.name}` : '');
-        addMessageToFeed('user', displayText);
+        const currentFile = pendingFile;
+        addMessageToFeed('user', text, null, currentFile);
         chatInput.value = '';
         chatInput.style.height = 'auto';
         sendBtn.classList.add('opacity-50', 'cursor-not-allowed');
@@ -437,19 +438,34 @@ document.addEventListener('DOMContentLoaded', () => {
             triggerAgentIndicators(text);
 
             // File uploads use non-streaming endpoint
-            if (pendingFile) {
+            if (currentFile) {
                 const loadingId = addTypingIndicator(true);
                 const formData = new FormData();
-                formData.append('message', text || `Phân tích rủi ro file ${pendingFile.name}`);
-                formData.append('file', pendingFile);
+                
+                // Smart Context-Aware Prompts
+                const defaultPrompts = {
+                    'full': 'Hãy phân tích toàn diện tài liệu đính kèm, nhận diện đây là loại tài liệu gì và trích xuất các thông tin quan trọng nhất.',
+                    'fraud': 'Hãy kiểm tra tài liệu này và phát hiện các dấu hiệu gian lận, rủi ro giả mạo hoặc bất thường.',
+                    'vat': 'Hãy trích xuất thông tin hóa đơn và kiểm tra rủi ro hoàn thuế VAT của tài liệu đính kèm.',
+                    'delinquency': 'Hãy phân tích tài liệu đính kèm để đánh giá rủi ro nợ đọng hoặc khả năng thanh toán.',
+                    'macro': 'Hãy đánh giá tác động vĩ mô dựa trên các chỉ số trong tài liệu này.',
+                    'legal': 'Hãy đọc tài liệu đính kèm và phân tích mức độ tuân thủ pháp lý.'
+                };
+                const smartMsg = text || defaultPrompts[currentModelMode] || defaultPrompts['full'];
+
+                formData.append('message', smartMsg);
+                formData.append('file', currentFile);
                 formData.append('session_id', AGENT_SESSION_ID);
                 formData.append('model_mode', currentModelMode);
+                clearPendingFile();
                 const response = await fetch(`${API_BASE}/tax-agent/chat/v2/with-file`, {
                     method: 'POST', body: formData,
                 });
-                clearPendingFile();
                 const data = await response.json();
                 document.getElementById(loadingId)?.remove();
+                
+                if (!response.ok) throw new Error(data.detail || 'Lỗi hệ thống khi phân tích file.');
+
                 const answerHtml = formatMarkdown(data.answer || data.content || data.response || '');
                 const vizHtml = buildVisualizationCards(data.visualization_data || {}, data);
                 const metaHtml = buildMetaCards(data);
@@ -1698,14 +1714,34 @@ document.addEventListener('DOMContentLoaded', () => {
     //  MESSAGE FEED RENDERING
     // ═══════════════════════════════════════════════════════════
 
-    function addMessageToFeed(role, contentHTML, agentData = null) {
+    function addMessageToFeed(role, contentHTML, agentData = null, file = null) {
         const wrapper = document.createElement('div');
         wrapper.className = 'max-w-4xl mx-auto w-full flex mb-6 chat-message';
 
         if (role === 'user') {
+            let fileHtml = '';
+            if (file) {
+                const isImage = file.type.startsWith('image/') || file.name.match(/\.(jpg|jpeg|png)$/i);
+                const sizeKb = (file.size / 1024).toFixed(1);
+                if (isImage) {
+                    fileHtml = `<div class="mt-2 flex justify-end"><img src="${URL.createObjectURL(file)}" class="max-w-[320px] max-h-[320px] object-cover rounded-xl border border-slate-200 shadow-sm" alt="Upload"></div>`;
+                } else {
+                    let icon = 'fa-file';
+                    if (file.name.endsWith('.pdf')) icon = 'fa-file-pdf text-red-500';
+                    if (file.name.endsWith('.csv')) icon = 'fa-file-csv text-emerald-500';
+                    fileHtml = `<div class="mt-2 flex items-center gap-3 bg-white px-4 py-3 rounded-xl w-fit border border-slate-200 shadow-sm ml-auto">
+                        <i class="fa-solid ${icon} text-3xl"></i>
+                        <div class="text-xs text-left">
+                            <div class="font-bold text-slate-800 truncate max-w-[200px]">${escapeHTML(file.name)}</div>
+                            <div class="text-slate-500">${sizeKb} KB</div>
+                        </div>
+                    </div>`;
+                }
+            }
             wrapper.innerHTML = `
-                <div class="user-message text-[15px]">
-                    ${escapeHTML(contentHTML)}
+                <div class="w-full flex flex-col items-end">
+                    ${contentHTML ? `<div class="user-message text-[15px] mb-2">${escapeHTML(contentHTML)}</div>` : ''}
+                    ${fileHtml}
                 </div>
             `;
         } else {
@@ -1772,7 +1808,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const id = 'typing-' + Date.now();
         const wrapper = document.createElement('div');
         wrapper.id = id;
-        wrapper.className = 'w-full flex mb-6 chat-message';
+        wrapper.className = 'max-w-4xl mx-auto w-full flex mb-6 chat-message';
         
         let contentHtml = '';
         if (isScanning) {
@@ -1894,14 +1930,17 @@ document.addEventListener('DOMContentLoaded', () => {
         });
         
         // Tables (markdown-style)
-        const tableRegex = /\|(.+)\|\n\|[-| ]+\|\n((\|.+\|\n?)+)/g;
-        html = html.replace(tableRegex, (match, header, body) => {
+        const tableRegex = /\|([^\r\n]+)\|\r?\n\|([-| :]+)\|\r?\n((?:\|[^\r\n]+\|\r?\n?)+)/g;
+        html = html.replace(tableRegex, (match, header, sep, body) => {
             const heads = header.split('|').filter(h => h.trim()).map(h => `<th>${h.trim()}</th>`).join('');
-            const rows = body.trim().split('\n').map(row => {
-                const cells = row.split('|').filter(c => c.trim()).map(c => `<td>${c.trim()}</td>`).join('');
+            const rows = body.trim().split(/\r?\n/).map(row => {
+                let cellsArr = row.split('|');
+                if (cellsArr.length > 0 && cellsArr[0].trim() === '') cellsArr.shift();
+                if (cellsArr.length > 0 && cellsArr[cellsArr.length-1].trim() === '') cellsArr.pop();
+                const cells = cellsArr.map(c => `<td>${c.trim()}</td>`).join('');
                 return `<tr>${cells}</tr>`;
             }).join('');
-            return `<table class="viz-table"><thead><tr>${heads}</tr></thead><tbody>${rows}</tbody></table>`;
+            return `<div class="overflow-x-auto my-3"><table class="viz-table"><thead><tr>${heads}</tr></thead><tbody>${rows}</tbody></table></div>`;
         });
         
         // Lists and paragraphs

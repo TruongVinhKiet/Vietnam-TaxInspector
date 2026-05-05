@@ -177,6 +177,7 @@ class ConversationIntelligence:
         recent_turns: list[dict[str, Any]] | None = None,
         active_entities: list[Any] | None = None,
         intent_history: list[str] | None = None,
+        has_attachment: bool = False,
     ) -> ConversationIntelligenceResult:
         """
         Process a user message through the intelligence pipeline.
@@ -243,7 +244,7 @@ class ConversationIntelligence:
 
         # Step 5: Detect ambiguity
         is_ambiguous, ambiguity_reason, clarification_prompt = (
-            self._detect_ambiguity(message, active_tax_code, recent_turns)
+            self._detect_ambiguity(message, active_tax_code, recent_turns, has_attachment)
         )
 
         # Step 6: If we have an active tax code but message doesn't mention it,
@@ -450,6 +451,7 @@ class ConversationIntelligence:
         message: str,
         active_tax_code: str | None,
         recent_turns: list[dict],
+        has_attachment: bool = False,
     ) -> tuple[bool, str | None, str | None]:
         """
         Detect if the message is too ambiguous to process.
@@ -491,7 +493,10 @@ class ConversationIntelligence:
         ]
         is_legal_general = any(kw in message.lower() for kw in legal_general_keywords)
 
-        if has_analysis_keyword and not has_mst and not active_tax_code and not is_legal_general:
+        batch_keywords = ["top", "danh sách", "thống kê", "toàn bộ", "báo cáo", "tổng hợp", "danh mục"]
+        is_batch = any(kw in message.lower() for kw in batch_keywords)
+
+        if has_analysis_keyword and not has_mst and not active_tax_code and not is_legal_general and not has_attachment and not is_batch:
             return (
                 True,
                 "missing_tax_code",

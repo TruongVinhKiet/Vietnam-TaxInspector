@@ -148,10 +148,10 @@ document.addEventListener('DOMContentLoaded', () => {
             const status = dpo.current_status || 'unknown';
             badge.innerText = status.toUpperCase();
             badge.className = `px-2 py-1 text-xs font-semibold rounded-full ${
-                status === 'training' ? 'bg-amber-100 text-amber-700 animate-pulse' :
-                status === 'building_pairs' ? 'bg-sky-100 text-sky-700' :
-                status === 'idle' ? 'bg-emerald-100 text-emerald-700' :
-                'bg-slate-100 text-slate-600'
+                status === 'training' ? 'bg-slate-100 text-slate-800 border border-slate-300 animate-pulse' :
+                status === 'building_pairs' ? 'bg-slate-100 text-slate-800 border border-slate-300' :
+                status === 'idle' ? 'bg-white text-slate-500 border border-slate-200' :
+                'bg-slate-50 text-slate-500 border border-slate-200'
             }`;
         }
         setText('dpo-total-runs', dpo.total_runs || 0);
@@ -193,15 +193,15 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         if (!alerts.length) {
-            container.innerHTML = '<div class="text-sm text-emerald-600 flex items-center gap-2 bg-emerald-50 px-3 py-2 rounded-lg border border-emerald-100"><i class="fa-solid fa-circle-check"></i> Hệ thống ổn định. Không phát hiện độ lệch hoặc lỗi vi phạm.</div>';
+            container.innerHTML = '<div class="text-sm text-slate-500 flex items-center gap-2 bg-slate-50 px-3 py-2 rounded-lg border border-slate-200"><i class="fa-solid fa-check"></i> Hệ thống ổn định. Không phát hiện độ lệch hoặc lỗi vi phạm.</div>';
             return;
         }
 
         alerts.forEach(alert => {
-            const color = alert.level === 'info' ? 'text-sky-700 bg-sky-50 border-sky-200' : 'text-amber-700 bg-amber-50 border-amber-200';
-            container.innerHTML += `<div class="text-sm ${color} border px-3 py-2 rounded-lg flex items-start gap-2">
-                <i class="fa-solid fa-circle-exclamation mt-0.5"></i>
-                <div><div class="font-bold">${escapeHtml(alert.metric)}</div><div class="text-xs mt-0.5">${escapeHtml(alert.message)}</div></div>
+            const color = alert.level === 'info' ? 'text-slate-600 bg-slate-50 border-slate-200' : 'text-slate-800 bg-white border-slate-200 border-l-2 border-l-slate-400';
+            container.innerHTML += `<div class="text-sm ${color} border px-3 py-2 rounded-lg flex items-start gap-2 shadow-sm">
+                <i class="fa-solid fa-circle-exclamation mt-0.5 ${alert.level === 'info' ? 'text-slate-400' : 'text-slate-500'}"></i>
+                <div><div class="font-bold">${escapeHtml(alert.metric)}</div><div class="text-xs mt-0.5 text-slate-500">${escapeHtml(alert.message)}</div></div>
             </div>`;
         });
     }
@@ -247,7 +247,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         candidates.forEach(cand => {
             const isNeg = cand.feedback_type === 'negative';
-            const badgeColor = isNeg ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700';
+            const badgeColor = isNeg ? 'bg-slate-100 border border-slate-200 text-slate-700' : 'bg-white border border-slate-200 text-slate-600';
             const label = isNeg ? 'Phản hồi tiêu cực' : 'Độ tin cậy thấp';
             container.innerHTML += `<div class="mb-3 pb-3 border-b border-slate-100 last:border-0 last:pb-0">
                 <div class="flex items-center justify-between mb-1">
@@ -287,7 +287,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         failures.innerHTML = '';
         if (focus.count > 0) {
-            failures.innerHTML += `<div class="p-2 rounded-lg bg-red-50 text-red-700 border border-red-100">Focus violations: ${focus.count} (${(focus.rate * 100).toFixed(1)}%)</div>`;
+            failures.innerHTML += `<div class="p-2 rounded-lg bg-white text-slate-700 border border-slate-200">Focus violations: ${focus.count} (${(focus.rate * 100).toFixed(1)}%)</div>`;
         }
         toolUsage.forEach(tool => {
             failures.innerHTML += `<div class="p-2 rounded-lg bg-slate-50 border border-slate-100 flex justify-between">
