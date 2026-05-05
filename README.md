@@ -8,6 +8,9 @@
 [![PyTorch](https://img.shields.io/badge/ML-PyTorch-EE4C2C?style=flat&logo=pytorch&logoColor=white)](https://pytorch.org/)
 [![NetworkX](https://img.shields.io/badge/Graph-NetworkX-0052CC?style=flat&logo=python&logoColor=white)](https://networkx.org/)
 [![XGBoost](https://img.shields.io/badge/ML-XGBoost-189fdd?style=flat&logo=xgboost&logoColor=white)](https://xgboost.ai/)
+[![Redis](https://img.shields.io/badge/Cache-Redis-DC382D?style=flat&logo=redis&logoColor=white)](https://redis.io/)
+[![Kafka](https://img.shields.io/badge/Stream-Kafka-231F20?style=flat&logo=apachekafka&logoColor=white)](https://kafka.apache.org/)
+[![Docker](https://img.shields.io/badge/Deploy-Docker-2496ED?style=flat&logo=docker&logoColor=white)](https://www.docker.com/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 ---
@@ -318,10 +321,108 @@ Vietnam TaxInspector được thiết kế để liên tục tiến hóa. Các c
 - [x] Chuyển đổi kiến trúc RAG sang **Legal GraphRAG v2**: Knowledge Graph, authority path, effective-date reasoning, official-letter scope và relation path.
 - [x] Nâng cấp trích xuất bảng biểu với **Table Transformer**; LayoutLMv3 vẫn là tùy chọn nâng tiếp cho document understanding nhiều trang/phức tạp.
 - [x] Thêm **Legal Consultant Brain**: nối local `TaxAgentLLM` vào synthesizer khi artifact sẵn sàng, kèm verifier claim-to-citation, clarification slots và agent workspace audit.
+- [x] **RLHF/DPO Pipeline**: Hệ thống tự học & tiến hóa qua phản hồi của Thanh tra viên (Human-in-the-loop fine-tuning).
+- [x] **Dockerization & Microservices**: Đóng gói toàn bộ 6 containers (FastAPI, Model Server, Redis, Kafka, PostgreSQL, Nginx) với `docker-compose up`.
+- [x] **Event-Driven Architecture (Kafka)**: Real-time invoice streaming pipeline phát hiện gian lận hóa đơn điện tử tức thì.
+- [x] **Model Serving Gateway**: Singleton cache + LRU eviction giải quyết triệt để bài toán OOM khi chạy nhiều DL models đồng thời.
+- [x] **Multi-Tenant Session Management**: Dynamic session isolation hỗ trợ hàng trăm Thanh tra viên làm việc song song.
 - [ ] Phát triển hệ sinh thái di động: Xây dựng ứng dụng **Mobile App PWA** (Progressive Web App) gọn nhẹ cho phép cán bộ thuế chụp ảnh chứng từ và query hệ thống Agent ngay tại hiện trường cơ sở doanh nghiệp.
 - [ ] Liên minh Dữ liệu (Federated Learning): Áp dụng kỹ thuật Học máy Liên kết để các Cục thuế Tỉnh/Thành phố có thể cùng nhau huấn luyện mô hình Fraud chung mà tuyệt đối không cần chia sẻ/sao chép cơ sở dữ liệu gốc của địa phương mình, đảm bảo bảo mật dữ liệu tuyệt đối.
+- [ ] **Kubernetes Orchestration (K8s)**: Helm charts cho auto-scaling, rolling updates, và zero-downtime deployment trên cloud infrastructure.
+
+---
+
+## 🐳 12. Kiến Trúc Vi Dịch Vụ & Triển Khai Docker (Microservices & Docker Deployment)
+
+TaxInspector sử dụng kiến trúc **6-Container Microservices** để đảm bảo tách biệt hoàn toàn (Isolation) giữa các thành phần, tối ưu hóa tài nguyên RAM/CPU và cho phép triển khai trên bất kỳ máy chủ nào chỉ bằng một lệnh duy nhất.
+
+### 12.1. Sơ Đồ Kiến Trúc Triển Khai (Deployment Architecture)
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                    Docker Compose Stack                            │
+│                                                                     │
+│  ┌────────────────┐    ┌──────────────────┐    ┌───────────────┐   │
+│  │  tax-frontend   │───▶│  tax-api-server   │───▶│tax-model-server│  │
+│  │  (Nginx :3000)  │    │  (FastAPI :8000)   │    │(PyTorch :8001) │  │
+│  │                 │    │                    │    │                │  │
+│  │  Static HTML/   │    │  Multi-Agent       │    │ VAE Anomaly    │  │
+│  │  CSS/JS +       │    │  Orchestrator,     │    │ Transformer    │  │
+│  │  Reverse Proxy  │    │  LLM, RAG, SSE     │    │ GNN Fraud      │  │
+│  └────────────────┘    └──────┬───┬────────┘    └───────────────┘   │
+│                               │   │                                 │
+│                  ┌────────────┘   └───────────┐                     │
+│                  ▼                             ▼                     │
+│            ┌──────────┐                 ┌──────────┐                │
+│            │tax-redis  │                 │tax-kafka  │               │
+│            │ (6379)    │                 │ (9092)    │               │
+│            │           │                 │           │               │
+│            │Feature    │                 │Invoice    │               │
+│            │Cache +    │                 │Events +   │               │
+│            │Model Meta │                 │Anomaly    │               │
+│            └──────────┘                 │Alerts     │               │
+│                                          └──────────┘               │
+│            ┌──────────┐                                             │
+│            │tax-postgres│                                            │
+│            │ (5432)    │                                             │
+│            │           │                                             │
+│            │pgvector + │                                             │
+│            │Full Schema│                                             │
+│            └──────────┘                                             │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+### 12.2. Mô Tả Từng Container
+
+| Container | Image | Port | Chức năng | RAM Limit |
+|---|---|---|---|---|
+| `tax-postgres` | `pgvector/pgvector:pg17` | 5432 | CSDL chính + Vector Search | - |
+| `tax-redis` | `redis:7-alpine` | 6379 | Feature cache + Model metadata + Alert queue | 256MB |
+| `tax-kafka` | `bitnami/kafka:3.9` | 9092 | Event streaming (KRaft mode, không cần Zookeeper) | - |
+| `tax-model-server` | Custom (PyTorch CPU) | 8001 | DL inference: VAE, Transformer, GNN (Singleton cache) | **2GB** |
+| `tax-api-server` | Custom (FastAPI) | 8000 | Multi-Agent Orchestrator, LLM, RAG, SSE, CRUD | **4GB** |
+| `tax-frontend` | `nginx:alpine` | 3000 | Static UI + Reverse proxy + SSE passthrough | - |
+
+### 12.3. Khởi Chạy 1-Click (One-Click Deployment)
+
+```bash
+# 1. Clone repository
+git clone https://github.com/TruongVinhKiet/Vietnam-TaxInspector.git
+cd Vietnam-TaxInspector
+
+# 2. Cấu hình môi trường
+cp .env.example .env
+# Sửa .env: đặt mật khẩu DB, API keys, v.v.
+
+# 3. Khởi chạy toàn bộ 6 services
+docker-compose up -d
+
+# 4. Kiểm tra trạng thái
+docker-compose ps
+
+# 5. Truy cập hệ thống
+#    Frontend:  http://localhost:3000
+#    API Docs:  http://localhost:8000/docs
+#    Model API: http://localhost:8001/docs (internal)
+```
+
+### 12.4. Các Tính Năng Hạ Tầng Nổi Bật
+
+**🧠 ModelServingGateway (Singleton Model Cache):**
+Thay vì 6 lần `torch.load()` mỗi request, hệ thống chỉ load model **1 lần duy nhất** và cache trong RAM. Khi cache đầy, cơ chế LRU (Least Recently Used) tự động giải phóng model ít dùng nhất. Metadata về hiệu năng (load time, access count) được đồng bộ qua Redis.
+
+**⚡ Kafka Streaming Pipeline (Real-time Fraud Detection):**
+Khi hóa đơn điện tử mới được phát hành, event được đẩy vào Kafka topic `invoice.created`. Pipeline tự động:
+1. Tính toán feature tăng dần (Welford's Algorithm) — O(1), không cần query SQL.
+2. Cache feature vào Redis.
+3. Chạy VAE anomaly scoring.
+4. Nếu phát hiện bất thường → publish alert sang topic `invoice.anomaly` → Push notification tới Thanh tra viên.
+
+**🔒 Multi-Tenant Session Isolation:**
+Mỗi tab browser tạo ra một `session_id` duy nhất (`sessionStorage`). Dữ liệu phân tích, lịch sử đối thoại và feedback DPO được cách ly hoàn toàn giữa các Thanh tra viên.
 
 ---
 **Nhà Kiến Trúc Phần Mềm & Phát Triển Cốt Lõi:** [TruongVinhKiet](https://github.com/TruongVinhKiet)
 
 *LƯU Ý BẢO MẬT: Đây là tài liệu kiến trúc phần mềm chuyên sâu của dự án Vietnam TaxInspector. Hệ thống này được xây dựng với mục đích nghiên cứu, demo và minh họa tiềm năng ứng dụng của Giải pháp Công nghệ Số AI tiên tiến vào Quản lý Hành chính công nhà nước. Nghiêm cấm mọi hành vi sao chép hệ thống để phục vụ các mục đích phi pháp hoặc sử dụng sai trái dữ liệu nghiệp vụ.*
+

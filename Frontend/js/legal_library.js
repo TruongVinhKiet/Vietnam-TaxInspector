@@ -1,3 +1,5 @@
+const API_BASE = window.API_BASE_URL || 'http://localhost:8000';
+
 let LEGAL_DOCS = [];
 
 function getStampSVG(agency) {
@@ -37,7 +39,7 @@ document.addEventListener("DOMContentLoaded", () => {
     // Fetch Data from DB
     async function loadDocuments(docType) {
         try {
-            let url = 'http://localhost:8000/api/legal/documents';
+            let url = `${API_BASE}/legal/documents`;
             if (docType) url += '?doc_type=' + encodeURIComponent(docType);
             const response = await fetch(url);
             const data = await response.json();

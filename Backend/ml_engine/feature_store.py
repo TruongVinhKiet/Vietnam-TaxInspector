@@ -2,12 +2,42 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
+import os
 from dataclasses import dataclass
 from datetime import date
 from typing import Any, Dict, Optional
 
 from sqlalchemy.orm import Session
 from sqlalchemy import text
+
+logger = logging.getLogger(__name__)
+
+# Redis cache TTL for company features (seconds)
+FEATURE_CACHE_TTL = int(os.getenv("FEATURE_CACHE_TTL_SECONDS", "1800"))
+FEATURE_CACHE_PREFIX = "taxinspector:feature_store:"
+
+# Redis client (lazy-loaded, shared with streaming pipeline)
+_redis_client = None
+_redis_init_attempted = False
+
+
+def _get_redis():
+    """Get Redis client with lazy initialization and graceful fallback."""
+    global _redis_client, _redis_init_attempted
+    if _redis_init_attempted:
+        return _redis_client
+    _redis_init_attempted = True
+    try:
+        import redis
+        url = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+        _redis_client = redis.Redis.from_url(url, decode_responses=True, socket_timeout=2)
+        _redis_client.ping()
+        logger.info("[FeatureStore] Redis cache connected: %s", url)
+    except Exception as exc:
+        logger.warning("[FeatureStore] Redis unavailable, no caching: %s", exc)
+        _redis_client = None
+    return _redis_client
 
 
 def _hash_payload(payload: Any) -> str:
@@ -24,12 +54,42 @@ class SnapshotKey:
 
 class FeatureStore:
     """
-    Leakage-safe point-in-time feature snapshots.
+    Leakage-safe point-in-time feature snapshots with Redis cache layer.
     All builders must respect: only data <= as_of_date.
+    
+    Redis cache: build_company_snapshot results are cached with configurable TTL.
+    Falls back to direct SQL when Redis is unavailable.
     """
 
     def __init__(self, db: Session):
         self.db = db
+
+    def _cache_get(self, key: str) -> Dict[str, Any] | None:
+        """Try to get features from Redis cache."""
+        r = _get_redis()
+        if r is None:
+            return None
+        try:
+            data = r.get(f"{FEATURE_CACHE_PREFIX}{key}")
+            if data:
+                return json.loads(data)
+        except Exception:
+            pass
+        return None
+
+    def _cache_set(self, key: str, features: Dict[str, Any]):
+        """Store features in Redis cache."""
+        r = _get_redis()
+        if r is None:
+            return
+        try:
+            r.setex(
+                f"{FEATURE_CACHE_PREFIX}{key}",
+                FEATURE_CACHE_TTL,
+                json.dumps(features, default=str),
+            )
+        except Exception:
+            pass
 
     def ensure_feature_set(self, *, name: str, version: str, owner: str = "system", description: str = "") -> int:
         row = self.db.execute(
@@ -78,6 +138,12 @@ class FeatureStore:
         self.db.commit()
 
     def build_company_snapshot(self, *, tax_code: str, as_of_date: date) -> Dict[str, Any]:
+        # Check Redis cache first (O(1) vs 3 SQL queries)
+        cache_key = f"company:{tax_code}:{as_of_date}"
+        cached = self._cache_get(cache_key)
+        if cached is not None:
+            return cached
+
         company = self.db.execute(
             text(
                 "SELECT tax_code, industry, risk_score, is_active, registration_date "
@@ -130,6 +196,10 @@ class FeatureStore:
             "payment_sum_paid": float(payment_stats[1] or 0),
             "payment_sum_due": float(payment_stats[2] or 0),
         }
+
+        # Cache the result for subsequent requests
+        self._cache_set(cache_key, features)
+
         return features
 
     def build_invoice_snapshot(self, *, invoice_number: str, as_of_date: date) -> Dict[str, Any]:

@@ -274,9 +274,10 @@ class PreferencePairBuilder:
             from sqlalchemy import text as sql_text
             row = db.execute(sql_text("""
                 SELECT at2.message_text
-                FROM agent_feedback af
+                FROM agent_feedback_events af
                 JOIN agent_turns at2 ON at2.session_id = af.session_id
-                    AND at2.turn_index = af.turn_id AND at2.role = 'assistant'
+                    AND (at2.id = af.turn_id OR at2.turn_index = af.turn_id)
+                    AND at2.role = 'assistant'
                 WHERE af.feedback_type = 'positive' AND af.intent = :intent
                 ORDER BY af.confidence DESC
                 LIMIT 1
@@ -728,10 +729,159 @@ class AutoRetrainController:
 
 
 # ════════════════════════════════════════════════════════════════
+#  Training Status Tracker
+# ════════════════════════════════════════════════════════════════
+
+class DPOTrainingStatusTracker:
+    """
+    Tracks DPO training history and current status for dashboard consumption.
+
+    Thread-safe singleton that records every training run, providing
+    data for the Telemetry Dashboard to show DPO pipeline health.
+    """
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._history: list[dict[str, Any]] = []
+        self._current_status: str = "idle"  # idle | building_pairs | training | evaluating | swapping
+        self._last_run: dict[str, Any] = {}
+
+    def record_run(self, run_data: dict[str, Any]) -> None:
+        """Record a completed training run."""
+        with self._lock:
+            self._history.append({
+                **run_data,
+                "recorded_at": time.time(),
+            })
+            # Keep only last 50 runs
+            if len(self._history) > 50:
+                self._history = self._history[-50:]
+            self._last_run = run_data
+
+    def set_status(self, status: str) -> None:
+        with self._lock:
+            self._current_status = status
+
+    def get_status(self) -> dict[str, Any]:
+        """Get current DPO pipeline status for dashboard."""
+        with self._lock:
+            return {
+                "current_status": self._current_status,
+                "last_run": dict(self._last_run) if self._last_run else None,
+                "total_runs": len(self._history),
+                "history": list(self._history[-10:]),  # Last 10 runs
+                "has_deps": _check_dpo_deps(),
+            }
+
+    def persist_to_db(self, db, run_data: dict[str, Any]) -> bool:
+        """Persist training run to dpo_training_runs table."""
+        try:
+            from sqlalchemy import text as sql_text
+            db.execute(sql_text("""
+                INSERT INTO dpo_training_runs
+                (pairs_count, avg_loss, duration_seconds, adapter_path,
+                 data_hash, ab_verdict, status, triggered_by)
+                VALUES
+                (:pairs_count, :avg_loss, :duration_seconds, :adapter_path,
+                 :data_hash, :ab_verdict, :status, :triggered_by)
+            """), {
+                "pairs_count": run_data.get("pairs_used", run_data.get("pairs_count", 0)),
+                "avg_loss": run_data.get("avg_loss"),
+                "duration_seconds": run_data.get("duration_seconds"),
+                "adapter_path": run_data.get("adapter_path", ""),
+                "data_hash": run_data.get("data_hash", ""),
+                "ab_verdict": run_data.get("ab_verdict", ""),
+                "status": run_data.get("status", run_data.get("action", "unknown")),
+                "triggered_by": run_data.get("triggered_by", "auto"),
+            })
+            db.commit()
+            return True
+        except Exception as exc:
+            logger.debug("[DPO-Tracker] DB persist failed (table may not exist): %s", exc)
+            return False
+
+
+def _check_dpo_deps() -> bool:
+    """Check if torch/transformers/peft are available."""
+    try:
+        import torch
+        import transformers
+        import peft
+        return True
+    except ImportError:
+        return False
+
+
+class DPODryRunner:
+    """
+    Dry-run mode: builds preference pairs + exports JSONL without training.
+
+    Useful when:
+      - DPO dependencies (torch/peft) are not installed
+      - You want to review the training data before committing
+      - Manual trigger from dashboard for data inspection
+    """
+
+    def run(
+        self,
+        feedback_collector,
+        db=None,
+        window_hours: int = 168,
+        triggered_by: str = "manual_dry_run",
+    ) -> dict[str, Any]:
+        """
+        Build pairs and export JSONL without training.
+
+        Returns:
+            Summary with pairs count, export path, and sample data.
+        """
+        builder = PreferencePairBuilder()
+        export_data = feedback_collector.export_training_candidates(
+            window_hours=window_hours,
+        )
+        pairs = builder.build_from_feedback(export_data, db)
+
+        result = {
+            "action": "dry_run",
+            "triggered_by": triggered_by,
+            "pairs_count": len(pairs),
+            "corrections_count": len([p for p in pairs if p.source == "correction"]),
+            "feedback_count": len([p for p in pairs if p.source == "feedback"]),
+            "synthetic_count": len([p for p in pairs if p.source == "synthetic"]),
+            "has_deps": _check_dpo_deps(),
+            "timestamp": time.time(),
+        }
+
+        if pairs:
+            # Export to JSONL
+            export_path = Path(DPO_DIR) / "dry_run_data.jsonl"
+            count = builder.export_to_jsonl(pairs, export_path)
+            result["export_path"] = str(export_path)
+            result["exported_count"] = count
+            # Sample preview (first 3 pairs)
+            result["sample_pairs"] = [
+                {
+                    "prompt": p.prompt[:200],
+                    "chosen_preview": p.chosen[:150],
+                    "rejected_preview": p.rejected[:150],
+                    "intent": p.intent,
+                    "source": p.source,
+                }
+                for p in pairs[:3]
+            ]
+        else:
+            result["message"] = "Không có đủ feedback data để xây dựng preference pairs."
+
+        logger.info("[DPO-DryRun] Completed: %d pairs built", len(pairs))
+        return result
+
+
+# ════════════════════════════════════════════════════════════════
 #  Singleton + Factory
 # ════════════════════════════════════════════════════════════════
 
 _dpo_controller: AutoRetrainController | None = None
+_dpo_status: DPOTrainingStatusTracker | None = None
 
 
 def get_auto_retrain_controller() -> AutoRetrainController:
@@ -742,6 +892,19 @@ def get_auto_retrain_controller() -> AutoRetrainController:
     return _dpo_controller
 
 
+def get_dpo_status_tracker() -> DPOTrainingStatusTracker:
+    """Singleton cho DPOTrainingStatusTracker."""
+    global _dpo_status
+    if _dpo_status is None:
+        _dpo_status = DPOTrainingStatusTracker()
+    return _dpo_status
+
+
 def get_dpo_trainer(config: DPOConfig | None = None) -> DPOTrainer:
     """Factory method cho DPOTrainer."""
     return DPOTrainer(config)
+
+
+def get_dpo_dry_runner() -> DPODryRunner:
+    """Factory method cho DPODryRunner."""
+    return DPODryRunner()

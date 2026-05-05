@@ -668,6 +668,33 @@ def _run_legal_agent_v2_migration(conn) -> None:
     conn.execute(text("CREATE INDEX IF NOT EXISTS idx_legal_claim_verifications_session ON legal_claim_verifications (session_id, turn_id);"))
 
 
+def _run_agent_routing_telemetry_migration(conn) -> None:
+    conn.execute(text("ALTER TABLE agent_feedback_events ADD COLUMN IF NOT EXISTS intent VARCHAR(80);"))
+    conn.execute(text("ALTER TABLE agent_feedback_events ADD COLUMN IF NOT EXISTS confidence FLOAT;"))
+    conn.execute(text("ALTER TABLE agent_feedback_events ADD COLUMN IF NOT EXISTS correction_text TEXT;"))
+    conn.execute(text("ALTER TABLE agent_feedback_events ADD COLUMN IF NOT EXISTS suggested_intent VARCHAR(80);"))
+    conn.execute(text("ALTER TABLE agent_feedback_events ADD COLUMN IF NOT EXISTS metadata_json JSONB;"))
+    conn.execute(text("""
+        CREATE TABLE IF NOT EXISTS agent_route_events (
+            id SERIAL PRIMARY KEY,
+            session_id VARCHAR(120) NOT NULL REFERENCES agent_sessions(session_id) ON DELETE CASCADE,
+            turn_id INTEGER REFERENCES agent_turns(id) ON DELETE SET NULL,
+            dialogue_act VARCHAR(40) NOT NULL DEFAULT 'task',
+            intent VARCHAR(80) NOT NULL,
+            answer_contract VARCHAR(80) NOT NULL,
+            model_mode VARCHAR(40) NOT NULL DEFAULT 'full',
+            selected_tools_json JSONB,
+            suppressed_tools_json JSONB,
+            route_confidence FLOAT,
+            focus_score FLOAT,
+            route_violation BOOLEAN NOT NULL DEFAULT FALSE,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+    """))
+    conn.execute(text("CREATE INDEX IF NOT EXISTS idx_agent_route_events_created ON agent_route_events (created_at DESC);"))
+    conn.execute(text("CREATE INDEX IF NOT EXISTS idx_agent_route_events_contract ON agent_route_events (answer_contract, created_at DESC);"))
+
+
 def run_migration() -> None:
     with engine.begin() as conn:
         _run_safe_user_profile_migration(conn)
@@ -681,8 +708,9 @@ def run_migration() -> None:
         _run_entity_resolution_migration(conn)
         _run_multimodal_upload_migration(conn)
         _run_legal_agent_v2_migration(conn)
+        _run_agent_routing_telemetry_migration(conn)
 
-    print("[OK] Completed migration: user profile columns + offshore proxy mapping + numeric tax_code contract + multimodal uploads + legal agent v2.")
+    print("[OK] Completed migration: user profile columns + offshore proxy mapping + numeric tax_code contract + multimodal uploads + legal agent v2 + agent routing telemetry.")
 
 
 if __name__ == "__main__":

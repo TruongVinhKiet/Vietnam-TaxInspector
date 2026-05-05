@@ -7,7 +7,7 @@
  *   3. Handles 401 responses globally → redirects to login
  */
 
-const API_BASE = "http://localhost:8000/api";
+const API_BASE = window.API_BASE_URL || "http://localhost:8000/api";
 const SIDEBAR_IDENTITY_CACHE_KEY = "taxinspector_sidebar_identity_v1";
 
 const SIDEBAR_ROLE_MAP = {

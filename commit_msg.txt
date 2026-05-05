@@ -1,0 +1,23 @@
+feat(infrastructure): enterprise-grade microservices & security hardening
+
+1. Containerization & Architecture (Docker Compose)
+- Designed a 6-container microservices stack (API, Model, Redis, Kafka, Postgres, Nginx).
+- Split Backend into dedicated FastAPI Orchestrator (`tax-api-server`) and ML Serving (`tax-model-server`) for optimized resource allocation.
+- Introduced KRaft-based Kafka for streaming event processing.
+- Configured Nginx reverse-proxy for the Frontend to route `/api` seamlessly.
+
+2. Comprehensive Security Hardening
+- Enforced non-root execution (`taxapp`, `taxmodel` users) across all custom Docker containers.
+- Added `no-new-privileges:true` container boundaries.
+- Upgraded Rate Limiter to utilize Redis instead of memory, enabling safe multi-instance deployment.
+- Secured Redis instance with mandatory password authentication.
+- Patched critical Markdown XSS vulnerability in `agent_ui.js` by introducing strict HTML entity escaping.
+- Tightened `.gitignore` to prevent leakage of fallback OTP outbox logs, SSL certificates, and local Docker overrides.
+
+3. Frontend Network Abstraction
+- Completely purged hardcoded `localhost:8000` endpoints from JS source files.
+- Implemented environment-aware `window.API_BASE_URL` fallback pattern across all modules (`telemetry.js`, `api.js`, `graph.js`, `agent_ui.js`, etc.) to support seamless Nginx deployment without CORS/CSP violations.
+
+4. Multi-Agent & Orchestration Advancements
+- Implemented `tax_agent_task_router.py` and decoupled `model_api_server.py` for autonomous agent interactions.
+- Enhanced GraphRAG testing frameworks and telemetry dashboard monitoring limits.

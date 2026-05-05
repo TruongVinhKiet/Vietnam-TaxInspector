@@ -1156,23 +1156,12 @@ def _tool_temporal_delinquency_deep(
         builder = PaymentSequenceBuilder()
         seq, mask = builder.build_sequence(payments, [])
 
-        # Load trained model
-        config_path = MODEL_DIR / "temporal_transformer_config.json"
-        model_path = MODEL_DIR / "temporal_transformer.pt"
-        if not model_path.exists():
+        # Load trained model via ModelServingGateway (singleton cache)
+        from ml_engine.model_serving import get_model_gateway
+        model = get_model_gateway().get_model("transformer")
+        if model is None:
             return {"status": "model_not_found", "tax_code": tax_code,
-                    "message": "Temporal Transformer model chua duoc train."}
-
-        with open(config_path) as f:
-            config = json.load(f)
-        model = DelinquencyTransformer(
-            feature_dim=config.get("feature_dim", FEATURE_DIM),
-            d_model=config.get("d_model", 64),
-            nhead=config.get("nhead", 4),
-            num_layers=config.get("num_layers", 3),
-        )
-        model.load_state_dict(torch.load(model_path, map_location="cpu", weights_only=True))
-        model.eval()
+                    "message": "Temporal Transformer model chưa được train."}
 
         with torch.no_grad():
             out_30, out_60, out_90 = model(seq.unsqueeze(0), mask.unsqueeze(0))
@@ -1362,11 +1351,11 @@ def _tool_vae_anomaly_scan(
             builder.fit_scaler(X)
             X_norm = builder.transform(X)
 
-        # Load model
-        input_dim = config.get("input_dim", X_norm.shape[1])
-        model = TransactionVAE(input_dim=input_dim)
-        model.load_state_dict(torch.load(model_path, map_location="cpu", weights_only=True))
-        model.eval()
+        # Load model via ModelServingGateway (singleton cache)
+        from ml_engine.model_serving import get_model_gateway
+        model = get_model_gateway().get_model("vae")
+        if model is None:
+            return {"status": "model_not_found", "tax_code": tax_code}
 
         threshold = config.get("anomaly_threshold", 0.65)
 

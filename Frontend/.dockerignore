@@ -1,0 +1,5 @@
+.git
+.gitignore
+screen/
+*.md
+node_modules/

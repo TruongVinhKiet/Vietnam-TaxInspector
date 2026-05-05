@@ -142,6 +142,12 @@ class OrchestratorResponse:
     visualization_data: dict[str, Any] = field(default_factory=dict)
     # Model mode used
     model_mode: str = "full"
+    # Routing/focus metadata
+    dialogue_act: str = "task"
+    answer_contract: str = "risk_profile"
+    routing_decision: dict[str, Any] = field(default_factory=dict)
+    focus_score: float = 1.0
+    route_violation: bool = False
 
 
 class TaxAgentOrchestrator:
@@ -178,6 +184,7 @@ class TaxAgentOrchestrator:
         self._compliance_gate = None
         self._memory = None
         self._embedding_engine = None
+        self._task_router = None
         # Phase 3: Sub-agents
         self._legal_agent = None
         self._analytics_agent = None
@@ -208,6 +215,10 @@ class TaxAgentOrchestrator:
         # Planner
         from ml_engine.tax_agent_planner import TaxAgentPlanner
         self._planner = TaxAgentPlanner()
+
+        # Focus router
+        from ml_engine.tax_agent_task_router import TaskRouter
+        self._task_router = TaskRouter()
 
         # Tool Registry & Executor
         from ml_engine.tax_agent_tools import get_tool_registry, ToolExecutor
@@ -322,6 +333,11 @@ class TaxAgentOrchestrator:
             plan_steps=done_payload.get("plan_steps", []),
             visualization_data=done_payload.get("visualization_data", {}),
             model_mode=model_mode,
+            dialogue_act=done_payload.get("dialogue_act", "task"),
+            answer_contract=done_payload.get("answer_contract", "risk_profile"),
+            routing_decision=done_payload.get("routing_decision", {}),
+            focus_score=float(done_payload.get("focus_score", 1.0)),
+            route_violation=bool(done_payload.get("route_violation", False)),
         )
 
     # ═══════════════════════════════════════════════════════════════════════
@@ -402,6 +418,150 @@ class TaxAgentOrchestrator:
                 yield {"event": "thinking", "data": {
                     "step": "conv_intel", "detail": f"Đã giải quyết ngữ cảnh: {message[:60]}...",
                 }}
+            if not getattr(conv_intel_result, "should_plan", True):
+                answer = (
+                    conv_intel_result.direct_response
+                    or conv_intel_result.clarification_prompt
+                    or "Bạn có thể cung cấp thêm thông tin để tôi hỗ trợ chính xác hơn."
+                )
+                dialogue_act = getattr(conv_intel_result, "dialogue_act", "smalltalk")
+                direct_intent = "clarification" if dialogue_act == "clarification" else "smalltalk"
+                from ml_engine.tax_agent_task_router import AnswerContract, RoutingDecision
+                routing_decision = RoutingDecision(
+                    intent=direct_intent,
+                    answer_contract=(
+                        AnswerContract.CLARIFICATION
+                        if direct_intent == "clarification" else AnswerContract.SMALLTALK
+                    ),
+                    allowed_tools=set(),
+                    allow_legal=False,
+                    route_confidence=0.98,
+                    reason=dialogue_act,
+                )
+                total_latency = (time.perf_counter() - t_total_start) * 1000.0
+                assistant_turn_id = 0
+                try:
+                    turn_row = db.execute(
+                        sql_text("""
+                            INSERT INTO agent_turns
+                            (session_id, turn_index, role, message_text, normalized_intent, confidence, citations_json)
+                            VALUES (:session_id, :turn_index, 'assistant', :message_text,
+                                    :normalized_intent, :confidence, '[]'::jsonb)
+                            RETURNING id
+                        """),
+                        {
+                            "session_id": session_id,
+                            "turn_index": turn_index + 1,
+                            "message_text": answer,
+                            "normalized_intent": direct_intent,
+                            "confidence": 0.98,
+                        },
+                    ).fetchone()
+                    assistant_turn_id = int(turn_row[0]) if turn_row else 0
+                    db.execute(sql_text("""
+                        INSERT INTO agent_decision_traces
+                        (session_id, turn_id, intent, selected_track, confidence,
+                         abstained, escalation_required, evidence_json, answer_text)
+                        VALUES (:session_id, :turn_id, :intent, :selected_track, :confidence,
+                         FALSE, FALSE, CAST(:evidence_json AS jsonb), :answer_text)
+                    """), {
+                        "session_id": session_id,
+                        "turn_id": assistant_turn_id,
+                        "intent": direct_intent,
+                        "selected_track": "direct",
+                        "confidence": 0.98,
+                        "evidence_json": _json.dumps({
+                            "dialogue_act": dialogue_act,
+                            "routing": routing_decision.to_dict(),
+                        }),
+                        "answer_text": answer,
+                    })
+                    self._persist_route_event(
+                        db,
+                        session_id=session_id,
+                        turn_id=assistant_turn_id,
+                        dialogue_act=dialogue_act,
+                        intent=direct_intent,
+                        model_mode=model_mode,
+                        selected_tools=[],
+                        routing_decision=routing_decision,
+                    )
+                    db.commit()
+                except Exception as exc:
+                    try:
+                        db.rollback()
+                    except Exception:
+                        pass
+                    logger.debug("[Orchestrator:stream] Direct dialogue persist skipped: %s", exc)
+
+                payload = {
+                    "session_id": session_id,
+                    "intent": direct_intent,
+                    "intent_confidence": 0.98,
+                    "complexity": "direct",
+                    "reasoning_trace": f"Direct dialogue act: {dialogue_act}",
+                    "tools_used": [],
+                    "answer": answer,
+                    "summary": answer,
+                    "citations": [],
+                    "recommendations": [],
+                    "confidence": 0.98,
+                    "abstained": False,
+                    "escalation_required": False,
+                    "escalation_domain": "none",
+                    "compliance_warnings": [],
+                    "active_tax_code": context.active_tax_code,
+                    "active_tax_period": context.active_tax_period,
+                    "latency_ms": round(total_latency, 1),
+                    "latency_breakdown": {k: round(v, 1) for k, v in latency_breakdown.items()},
+                    "synthesis_tier": "direct",
+                    "verification": {},
+                    "clarification_needed": direct_intent == "clarification",
+                    "clarification_questions": [answer] if direct_intent == "clarification" else [],
+                    "tool_results": {},
+                    "policy_traces": [],
+                    "visualization_data": {},
+                    "model_mode": model_mode,
+                    "plan_steps": [],
+                    "dialogue_act": dialogue_act,
+                    "answer_contract": routing_decision.answer_contract.value,
+                    "routing_decision": routing_decision.to_dict(),
+                    "focus_score": routing_decision.focus_score,
+                    "route_violation": routing_decision.route_violation,
+                }
+                try:
+                    from ml_engine.tax_agent_telemetry import get_telemetry
+                    get_telemetry().record_from_orchestrator(OrchestratorResponse(
+                        session_id=session_id,
+                        intent=direct_intent,
+                        intent_confidence=0.98,
+                        complexity="direct",
+                        reasoning_trace=payload["reasoning_trace"],
+                        tools_used=[],
+                        answer=answer,
+                        summary=answer,
+                        citations=[],
+                        recommendations=[],
+                        confidence=0.98,
+                        abstained=False,
+                        escalation_required=False,
+                        escalation_domain="none",
+                        compliance_warnings=[],
+                        active_tax_code=context.active_tax_code,
+                        active_tax_period=context.active_tax_period,
+                        latency_ms=total_latency,
+                        latency_breakdown=latency_breakdown,
+                        tool_results={},
+                        synthesis_tier="direct",
+                        dialogue_act=dialogue_act,
+                        answer_contract=routing_decision.answer_contract.value,
+                        routing_decision=routing_decision.to_dict(),
+                    ))
+                except Exception as exc:
+                    logger.debug("[Orchestrator:stream] Direct telemetry skipped: %s", exc)
+                yield {"event": "text_chunk", "data": {"chunk": answer}}
+                yield {"event": "done", "data": payload}
+                return
             if conv_intel_result.is_ambiguous and conv_intel_result.clarification_prompt:
                 # Return clarification instead of running full pipeline
                 yield {"event": "text_chunk", "data": {"chunk": conv_intel_result.clarification_prompt}}
@@ -471,7 +631,9 @@ class TaxAgentOrchestrator:
                     for ent in multi_intent_result.extracted_entities:
                         if ent.get("type") == "quantity":
                             quantity = min(50, max(1, int(ent["value"])))
-                nl_results = nl_executor.execute_top_n(db, n=quantity, sort_by="risk_score", mode=model_mode)
+                nl_results["top_n_risky_companies"] = nl_executor.execute_top_n(
+                    db, n=quantity, sort_by="risk_score", mode=model_mode,
+                )
 
             elif intent == "company_name_lookup":
                 company_name = ""
@@ -481,14 +643,14 @@ class TaxAgentOrchestrator:
                             company_name = ent["value"]
                 if company_name:
                     yield {"event": "thinking", "data": {"step": "nl_query", "detail": f"Đang tìm DN: {company_name}..."}}
-                    nl_results = nl_executor.execute_company_name_search(db, name=company_name)
-                    matches = nl_results.get("matches", [])
+                    nl_results["company_name_search"] = nl_executor.execute_company_name_search(db, name=company_name)
+                    matches = nl_results["company_name_search"].get("matches", [])
                     if len(matches) == 1:
                         context.active_tax_code = matches[0]["tax_code"]
 
             if attachment_analysis:
                 analysis_type = str(attachment_analysis.get("analysis_type") or attachment_analysis.get("detected_schema", "attachment"))
-                yield {"event": "thinking", "data": {"step": "attachment", "detail": f"Da phan tich tep dinh kem: {analysis_type}"}}
+                yield {"event": "thinking", "data": {"step": "attachment", "detail": f"Đã phân tích tệp đính kèm: {analysis_type}"}}
                 nl_results["_attachment_analysis"] = attachment_analysis
                 if analysis_type == "risk_csv":
                     intent = "batch_analysis"
@@ -511,6 +673,15 @@ class TaxAgentOrchestrator:
             logger.warning("[Orchestrator:stream] NL query error: %s", exc)
         latency_breakdown["nl_query"] = (time.perf_counter() - t0) * 1000.0
 
+        routing_decision = self._task_router.route(
+            query=message,
+            intent=intent,
+            model_mode=model_mode,
+            has_attachment=bool(attachment_analysis or csv_attachment),
+        )
+        if not routing_decision.allow_legal and intent == "top_n_query":
+            context.active_tax_code = None
+
         # ─── Step 3: Planning ───────────────────────────────────────────
         yield {"event": "thinking", "data": {"step": "planning", "detail": "Đang lập kế hoạch phân tích..."}}
         t0 = time.perf_counter()
@@ -519,6 +690,16 @@ class TaxAgentOrchestrator:
         allowed_tools = mode_profile.get("required_tools")
         allowed_optional = set(mode_profile.get("optional_tools", []))
         allowed_sub_agents = set(mode_profile.get("sub_agents", ["legal", "analytics", "investigation"]))
+        if routing_decision.allowed_tools is not None:
+            route_tools = set(routing_decision.allowed_tools)
+            allowed_tools = (
+                route_tools
+                if allowed_tools is None
+                else set(allowed_tools).intersection(route_tools)
+            )
+            allowed_optional = allowed_optional.intersection(route_tools)
+        if not routing_decision.allow_legal:
+            allowed_sub_agents.discard("legal")
         plan = self._planner.plan(
             query=message,
             intent=intent,
@@ -527,6 +708,10 @@ class TaxAgentOrchestrator:
             tax_period=context.active_tax_period,
             context_intents=context.active_intent_history,
         )
+        if routing_decision.allowed_tools is not None:
+            plan.steps = [s for s in plan.steps if s.tool_name in routing_decision.allowed_tools]
+        elif not routing_decision.allow_legal:
+            plan.steps = [s for s in plan.steps if s.tool_name != "knowledge_search"]
         budget_ms = int(getattr(plan, "budget_ms", 30000) or 30000)
         latency_breakdown["planning"] = (time.perf_counter() - t0) * 1000.0
 
@@ -551,6 +736,9 @@ class TaxAgentOrchestrator:
         for stage in stages:
             requests = []
             for step in stage:
+                existing = all_tool_results.get(step.tool_name)
+                if existing and existing.get("status") in {"success", "partial", "found", "analyzed"}:
+                    continue
                 if step.optional and intent_conf <= 0.6:
                     continue
                 if allowed_tools is not None and step.tool_name not in allowed_tools and step.tool_name not in allowed_optional:
@@ -725,19 +913,35 @@ class TaxAgentOrchestrator:
                 }
                 yield {"event": "sub_agent", "data": {"agent": "analytics", "status": "done"}}
 
-            if context.active_tax_code and plan.complexity.value in ("complex", "investigation") and "investigation" in allowed_sub_agents:
-                if intent in ("osint_ownership", "invoice_risk", "vat_refund_risk"):
-                    yield {"event": "sub_agent", "data": {"agent": "investigation", "status": "running", "detail": "Điều tra chuyên sâu..."}}
-                    inv_report = self._investigation_agent.investigate(
-                        tax_code=context.active_tax_code, tool_results=all_tool_results, intent=intent,
-                    )
-                    sub_agent_analysis["investigation"] = {
-                        "suspicion_level": inv_report.suspicion_level.value, "overall_score": inv_report.overall_score,
-                        "executive_summary": inv_report.executive_summary, "detailed_findings": inv_report.detailed_findings,
-                        "patterns_count": len(inv_report.suspicious_patterns), "escalation_level": inv_report.escalation_level,
-                        "recommended_actions": inv_report.recommended_actions, "confidence": inv_report.confidence,
-                    }
-                    yield {"event": "sub_agent", "data": {"agent": "investigation", "status": "done"}}
+            # G1: Expanded Investigation Agent trigger — enables 3-agent debate
+            # for more queries, not just the original 3 intents.
+            _investigation_intents = {
+                "osint_ownership", "invoice_risk", "vat_refund_risk",
+                "general_tax_query", "transfer_pricing", "vat_network_analysis",
+                "batch_analysis",
+            }
+            _should_investigate = (
+                context.active_tax_code
+                and plan.complexity.value in ("moderate", "complex", "investigation")
+                and "investigation" in allowed_sub_agents
+                and (
+                    intent in _investigation_intents
+                    or model_mode in ("fraud", "full")
+                    or react_escalate
+                )
+            )
+            if _should_investigate:
+                yield {"event": "sub_agent", "data": {"agent": "investigation", "status": "running", "detail": "Điều tra chuyên sâu..."}}
+                inv_report = self._investigation_agent.investigate(
+                    tax_code=context.active_tax_code, tool_results=all_tool_results, intent=intent,
+                )
+                sub_agent_analysis["investigation"] = {
+                    "suspicion_level": inv_report.suspicion_level.value, "overall_score": inv_report.overall_score,
+                    "executive_summary": inv_report.executive_summary, "detailed_findings": inv_report.detailed_findings,
+                    "patterns_count": len(inv_report.suspicious_patterns), "escalation_level": inv_report.escalation_level,
+                    "recommended_actions": inv_report.recommended_actions, "confidence": inv_report.confidence,
+                }
+                yield {"event": "sub_agent", "data": {"agent": "investigation", "status": "done"}}
 
         except Exception as exc:
             logger.warning("[Orchestrator:stream] Sub-agent error: %s", exc)
@@ -776,6 +980,7 @@ class TaxAgentOrchestrator:
         synthesis_result = self._synthesizer.synthesize(
             query=message, intent=intent, tool_results=enriched_tool_results,
             reasoning_trace=plan.reasoning, tax_code=context.active_tax_code,
+            answer_contract=routing_decision.answer_contract.value,
         )
         answer = self._synthesizer.format_response_text(synthesis_result)
         answer = self._enrich_with_sub_agents(answer, sub_agent_analysis)
@@ -834,6 +1039,11 @@ class TaxAgentOrchestrator:
         if react_escalate:
             compliance_warnings.append("ReAct detected contradictions that require deeper investigation.")
 
+        routing_decision = self._task_router.evaluate_focus(
+            decision=routing_decision,
+            selected_tools=list(all_tool_results.keys()),
+            answer_text=answer,
+        )
         latency_breakdown["compliance"] = (time.perf_counter() - t0) * 1000.0
 
         # Stream only the final post-compliance answer.
@@ -885,6 +1095,7 @@ class TaxAgentOrchestrator:
                     "retry_policy": getattr(plan, "retry_policy", {}),
                     "evidence_contract": getattr(plan, "evidence_contract", {}),
                 },
+                "routing": routing_decision.to_dict(),
                 "react": react_reflections,
                 "debate": debate_result_dict,
                 "legal_review": legal_review,
@@ -908,6 +1119,17 @@ class TaxAgentOrchestrator:
                 "tool_output": _json.dumps({k: v for k, v in result.items() if not k.startswith("_")}, default=str),
                 "status": result.get("status", "unknown"), "latency_ms": result.get("_latency_ms"),
             })
+
+        self._persist_route_event(
+            db,
+            session_id=session_id,
+            turn_id=assistant_turn_id,
+            dialogue_act=getattr(conv_intel_result, "dialogue_act", "task") if conv_intel_result else "task",
+            intent=intent,
+            model_mode=model_mode,
+            selected_tools=list(all_tool_results.keys()),
+            routing_decision=routing_decision,
+        )
 
         self._persist_execution_plan(
             db,
@@ -998,6 +1220,11 @@ class TaxAgentOrchestrator:
                 plan_steps=[{"tool": s.tool_name, "description": s.description, "optional": getattr(s, 'optional', False)} for s in plan.steps],
                 visualization_data=viz_data,
                 model_mode=model_mode,
+                dialogue_act=getattr(conv_intel_result, "dialogue_act", "task") if conv_intel_result else "task",
+                answer_contract=routing_decision.answer_contract.value,
+                routing_decision=routing_decision.to_dict(),
+                focus_score=routing_decision.focus_score,
+                route_violation=routing_decision.route_violation,
             )
             get_telemetry().record_from_orchestrator(telemetry_resp)
         except Exception as e:
@@ -1029,12 +1256,35 @@ class TaxAgentOrchestrator:
             if legal_review.get("disagreements"):
                 escalations.append("Xung đột pháp lý chưa giải quyết triệt để.")
 
+        # G5+G6: Inject debate conclusions and adjudicator verdict
+        debate_conclusions = []
+        if debate_result_dict:
+            consensus_pct = debate_result_dict.get("consensus_pct", 0)
+            debate_conclusions.append(
+                f"Đồng thuận agent: {consensus_pct}% — "
+                f"{debate_result_dict.get('consensus_label', 'N/A')}"
+            )
+            for d in debate_result_dict.get("disagreements", [])[:3]:
+                topic = d.get("topic", "")
+                severity = d.get("severity", "")
+                debate_conclusions.append(f"Bất đồng [{severity}]: {topic}")
+
+            adj = debate_result_dict.get("adjudicator_verdict")
+            if adj:
+                verdict_vi = adj.get("verdict_vi", "")
+                strongest = adj.get("strongest_agent_label", "")
+                debate_conclusions.append(
+                    f"⚖️ Trọng tài: {verdict_vi} (bằng chứng mạnh nhất: {strongest})"
+                )
+                escalations.append(adj.get("recommended_action", ""))
+
         legal_workspace = {
             "facts": facts,
             "assumptions": assumptions,
             "open_questions": open_questions,
             "verifications": verifications,
             "escalations": escalations,
+            "debate_conclusions": debate_conclusions,
         }
 
         yield {"event": "done", "data": {
@@ -1074,6 +1324,11 @@ class TaxAgentOrchestrator:
             ],
             "visualization_data": viz_data,
             "model_mode": model_mode,
+            "dialogue_act": getattr(conv_intel_result, "dialogue_act", "task") if conv_intel_result else "task",
+            "answer_contract": routing_decision.answer_contract.value,
+            "routing_decision": routing_decision.to_dict(),
+            "focus_score": routing_decision.focus_score,
+            "route_violation": routing_decision.route_violation,
             "plan_budget_ms": budget_ms,
             "retry_policy": getattr(plan, "retry_policy", {}),
             "evidence_contract": getattr(plan, "evidence_contract", {}),
@@ -1269,6 +1524,56 @@ class TaxAgentOrchestrator:
         )
         penalty = (1.0 - consensus) * 0.25 + min(0.2, severe_count * 0.08)
         return round(max(0.05, min(0.98, float(confidence) - penalty)), 4)
+
+    def _persist_route_event(
+        self,
+        db,
+        *,
+        session_id: str,
+        turn_id: int,
+        dialogue_act: str,
+        intent: str,
+        model_mode: str,
+        selected_tools: list[str],
+        routing_decision,
+    ) -> None:
+        nested = None
+        try:
+            if hasattr(db, "begin_nested"):
+                nested = db.begin_nested()
+            selected = list(selected_tools or [])
+            suppressed = list(getattr(routing_decision, "suppressed_tools", set()) or [])
+            db.execute(sql_text("""
+                INSERT INTO agent_route_events
+                (session_id, turn_id, dialogue_act, intent, answer_contract, model_mode,
+                 selected_tools_json, suppressed_tools_json, route_confidence,
+                 focus_score, route_violation)
+                VALUES
+                (:session_id, :turn_id, :dialogue_act, :intent, :answer_contract, :model_mode,
+                 CAST(:selected_tools_json AS jsonb), CAST(:suppressed_tools_json AS jsonb),
+                 :route_confidence, :focus_score, :route_violation)
+            """), {
+                "session_id": session_id,
+                "turn_id": turn_id,
+                "dialogue_act": dialogue_act,
+                "intent": intent,
+                "answer_contract": getattr(routing_decision.answer_contract, "value", str(routing_decision.answer_contract)),
+                "model_mode": model_mode,
+                "selected_tools_json": json.dumps(selected, default=str),
+                "suppressed_tools_json": json.dumps(suppressed, default=str),
+                "route_confidence": float(getattr(routing_decision, "route_confidence", 0.0) or 0.0),
+                "focus_score": float(getattr(routing_decision, "focus_score", 1.0) or 1.0),
+                "route_violation": bool(getattr(routing_decision, "route_violation", False)),
+            })
+            if nested is not None:
+                nested.commit()
+        except Exception as exc:
+            if nested is not None:
+                try:
+                    nested.rollback()
+                except Exception:
+                    pass
+            logger.debug("[Orchestrator] route event persist skipped: %s", exc)
 
     def _persist_execution_plan(
         self,
@@ -1650,6 +1955,21 @@ class TaxAgentOrchestrator:
     def _rule_based_intent(self, message: str) -> tuple[str, float]:
         """Keyword-based intent fallback."""
         normalized = message.lower()
+        try:
+            import unicodedata
+            plain = unicodedata.normalize("NFD", normalized)
+            plain = "".join(ch for ch in plain if unicodedata.category(ch) != "Mn")
+            plain = plain.replace("đ", "d").replace("Đ", "D")
+        except Exception:
+            plain = normalized
+        if (
+            "top" in plain
+            or "danh sach" in plain
+            or "liet ke" in plain
+            or "cao nhat" in plain
+            or "xep hang" in plain
+        ) and ("doanh" in plain or "cong ty" in plain or "dn" in plain):
+            return "top_n_query", 0.9
         best = ("general_tax_query", 0.15)
         for intent, keywords in self.INTENT_RULES.items():
             score = sum(1 for kw in keywords if kw in normalized)

@@ -115,3 +115,24 @@ Frontend/assets/
 .idea/
 .DS_Store
 Thumbs.db
+
+# ─── Security & Sensitive Data ────────
+# OTP/Password reset fallbacks
+*.otp_outbox.log
+.otp_outbox.log
+Backend/.otp_outbox.log
+
+# Docker overrides
+docker-compose.override.yml
+docker-compose.override.yaml
+
+# SSL/TLS Certificates
+certs/
+*.pem
+*.crt
+*.key
+*.p12
+
+# Global logs (in addition to *.log)
+logs/
+*.log

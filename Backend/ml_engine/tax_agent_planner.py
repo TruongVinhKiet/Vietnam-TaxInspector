@@ -160,10 +160,10 @@ class TaxAgentPlanner:
             "invoice_risk_scan", "nlp_red_flag_scan",
         ],
         "top_n_query": [
-            "knowledge_search",
+            "top_n_risky_companies",
         ],
         "company_name_lookup": [
-            "knowledge_search", "company_risk_lookup",
+            "company_name_search",
         ],
         "batch_analysis": [
             "knowledge_search",
@@ -319,8 +319,8 @@ class TaxAgentPlanner:
         default_tools = list(self.INTENT_TOOL_MAP.get(intent, ["knowledge_search"]))
 
         if complexity == QueryComplexity.SIMPLE:
-            # Only retrieval for simple queries
-            return ["knowledge_search"]
+            # Preserve direct-data tools for simple lookup intents.
+            return default_tools[:1]
 
         if complexity == QueryComplexity.MODERATE:
             # Primary tools only
@@ -374,6 +374,37 @@ class TaxAgentPlanner:
 
         # Stage 2: Analytics tools (parallel, depend on nothing or retrieval)
         analytics_step_ids = []
+
+        if "top_n_risky_companies" in tools:
+            n = 10
+            quantity_match = re.search(r"\b(?:top\s*)?(\d{1,2})\b", query.lower())
+            if quantity_match:
+                try:
+                    n = min(50, max(1, int(quantity_match.group(1))))
+                except Exception:
+                    n = 10
+            steps.append(SubTask(
+                step_id=step_id,
+                step_type=PlanStep.LOOKUP_COMPANY,
+                tool_name="top_n_risky_companies",
+                tool_inputs={"n": n, "sort_by": "risk_score"},
+                description=f"Tra cứu top {n} doanh nghiệp rủi ro cao nhất",
+                priority=1,
+            ))
+            analytics_step_ids.append(step_id)
+            step_id += 1
+
+        if "company_name_search" in tools:
+            steps.append(SubTask(
+                step_id=step_id,
+                step_type=PlanStep.LOOKUP_COMPANY,
+                tool_name="company_name_search",
+                tool_inputs={"name": query},
+                description="Tra cứu doanh nghiệp theo tên",
+                priority=1,
+            ))
+            analytics_step_ids.append(step_id)
+            step_id += 1
 
         if "company_risk_lookup" in tools and tax_code:
             steps.append(SubTask(

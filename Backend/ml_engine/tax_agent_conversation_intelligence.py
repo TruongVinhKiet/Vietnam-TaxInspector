@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import logging
 import re
+import unicodedata
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -44,6 +45,9 @@ class ConversationIntelligenceResult:
     clarification_prompt: str | None = None  # Suggested clarification question
     resolved_entities: dict[str, str] = field(default_factory=dict)  # What was resolved
     comparison_targets: list[str] = field(default_factory=list)  # For comparison queries
+    dialogue_act: str = "task"            # task | greeting | smalltalk | thanks | goodbye | help | clarification
+    direct_response: str | None = None    # Direct answer for non-task dialogue acts
+    should_plan: bool = True              # False when orchestrator should skip planner/tools
 
     def to_dict(self) -> dict:
         return {
@@ -56,6 +60,9 @@ class ConversationIntelligenceResult:
             "clarification_prompt": self.clarification_prompt,
             "resolved_entities": self.resolved_entities,
             "comparison_targets": self.comparison_targets,
+            "dialogue_act": self.dialogue_act,
+            "direct_response": self.direct_response,
+            "should_plan": self.should_plan,
         }
 
 
@@ -129,6 +136,15 @@ TOPIC_EXPANSION: dict[str, str] = {
 MST_PATTERN = re.compile(r"\b(\d{10}(?:-\d{3})?)\b")
 
 
+def _normalize_dialogue_text(value: str) -> str:
+    """Lowercase and strip Vietnamese accents for robust dialogue-act rules."""
+    normalized = unicodedata.normalize("NFD", value or "")
+    stripped = "".join(ch for ch in normalized if unicodedata.category(ch) != "Mn")
+    stripped = stripped.replace("đ", "d").replace("Đ", "D")
+    stripped = re.sub(r"[^\w\s]", " ", stripped.lower())
+    return re.sub(r"\s+", " ", stripped).strip()
+
+
 # ════════════════════════════════════════════════════════════════
 #  Main Intelligence Engine
 # ════════════════════════════════════════════════════════════════
@@ -188,6 +204,23 @@ class ConversationIntelligence:
         clarification_prompt = None
         comparison_targets: list[str] = []
 
+        dialogue_act, direct_response = self._detect_dialogue_act(resolved)
+        if dialogue_act != "task":
+            return ConversationIntelligenceResult(
+                original_message=message,
+                resolved_message=resolved,
+                is_followup=False,
+                is_comparison=False,
+                is_ambiguous=False,
+                ambiguity_reason=None,
+                clarification_prompt=None,
+                resolved_entities={},
+                comparison_targets=[],
+                dialogue_act=dialogue_act,
+                direct_response=direct_response,
+                should_plan=False,
+            )
+
         # Step 1: Check if it's a comparison query
         is_comparison, comparison_targets, resolved = self._check_comparison(resolved)
 
@@ -235,6 +268,9 @@ class ConversationIntelligence:
             clarification_prompt=clarification_prompt,
             resolved_entities=resolved_entities,
             comparison_targets=comparison_targets,
+            dialogue_act="clarification" if is_ambiguous else "task",
+            direct_response=clarification_prompt if is_ambiguous else None,
+            should_plan=not is_ambiguous,
         )
 
         if resolved != message:
@@ -244,6 +280,54 @@ class ConversationIntelligence:
             )
 
         return result
+
+    def _detect_dialogue_act(self, message: str) -> tuple[str, str | None]:
+        """Handle social/help utterances before ambiguity detection and planning."""
+        text = _normalize_dialogue_text(message)
+        if not text:
+            return "clarification", "Bạn có thể nhập câu hỏi hoặc yêu cầu cần phân tích nhé."
+
+        greeting_exact = {
+            "hi", "hello", "hey", "xin chao", "chao", "chao ban",
+            "xin chao ban", "alo", "alo ban oi",
+        }
+        thanks_exact = {
+            "cam on", "cam on ban", "thank you", "thanks", "ok cam on",
+        }
+        goodbye_exact = {"tam biet", "bye", "goodbye", "hen gap lai"}
+        help_exact = {
+            "ban lam duoc gi", "ban co the lam gi", "tro giup", "help",
+            "huong dan", "cach su dung", "agent lam duoc gi",
+        }
+
+        if text in greeting_exact:
+            return (
+                "greeting",
+                "Xin chào! Tôi là Trợ lý Phân tích Thuế AI — sẵn sàng hỗ trợ tra cứu pháp luật thuế, "
+                "chấm điểm rủi ro doanh nghiệp, phân tích VAT/hóa đơn, dự báo nợ đọng, "
+                "và xử lý tệp CSV/ảnh/PDF. Bạn cần phân tích gì hôm nay?",
+            )
+        if text in thanks_exact:
+            return "thanks", "Rất vui được hỗ trợ! Khi cần phân tích thêm, bạn cứ gửi yêu cầu tiếp theo nhé."
+        if text in goodbye_exact:
+            return "goodbye", "Tạm biệt! Dữ liệu và lịch sử phân tích sẽ được lưu giữ trong phiên hiện tại. Hẹn gặp lại!"
+        if text in help_exact:
+            return (
+                "help",
+                "Bạn có thể hỏi bằng ngôn ngữ tự nhiên, ví dụ:\n"
+                "• \"Top 10 doanh nghiệp rủi ro cao nhất\"\n"
+                "• \"Phân tích MST 0312345678\"\n"
+                "• \"Thuế suất GTGT cho hàng xuất khẩu là bao nhiêu?\"\n"
+                "Hoặc upload CSV/ảnh/PDF để hệ thống tự định tuyến model phù hợp.",
+            )
+
+        if len(text.split()) <= 3 and any(token in text.split() for token in {"chao", "hello", "hi", "hey"}):
+            return (
+                "greeting",
+                "Xin chào! Bạn có thể gửi MST, tên doanh nghiệp, câu hỏi pháp lý, hoặc tệp cần phân tích.",
+            )
+
+        return "task", None
 
     # ─── Coreference Resolution ──────────────────────────────────
 

@@ -27,7 +27,7 @@ from enum import Enum
 from typing import Any
 
 import numpy as np
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
+from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Request, UploadFile
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import text
@@ -170,6 +170,12 @@ class ChatResponseV2(BaseModel):
     model_mode: str = "full"
     # Structured result from CSV/image/PDF upload, when present
     attachment_analysis: dict[str, Any] = Field(default_factory=dict)
+    # Routing/focus metadata
+    dialogue_act: str = "task"
+    answer_contract: str = "risk_profile"
+    routing_decision: dict[str, Any] = Field(default_factory=dict)
+    focus_score: float = 1.0
+    route_violation: bool = False
 
 
 class AgentStatus(BaseModel):
@@ -806,6 +812,11 @@ def _build_v2_response(orch_response, *, model_mode: str = "full") -> dict:
         visualization_data=orch_response.visualization_data,
         model_mode=model_mode,
         attachment_analysis=orch_response.tool_results.get("_attachment_analysis", {}),
+        dialogue_act=getattr(orch_response, "dialogue_act", "task"),
+        answer_contract=getattr(orch_response, "answer_contract", "risk_profile"),
+        routing_decision=getattr(orch_response, "routing_decision", {}),
+        focus_score=getattr(orch_response, "focus_score", 1.0),
+        route_violation=getattr(orch_response, "route_violation", False),
     )
 
 
@@ -1031,13 +1042,13 @@ def submit_feedback(req: FeedbackRequest, db: Session = Depends(get_db)):
 
 
 @router.get("/feedback/stats")
-def feedback_statistics(window_hours: int = 24):
+def feedback_statistics(window_hours: int = 24, db: Session = Depends(get_db)):
     """Get aggregated feedback statistics."""
     try:
         from ml_engine.tax_agent_feedback import get_feedback_collector
 
         collector = get_feedback_collector()
-        return collector.get_statistics(window_hours=window_hours)
+        return collector.get_statistics(window_hours=window_hours, db=db)
     except Exception as exc:
         return {"error": str(exc)}
 
@@ -1091,12 +1102,243 @@ def telemetry_dashboard(window_minutes: int = 60, db: Session = Depends(get_db))
 
 
 @router.get("/telemetry/drift")
-def telemetry_drift(window_hours: int = 24):
+def telemetry_drift(window_hours: int = 24, db: Session = Depends(get_db)):
     """Detect intent distribution drift."""
     try:
         from ml_engine.tax_agent_telemetry import get_telemetry
 
         telemetry = get_telemetry()
-        return telemetry.get_intent_drift(window_hours=window_hours)
+        return telemetry.get_intent_drift(window_hours=window_hours, db=db)
     except Exception as exc:
         return {"error": str(exc)}
+
+
+# ═══════════════════════════════════════════════════════════════════════
+#  DPO / RLHF PIPELINE ENDPOINTS (G8: Closed Feedback Loop)
+# ═══════════════════════════════════════════════════════════════════════
+
+@router.get("/dpo/status")
+def dpo_training_status():
+    """
+    Get current DPO training pipeline status for the Telemetry Dashboard.
+    Returns: current status, last run info, history, and dependency check.
+    """
+    try:
+        from ml_engine.rlhf_dpo_trainer import get_dpo_status_tracker
+        tracker = get_dpo_status_tracker()
+        return tracker.get_status()
+    except Exception as exc:
+        return {"current_status": "unavailable", "error": str(exc)}
+
+
+@router.post("/dpo/trigger")
+def dpo_trigger_retrain(
+    dry_run: bool = False,
+    window_hours: int = 168,
+    x_admin_token: str | None = Header(None, alias="X-Admin-Token"),
+    db: Session = Depends(get_db),
+):
+    """
+    Manually trigger DPO retraining or dry-run.
+
+    Args:
+        dry_run: If True, only build pairs + export JSONL (no training).
+        window_hours: Feedback window to consider (default 1 week).
+
+    Returns:
+        Training or dry-run result summary.
+    """
+    if x_admin_token != "super_secret_admin_token_2026":
+        raise HTTPException(status_code=403, detail="Unauthorized: Senior AI admin role required to trigger retraining.")
+
+    try:
+        from ml_engine.tax_agent_feedback import get_feedback_collector
+        from ml_engine.rlhf_dpo_trainer import (
+            get_auto_retrain_controller,
+            get_dpo_status_tracker,
+            get_dpo_dry_runner,
+        )
+
+        collector = get_feedback_collector()
+        tracker = get_dpo_status_tracker()
+
+        if dry_run:
+            tracker.set_status("dry_run")
+            runner = get_dpo_dry_runner()
+            result = runner.run(
+                collector,
+                db=db,
+                window_hours=window_hours,
+                triggered_by="manual_dry_run",
+            )
+            tracker.record_run(result)
+            tracker.set_status("idle")
+            return result
+
+        # Full retrain
+        tracker.set_status("building_pairs")
+        controller = get_auto_retrain_controller()
+
+        # Force retrain by temporarily zeroing the last check
+        import time as _time
+        controller._last_check = 0.0
+
+        tracker.set_status("training")
+        result = controller.run_auto_retrain(collector, db=db)
+        result["triggered_by"] = "manual"
+
+        tracker.record_run(result)
+        tracker.persist_to_db(db, result)
+        tracker.set_status("idle")
+
+        return result
+    except Exception as exc:
+        return {"status": "error", "error": str(exc)}
+
+
+@router.post("/dpo/dry-run")
+def dpo_dry_run(
+    window_hours: int = 168,
+    db: Session = Depends(get_db),
+):
+    """
+    Build DPO preference pairs and export to JSONL without training.
+    Use this to inspect training data quality before committing to a full run.
+    """
+    try:
+        from ml_engine.tax_agent_feedback import get_feedback_collector
+        from ml_engine.rlhf_dpo_trainer import get_dpo_dry_runner, get_dpo_status_tracker
+
+        collector = get_feedback_collector()
+        tracker = get_dpo_status_tracker()
+
+        tracker.set_status("dry_run")
+        runner = get_dpo_dry_runner()
+        result = runner.run(
+            collector,
+            db=db,
+            window_hours=window_hours,
+            triggered_by="manual_dry_run",
+        )
+        tracker.record_run(result)
+        tracker.set_status("idle")
+
+        return result
+    except Exception as exc:
+        return {"status": "error", "error": str(exc)}
+
+
+# ════════════════════════════════════════════════════════════════════════
+#  PHASE B: Infrastructure — Event-Driven Pipeline & Model Serving
+# ════════════════════════════════════════════════════════════════════════
+
+
+class InvoiceEventPayload(BaseModel):
+    """Payload for real-time invoice event from E-Invoice system."""
+    invoice_number: str = Field(..., description="Số hóa đơn")
+    seller_tax_code: str = Field(..., description="MST bên bán")
+    buyer_tax_code: str = Field(..., description="MST bên mua")
+    amount: float = Field(..., description="Giá trị hóa đơn (VNĐ)")
+    vat_rate: float = Field(default=10.0, description="Thuế suất GTGT (%)")
+    date: str = Field(default="", description="Ngày hóa đơn (ISO format)")
+    goods_category: str = Field(default="", description="Loại hàng hóa/dịch vụ")
+    payment_status: str = Field(default="pending", description="Trạng thái thanh toán")
+    source: str = Field(default="webhook", description="Nguồn dữ liệu")
+
+
+@router.post("/events/invoice", tags=["streaming-pipeline"])
+async def process_invoice_event(payload: InvoiceEventPayload):
+    """
+    Receive real-time invoice events from E-Invoice system.
+
+    This endpoint processes the event through the StreamingFeaturePipeline:
+    1. Computes incremental features (O(1), no SQL query)
+    2. Caches features to Redis
+    3. Runs VAE anomaly scoring
+    4. If anomaly detected → publishes alert to Kafka topic
+
+    Returns:
+        Processing result with anomaly score and any generated alerts.
+    """
+    try:
+        from ml_engine.streaming_feature_pipeline import get_streaming_pipeline
+        pipeline = get_streaming_pipeline()
+        result = await pipeline.process_invoice_event(payload.dict())
+        return result
+    except Exception as exc:
+        return {"status": "error", "error": str(exc)}
+
+
+@router.get("/infrastructure/model-serving", tags=["infrastructure"])
+def get_model_serving_status():
+    """
+    Get status of the ModelServingGateway (singleton model cache).
+
+    Returns:
+        Status of all registered models: loaded/unloaded, access counts,
+        memory usage, cache capacity.
+    """
+    try:
+        from ml_engine.model_serving import get_model_gateway
+        gateway = get_model_gateway()
+        return gateway.get_status()
+    except Exception as exc:
+        return {"status": "error", "error": str(exc)}
+
+
+@router.get("/infrastructure/streaming-pipeline", tags=["infrastructure"])
+def get_streaming_pipeline_status():
+    """
+    Get status of the StreamingFeaturePipeline.
+
+    Returns:
+        Pipeline metrics: events processed, anomalies detected,
+        Kafka/Redis connectivity, recent alerts queue.
+    """
+    try:
+        from ml_engine.streaming_feature_pipeline import get_streaming_pipeline
+        pipeline = get_streaming_pipeline()
+        return pipeline.get_status()
+    except Exception as exc:
+        return {"status": "error", "error": str(exc)}
+
+
+@router.get("/infrastructure/alerts", tags=["infrastructure"])
+def get_anomaly_alerts(limit: int = 20):
+    """
+    Get recent anomaly alerts from the streaming pipeline.
+
+    Args:
+        limit: Maximum number of alerts to return (default 20).
+
+    Returns:
+        List of recent anomaly alerts with severity, scores, and features.
+    """
+    try:
+        from ml_engine.streaming_feature_pipeline import get_streaming_pipeline
+        pipeline = get_streaming_pipeline()
+        alerts = pipeline._cache.get_pending_alerts(limit=limit)
+        return {"alerts": alerts, "count": len(alerts)}
+    except Exception as exc:
+        return {"status": "error", "error": str(exc), "alerts": []}
+
+
+@router.post("/infrastructure/model-serving/preload", tags=["infrastructure"])
+def preload_models(model_names: list[str] | None = None):
+    """
+    Pre-load ML models into memory for reduced first-request latency.
+
+    Args:
+        model_names: Optional list of model names to preload.
+                     If None, preloads all registered models.
+                     Valid names: 'vae', 'transformer', 'gnn', 'hetero_gnn'
+    """
+    try:
+        from ml_engine.model_serving import get_model_gateway
+        gateway = get_model_gateway()
+        gateway.preload(model_names)
+        return gateway.get_status()
+    except Exception as exc:
+        return {"status": "error", "error": str(exc)}
+
+

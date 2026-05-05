@@ -1119,8 +1119,43 @@ async def lifespan(app: FastAPI):
                 "rating FLOAT, "
                 "notes TEXT, "
                 "actor VARCHAR(80), "
+                "intent VARCHAR(80), "
+                "confidence FLOAT, "
+                "correction_text TEXT, "
+                "suggested_intent VARCHAR(80), "
+                "metadata_json JSONB, "
                 "created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP"
                 ");"
+            ))
+            conn.execute(text("ALTER TABLE agent_feedback_events ADD COLUMN IF NOT EXISTS intent VARCHAR(80);"))
+            conn.execute(text("ALTER TABLE agent_feedback_events ADD COLUMN IF NOT EXISTS confidence FLOAT;"))
+            conn.execute(text("ALTER TABLE agent_feedback_events ADD COLUMN IF NOT EXISTS correction_text TEXT;"))
+            conn.execute(text("ALTER TABLE agent_feedback_events ADD COLUMN IF NOT EXISTS suggested_intent VARCHAR(80);"))
+            conn.execute(text("ALTER TABLE agent_feedback_events ADD COLUMN IF NOT EXISTS metadata_json JSONB;"))
+            conn.execute(text(
+                "CREATE TABLE IF NOT EXISTS agent_route_events ("
+                "id SERIAL PRIMARY KEY, "
+                "session_id VARCHAR(120) NOT NULL REFERENCES agent_sessions(session_id) ON DELETE CASCADE, "
+                "turn_id INTEGER REFERENCES agent_turns(id) ON DELETE SET NULL, "
+                "dialogue_act VARCHAR(40) NOT NULL DEFAULT 'task', "
+                "intent VARCHAR(80) NOT NULL, "
+                "answer_contract VARCHAR(80) NOT NULL, "
+                "model_mode VARCHAR(40) NOT NULL DEFAULT 'full', "
+                "selected_tools_json JSONB, "
+                "suppressed_tools_json JSONB, "
+                "route_confidence FLOAT, "
+                "focus_score FLOAT, "
+                "route_violation BOOLEAN NOT NULL DEFAULT FALSE, "
+                "created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP"
+                ");"
+            ))
+            conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS idx_agent_route_events_created "
+                "ON agent_route_events (created_at DESC);"
+            ))
+            conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS idx_agent_route_events_contract "
+                "ON agent_route_events (answer_contract, created_at DESC);"
             ))
             conn.execute(text(
                 "CREATE TABLE IF NOT EXISTS agent_eval_suites ("

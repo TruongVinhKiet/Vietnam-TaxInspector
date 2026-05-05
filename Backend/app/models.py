@@ -1254,6 +1254,29 @@ class AgentFeedbackEvent(Base):
     rating = Column(Float, nullable=True)
     notes = Column(Text, nullable=True)
     actor = Column(String(80), nullable=True)
+    intent = Column(String(80), nullable=True, index=True)
+    confidence = Column(Float, nullable=True)
+    correction_text = Column(Text, nullable=True)
+    suggested_intent = Column(String(80), nullable=True)
+    metadata_json = Column(JSON, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class AgentRouteEvent(Base):
+    __tablename__ = "agent_route_events"
+
+    id = Column(Integer, primary_key=True, index=True)
+    session_id = Column(String(120), ForeignKey("agent_sessions.session_id", ondelete="CASCADE"), nullable=False, index=True)
+    turn_id = Column(Integer, ForeignKey("agent_turns.id", ondelete="SET NULL"), nullable=True, index=True)
+    dialogue_act = Column(String(40), nullable=False, default="task", index=True)
+    intent = Column(String(80), nullable=False, index=True)
+    answer_contract = Column(String(80), nullable=False, index=True)
+    model_mode = Column(String(40), nullable=False, default="full", index=True)
+    selected_tools_json = Column(JSON, nullable=True)
+    suppressed_tools_json = Column(JSON, nullable=True)
+    route_confidence = Column(Float, nullable=True)
+    focus_score = Column(Float, nullable=True)
+    route_violation = Column(Boolean, nullable=False, default=False, index=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
@@ -1489,3 +1512,22 @@ class AgentEntityMemory(Base):
     __table_args__ = (
         UniqueConstraint('session_id', 'entity_type', 'entity_value', name='_session_entity_uc'),
     )
+
+
+class DPOTrainingRun(Base):
+    """
+    Tracks the execution history of DPO automated retraining pipeline.
+    """
+    __tablename__ = "dpo_training_runs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    pairs_count = Column(Integer, nullable=False, default=0)
+    avg_loss = Column(Float, nullable=True)
+    duration_seconds = Column(Float, nullable=True)
+    adapter_path = Column(String(255), nullable=True)
+    data_hash = Column(String(64), nullable=True)
+    ab_verdict = Column(String(40), nullable=True)
+    status = Column(String(40), nullable=False, default="training", index=True)
+    triggered_by = Column(String(40), nullable=False, default="auto")
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
+

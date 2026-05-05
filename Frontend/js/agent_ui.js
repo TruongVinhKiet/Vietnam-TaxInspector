@@ -22,6 +22,16 @@ document.addEventListener('DOMContentLoaded', () => {
     let currentTheme = localStorage.getItem('taxAgentTheme') || 'ai_avatar.png';
     let selectedTheme = currentTheme;
 
+    // Top-level: Generate unique session per browser tab/user
+    const AGENT_SESSION_ID = (() => {
+        let sid = sessionStorage.getItem('tax_agent_session_id');
+        if (!sid) {
+            sid = `session-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+            sessionStorage.setItem('tax_agent_session_id', sid);
+        }
+        return sid;
+    })();
+
     // ─── Model Mode State ────────────────────────────────────────────
     let currentModelMode = 'full';
     let pendingFile = null;
@@ -432,9 +442,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 const formData = new FormData();
                 formData.append('message', text || `Phân tích rủi ro file ${pendingFile.name}`);
                 formData.append('file', pendingFile);
-                formData.append('session_id', 'demo-session-01');
+                formData.append('session_id', AGENT_SESSION_ID);
                 formData.append('model_mode', currentModelMode);
-                const response = await fetch('http://localhost:8000/api/tax-agent/chat/v2/with-file', {
+                const response = await fetch(`${API_BASE}/tax-agent/chat/v2/with-file`, {
                     method: 'POST', body: formData,
                 });
                 clearPendingFile();
@@ -497,11 +507,11 @@ document.addEventListener('DOMContentLoaded', () => {
         window.currentCitations = null; // reset per message
 
         try {
-            const response = await fetch('http://localhost:8000/api/tax-agent/chat/v2/stream', {
+            const response = await fetch(`${API_BASE}/tax-agent/chat/v2/stream`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    session_id: 'demo-session-01',
+                    session_id: AGENT_SESSION_ID,
                     message: text,
                     model_mode: currentModelMode,
                 }),
@@ -1312,6 +1322,22 @@ document.addEventListener('DOMContentLoaded', () => {
                 </div>
 
                 ${debate.summary ? `<div class="text-xs text-slate-400 mt-2 italic">${debate.summary}</div>` : ''}
+
+                <!-- Adjudicator Verdict -->
+                ${debate.adjudicator_verdict ? `
+                <div class="mt-4 p-3 rounded-xl bg-red-50 border border-red-200 relative">
+                    <div class="absolute -top-3 left-4 px-2 py-0.5 bg-red-600 text-white text-[10px] font-bold rounded shadow uppercase tracking-wide flex items-center gap-1"><i class="fa-solid fa-gavel"></i> Phán Quyết Của Tòa Án AI</div>
+                    <div class="mt-2 text-sm text-slate-800">
+                        <div class="flex items-center gap-2 mb-2">
+                            <span class="font-bold text-red-700">Quyết định:</span> 
+                            <span class="px-2 py-0.5 rounded text-xs font-bold ${debate.adjudicator_verdict.decision === 'escalate' ? 'bg-red-200 text-red-800' : 'bg-amber-200 text-amber-800'}">${debate.adjudicator_verdict.decision.toUpperCase()}</span>
+                            <span class="ml-auto text-xs text-slate-500">Độ tin cậy: ${(debate.adjudicator_verdict.confidence * 100).toFixed(0)}%</span>
+                        </div>
+                        <div class="text-xs text-slate-600 space-y-1 pl-2 border-l-2 border-red-300">
+                            ${formatMarkdown(debate.adjudicator_verdict.reasoning)}
+                        </div>
+                    </div>
+                </div>` : ''}
             </div>
         </div>`;
 
@@ -1820,8 +1846,16 @@ document.addEventListener('DOMContentLoaded', () => {
     function formatMarkdown(text, citations = []) {
         if (!text) return '';
         
+        // --- CRITICAL SECURITY: XSS Sanitization ---
+        // Escape HTML tags to prevent Prompt Injection XSS from model output
+        let html = text.replace(/&/g, '&amp;')
+                       .replace(/</g, '&lt;')
+                       .replace(/>/g, '&gt;')
+                       .replace(/"/g, '&quot;')
+                       .replace(/'/g, '&#039;');
+        
         // Headers
-        let html = text.replace(/^### (.*$)/gm, '<h4 class="font-bold text-slate-700 mt-3 mb-1">$1</h4>');
+        html = html.replace(/^### (.*$)/gm, '<h4 class="font-bold text-slate-700 mt-3 mb-1">$1</h4>');
         html = html.replace(/^## (.*$)/gm, '<h3 class="font-bold text-slate-800 mt-4 mb-2 text-lg">$1</h3>');
         
         // Bold
@@ -1939,19 +1973,33 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (type === 'positive') btn.classList.add('text-emerald-500');
                 else btn.classList.add('text-red-500');
                 
+                if (type === 'negative') {
+                    // Open DPO Correction Modal
+                    window._currentFeedbackContext = { agentData, statusEl: status };
+                    const modal = document.getElementById('correctionModal');
+                    const intentInput = document.getElementById('correctionIntentInput');
+                    const txtInput = document.getElementById('correctionInput');
+                    if (modal) {
+                        modal.classList.remove('hidden');
+                        if (intentInput) intentInput.value = agentData.intent || '';
+                        if (txtInput) txtInput.value = '';
+                    }
+                    return;
+                }
+
                 status.textContent = 'Đang gửi...';
                 status.classList.remove('opacity-0');
                 
                 try {
                     const reqBody = {
-                        session_id: agentData.session_id || 'demo-session-01',
+                        session_id: agentData.session_id || AGENT_SESSION_ID,
                         turn_id: agentData.turn_index || 1,
                         feedback_type: type,
                         intent: agentData.intent || '',
                         confidence: agentData.intent_confidence || 0,
                     };
                     
-                    const res = await fetch('http://localhost:8000/api/tax-agent/feedback', {
+                    const res = await fetch(`${API_BASE}/tax-agent/feedback`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify(reqBody)
@@ -1969,6 +2017,88 @@ document.addEventListener('DOMContentLoaded', () => {
             });
         });
     }
+
+    // Bind DPO Modal buttons
+    document.addEventListener('DOMContentLoaded', () => {
+        const modal = document.getElementById('correctionModal');
+        const closeBtn = document.getElementById('closeCorrectionModal');
+        const skipBtn = document.getElementById('skipCorrectionBtn');
+        const submitBtn = document.getElementById('submitCorrectionBtn');
+
+        const closeModal = () => {
+            if (modal) modal.classList.add('hidden');
+        };
+
+        if (closeBtn) closeBtn.addEventListener('click', closeModal);
+        if (skipBtn) skipBtn.addEventListener('click', async () => {
+            // Send negative without correction
+            const ctx = window._currentFeedbackContext;
+            if (ctx && ctx.agentData && ctx.statusEl) {
+                ctx.statusEl.textContent = 'Đang gửi...';
+                ctx.statusEl.classList.remove('opacity-0');
+                try {
+                    await fetch(`${API_BASE}/tax-agent/feedback`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            session_id: ctx.agentData.session_id || AGENT_SESSION_ID,
+                            turn_id: ctx.agentData.turn_index || 1,
+                            feedback_type: 'negative',
+                            intent: ctx.agentData.intent || '',
+                            confidence: ctx.agentData.intent_confidence || 0
+                        })
+                    });
+                    ctx.statusEl.innerHTML = '<i class="fa-solid fa-check text-emerald-500"></i> Cảm ơn bạn!';
+                    setTimeout(() => ctx.statusEl.classList.add('opacity-0'), 2000);
+                } catch (e) {
+                    ctx.statusEl.textContent = 'Lỗi kết nối';
+                }
+            }
+            closeModal();
+        });
+
+        if (submitBtn) submitBtn.addEventListener('click', async () => {
+            const ctx = window._currentFeedbackContext;
+            const correction = document.getElementById('correctionInput')?.value.trim();
+            const intent = document.getElementById('correctionIntentInput')?.value.trim();
+            if (!correction) {
+                alert('Vui lòng nhập câu trả lời chính xác!');
+                return;
+            }
+
+            if (ctx && ctx.agentData && ctx.statusEl) {
+                ctx.statusEl.textContent = 'Đang gửi...';
+                ctx.statusEl.classList.remove('opacity-0');
+                const oldHtml = submitBtn.innerHTML;
+                submitBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Đang gửi...';
+                submitBtn.disabled = true;
+
+                try {
+                    await fetch(`${API_BASE}/tax-agent/feedback`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            session_id: ctx.agentData.session_id || AGENT_SESSION_ID,
+                            turn_id: ctx.agentData.turn_index || 1,
+                            feedback_type: 'correction', // High signal for DPO
+                            intent: ctx.agentData.intent || '',
+                            confidence: ctx.agentData.intent_confidence || 0,
+                            correction_text: correction,
+                            suggested_intent: intent
+                        })
+                    });
+                    ctx.statusEl.innerHTML = '<i class="fa-solid fa-brain text-purple-500"></i> Đã đưa vào pipeline DPO!';
+                    setTimeout(() => ctx.statusEl.classList.add('opacity-0'), 3000);
+                } catch (e) {
+                    ctx.statusEl.textContent = 'Lỗi kết nối';
+                } finally {
+                    submitBtn.innerHTML = oldHtml;
+                    submitBtn.disabled = false;
+                }
+            }
+            closeModal();
+        });
+    });
     function renderLegalWorkspace(wsData) {
         const lwPanel = document.getElementById('legalWorkspacePanel');
         if (!lwPanel) return;

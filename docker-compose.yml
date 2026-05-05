@@ -1,0 +1,203 @@
+# ════════════════════════════════════════════════════════════════════════════
+#  docker-compose.yml – TaxInspector Production Stack
+# ════════════════════════════════════════════════════════════════════════════
+#
+#  6-Container Microservices Architecture:
+#
+#    ┌────────────────┐    ┌──────────────────┐    ┌───────────────┐
+#    │  tax-frontend   │───▶│  tax-api-server   │───▶│ tax-model-srv │
+#    │  (Nginx :3000)  │    │  (FastAPI :8000)   │    │ (PyTorch:8001)│
+#    └────────────────┘    └──────┬───┬────────┘    └───────────────┘
+#                                 │   │
+#                    ┌────────────┘   └───────────┐
+#                    ▼                             ▼
+#              ┌──────────┐                 ┌──────────┐
+#              │tax-redis  │                 │tax-kafka  │
+#              │ (:6379)   │                 │ (:9092)   │
+#              └──────────┘                 └──────────┘
+#                                                 │
+#              ┌──────────┐                       │
+#              │tax-postgres│◀──────────────────────┘
+#              │ (:5432)   │
+#              └──────────┘
+#
+#  Usage:
+#    docker-compose up -d          # Start all services
+#    docker-compose logs -f        # Follow all logs
+#    docker-compose down           # Stop all services
+#    docker-compose ps             # Check service status
+#
+# ════════════════════════════════════════════════════════════════════════════
+
+services:
+
+  # ─── 1. PostgreSQL + pgvector ────────────────────────────────────────────
+  tax-postgres:
+    image: pgvector/pgvector:pg17
+    container_name: tax-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-Kiet2004}
+      POSTGRES_DB: ${DB_NAME:-TaxInspector}
+    ports:
+      - "${DB_EXTERNAL_PORT:-5433}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./Database/init_db.sql:/docker-entrypoint-initdb.d/01_init.sql:ro
+    shm_size: 1g
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d TaxInspector"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - taxnet
+
+  # ─── 2. Redis Cache ─────────────────────────────────────────────────────
+  tax-redis:
+    image: redis:7-alpine
+    container_name: tax-redis
+    restart: unless-stopped
+    ports:
+      - "${REDIS_EXTERNAL_PORT:-6379}:6379"
+    volumes:
+      - redisdata:/data
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru --requirepass ${REDIS_PASSWORD:-taxinspector_redis_2026}
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-taxinspector_redis_2026}", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+    networks:
+      - taxnet
+
+  # ─── 3. Kafka (KRaft mode, no Zookeeper) ─────────────────────────────────
+  tax-kafka:
+    image: bitnami/kafka:3.9
+    container_name: tax-kafka
+    restart: unless-stopped
+    ports:
+      - "${KAFKA_EXTERNAL_PORT:-9092}:9092"
+    environment:
+      # KRaft mode (no Zookeeper needed)
+      KAFKA_CFG_NODE_ID: 1
+      KAFKA_CFG_PROCESS_ROLES: broker,controller
+      KAFKA_CFG_CONTROLLER_QUORUM_VOTERS: 1@tax-kafka:9093
+      KAFKA_CFG_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
+      KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      KAFKA_CFG_ADVERTISED_LISTENERS: PLAINTEXT://tax-kafka:9092
+      KAFKA_CFG_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_CFG_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      # Topic auto-creation
+      KAFKA_CFG_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_CFG_NUM_PARTITIONS: 3
+      KAFKA_CFG_LOG_RETENTION_HOURS: 168
+    volumes:
+      - kafkadata:/bitnami/kafka
+    healthcheck:
+      test: ["CMD-SHELL", "kafka-broker-api-versions.sh --bootstrap-server localhost:9092 || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    networks:
+      - taxnet
+
+  # ─── 4. Model Inference Server (PyTorch) ─────────────────────────────────
+  tax-model-server:
+    build:
+      context: ./Backend
+      dockerfile: Dockerfile.model
+    container_name: tax-model-server
+    restart: unless-stopped
+    environment:
+      REDIS_URL: redis://:${REDIS_PASSWORD:-taxinspector_redis_2026}@tax-redis:6379/0
+      MODEL_SERVING_MAX_CACHE: 6
+      PYTHONPATH: /app
+    security_opt:
+      - no-new-privileges:true
+    depends_on:
+      tax-redis:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+        reservations:
+          memory: 512M
+    networks:
+      - taxnet
+
+  # ─── 5. FastAPI Main Server ──────────────────────────────────────────────
+  tax-api-server:
+    build:
+      context: ./Backend
+      dockerfile: Dockerfile.api
+    container_name: tax-api-server
+    restart: unless-stopped
+    ports:
+      - "${API_PORT:-8000}:8000"
+    environment:
+      DB_HOST: tax-postgres
+      DB_PORT: 5432
+      DB_USER: ${DB_USER:-postgres}
+      DB_PASSWORD: ${DB_PASSWORD:-Kiet2004}
+      DB_NAME: ${DB_NAME:-TaxInspector}
+      REDIS_URL: redis://:${REDIS_PASSWORD:-taxinspector_redis_2026}@tax-redis:6379/0
+      KAFKA_BOOTSTRAP_SERVERS: tax-kafka:9092
+      MODEL_SERVER_URL: http://tax-model-server:8001
+      SECRET_KEY: ${SECRET_KEY:-7b4c6e9d2f1a8c5b3e0d4f9a7c6b5a4d3f2e1b0c9a8b7c6d5e4f3a2b1c0d9e8f}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:-a3f9c7d1e4b2a8f0d5c6b9e7a4f3d2c1b0e8d7c6a5b4f3e2d1c0b9a8f7e6d5c4}
+      PYTHONPATH: /app
+    security_opt:
+      - no-new-privileges:true
+    depends_on:
+      tax-postgres:
+        condition: service_healthy
+      tax-redis:
+        condition: service_healthy
+      tax-kafka:
+        condition: service_healthy
+      tax-model-server:
+        condition: service_started
+    volumes:
+      - uploads:/app/data/uploads
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+        reservations:
+          memory: 1G
+    networks:
+      - taxnet
+
+  # ─── 6. Frontend (Nginx) ─────────────────────────────────────────────────
+  tax-frontend:
+    build:
+      context: ./Frontend
+      dockerfile: Dockerfile
+    container_name: tax-frontend
+    restart: unless-stopped
+    ports:
+      - "${FRONTEND_PORT:-3000}:80"
+    depends_on:
+      - tax-api-server
+    networks:
+      - taxnet
+
+# ─── Volumes ───────────────────────────────────────────────────────────────
+volumes:
+  pgdata:
+    driver: local
+  redisdata:
+    driver: local
+  kafkadata:
+    driver: local
+  uploads:
+    driver: local
+
+# ─── Network ──────────────────────────────────────────────────────────────
+networks:
+  taxnet:
+    driver: bridge

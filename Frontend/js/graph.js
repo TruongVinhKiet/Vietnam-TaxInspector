@@ -12,7 +12,7 @@
 
 const GRAPH_API_BASE =
     (typeof API_BASE !== "undefined" && API_BASE) ||
-    window.API_BASE ||
+    window.API_BASE_URL ||
     "http://localhost:8000/api";
 
 const FORENSIC_TAB_ACTIVE_CLASS = "py-2 text-[10px] font-black uppercase text-primary-container border-b-2 border-primary-container tracking-widest transition-colors";

@@ -137,6 +137,7 @@ class TaxAgentSynthesizer:
         abstained: bool = False,
         escalate: bool = False,
         tax_code: str | None = None,
+        answer_contract: str | None = None,
     ) -> SynthesisResult:
         """
         Synthesize a grounded response from tool results.
@@ -158,6 +159,13 @@ class TaxAgentSynthesizer:
         if abstained:
             return self._build_abstain_response(query, intent, reasoning_trace, t0)
 
+        if answer_contract == "data_table" and intent == "top_n_query":
+            return self._build_top_n_table_response(
+                tool_results=tool_results,
+                reasoning_trace=reasoning_trace,
+                t0=t0,
+            )
+
         # 1. Extract evidence from all tool results
         evidence = self._extract_evidence(tool_results)
 
@@ -169,7 +177,10 @@ class TaxAgentSynthesizer:
 
         missing_slots: list[str] = []
         slot_analyzer = LegalSlotAnalyzer()
-        if self._is_legal_consultation_intent(intent, evidence):
+        is_legal_consultation = self._is_legal_consultation_intent(
+            intent, evidence, answer_contract=answer_contract,
+        )
+        if is_legal_consultation:
             missing_slots = slot_analyzer.missing_slots(query, intent=intent)
             legal_hits = [ev for ev in evidence if ev.source_type == "legal"]
             if len(missing_slots) >= 3 and not legal_hits:
@@ -188,7 +199,7 @@ class TaxAgentSynthesizer:
         synthesis_tier = "template"
 
         # 4. Generate detailed analysis with citations
-        if self._is_legal_consultation_intent(intent, evidence):
+        if is_legal_consultation:
             llm_text, llm_tier = self._try_llm_legal_synthesis(
                 query=query,
                 intent=intent,
@@ -257,6 +268,70 @@ class TaxAgentSynthesizer:
             verification=verification,
             clarification_needed=bool(missing_slots),
             clarification_questions=missing_slots,
+        )
+
+    def _build_top_n_table_response(
+        self,
+        *,
+        tool_results: dict[str, dict[str, Any]],
+        reasoning_trace: str,
+        t0: float,
+    ) -> SynthesisResult:
+        top_n = tool_results.get("top_n_risky_companies", {}) or {}
+        companies = list(top_n.get("companies") or [])
+        requested = int(top_n.get("query_n") or len(companies) or 10)
+        total = int(top_n.get("total") or len(companies) or 0)
+
+        if not companies:
+            summary = "Chưa có dữ liệu chấm điểm rủi ro để lập danh sách top doanh nghiệp."
+            detailed = (
+                "Hệ thống chưa tìm thấy bản ghi có `risk_score` trong CSDL. "
+                "Hãy chạy batch scoring hoặc upload CSV trước, sau đó truy vấn lại top doanh nghiệp rủi ro."
+            )
+            confidence = 0.45
+        else:
+            found_note = (
+                f" Tìm thấy {len(companies)}/{requested} doanh nghiệp theo yêu cầu."
+                if len(companies) < requested else
+                f" Tìm thấy {len(companies)} doanh nghiệp rủi ro cao nhất."
+            )
+            summary = f"Danh sách top {min(requested, len(companies))} doanh nghiệp rủi ro cao nhất.{found_note}"
+            lines = [
+                "| STT | MST | Tên DN | Ngành | Điểm rủi ro | Mức | Năm |",
+                "|---:|---|---|---|---:|---|---:|",
+            ]
+            for item in companies:
+                lines.append(
+                    "| {stt} | {tax_code} | {company_name} | {industry} | {risk_score} | {risk_level} | {year} |".format(
+                        stt=item.get("stt", ""),
+                        tax_code=item.get("tax_code", ""),
+                        company_name=str(item.get("company_name", "")).replace("|", "/"),
+                        industry=str(item.get("industry", "")).replace("|", "/"),
+                        risk_score=item.get("risk_score", 0),
+                        risk_level=item.get("risk_level", ""),
+                        year=item.get("year", ""),
+                    )
+                )
+            detailed = "\n".join(lines)
+            if total and total > len(companies):
+                detailed += f"\n\nTổng số doanh nghiệp có điểm trong CSDL: {total}."
+            confidence = 0.9
+
+        return SynthesisResult(
+            summary=summary,
+            detailed_analysis=detailed,
+            evidence=[],
+            recommendations=[],
+            confidence=confidence,
+            limitations="",
+            escalation_needed=False,
+            intent="top_n_query",
+            tools_used=["top_n_risky_companies"] if top_n else [],
+            reasoning_trace=reasoning_trace,
+            latency_ms=(time.perf_counter() - t0) * 1000.0,
+            synthesis_tier="data_table",
+            verification={"status": "not_required", "reason": "direct_data_table"},
+            citation_map={},
         )
 
     def _extract_evidence(
@@ -470,7 +545,17 @@ class TaxAgentSynthesizer:
 
         return "\n".join(parts)
 
-    def _is_legal_consultation_intent(self, intent: str, evidence: list[Evidence]) -> bool:
+    def _is_legal_consultation_intent(
+        self,
+        intent: str,
+        evidence: list[Evidence],
+        *,
+        answer_contract: str | None = None,
+    ) -> bool:
+        if answer_contract == "legal_consultation":
+            return True
+        if answer_contract in {"data_table", "smalltalk", "file_analysis", "vat_graph"}:
+            return False
         if intent in {"general_tax_query", "vat_refund_risk", "invoice_risk", "transfer_pricing"}:
             return True
         return any(ev.source_type == "legal" for ev in evidence)

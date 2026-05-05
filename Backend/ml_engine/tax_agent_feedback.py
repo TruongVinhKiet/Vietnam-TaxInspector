@@ -12,7 +12,7 @@ Capabilities:
     5. Export training candidates (low-confidence + negative feedback)
 
 Storage:
-    - DB table: agent_feedback (session_id, turn_id, feedback_type, ...)
+    - DB table: agent_feedback_events (session_id, turn_id, feedback_type, ...)
     - In-memory rolling window for fast dashboard queries
 
 Design Decisions:
@@ -172,20 +172,28 @@ class FeedbackCollector:
         import json
 
         try:
+            turn_exists = db.execute(
+                sql_text("SELECT 1 FROM agent_turns WHERE id = :turn_id LIMIT 1"),
+                {"turn_id": record.turn_id},
+            ).scalar()
             db.execute(
                 sql_text("""
-                    INSERT INTO agent_feedback
-                    (session_id, turn_id, feedback_type, intent, confidence,
-                     correction_text, suggested_intent, metadata_json, created_at)
+                    INSERT INTO agent_feedback_events
+                    (session_id, turn_id, feedback_type, rating, notes, actor,
+                     intent, confidence, correction_text, suggested_intent,
+                     metadata_json, created_at)
                     VALUES
-                    (:session_id, :turn_id, :feedback_type, :intent, :confidence,
-                     :correction_text, :suggested_intent, :metadata_json,
-                     to_timestamp(:ts))
+                    (:session_id, :turn_id, :feedback_type, :rating, :notes, :actor,
+                     :intent, :confidence, :correction_text, :suggested_intent,
+                     CAST(:metadata_json AS jsonb), to_timestamp(:ts))
                 """),
                 {
                     "session_id": record.session_id,
-                    "turn_id": record.turn_id,
+                    "turn_id": record.turn_id if turn_exists else None,
                     "feedback_type": record.feedback_type,
+                    "rating": 1.0 if record.feedback_type == "positive" else 0.0 if record.feedback_type == "negative" else None,
+                    "notes": record.correction_text,
+                    "actor": "user",
                     "intent": record.intent,
                     "confidence": record.confidence,
                     "correction_text": record.correction_text,
@@ -202,7 +210,7 @@ class FeedbackCollector:
 
     # ─── Statistics ──────────────────────────────────────────────
 
-    def get_statistics(self, window_hours: int = 24) -> dict[str, Any]:
+    def get_statistics(self, window_hours: int = 24, db=None) -> dict[str, Any]:
         """
         Get aggregated feedback statistics.
 
@@ -211,6 +219,54 @@ class FeedbackCollector:
             and trending data.
         """
         cutoff = time.time() - (window_hours * 3600)
+
+        if db is not None:
+            try:
+                from sqlalchemy import text as sql_text
+                import datetime
+
+                cutoff_dt = datetime.datetime.fromtimestamp(cutoff, tz=datetime.timezone.utc)
+                rows = db.execute(
+                    sql_text("""
+                        SELECT feedback_type, COALESCE(intent, '') AS intent,
+                               COALESCE(confidence, 0) AS confidence
+                        FROM agent_feedback_events
+                        WHERE created_at >= :cutoff
+                    """),
+                    {"cutoff": cutoff_dt},
+                ).mappings().all()
+
+                if rows:
+                    total = len(rows)
+                    positive = [r for r in rows if r["feedback_type"] == "positive"]
+                    negative = [r for r in rows if r["feedback_type"] == "negative"]
+                    corrections = [r for r in rows if r["feedback_type"] == "correction"]
+                    denom = len(positive) + len(negative)
+                    satisfaction = len(positive) / denom if denom else None
+                    by_intent: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
+                    for r in rows:
+                        by_intent[str(r["intent"] or "unknown")][str(r["feedback_type"])] += 1
+                    return {
+                        "window_hours": window_hours,
+                        "total_feedback": total,
+                        "satisfaction_rate": round(satisfaction, 4) if satisfaction is not None else None,
+                        "by_intent": {k: dict(v) for k, v in by_intent.items()},
+                        "by_type": {
+                            "positive": len(positive),
+                            "negative": len(negative),
+                            "correction": len(corrections),
+                        },
+                        "avg_confidence_positive": (
+                            round(sum(float(r["confidence"] or 0) for r in positive) / len(positive), 4)
+                            if positive else None
+                        ),
+                        "avg_confidence_negative": (
+                            round(sum(float(r["confidence"] or 0) for r in negative) / len(negative), 4)
+                            if negative else None
+                        ),
+                    }
+            except Exception as exc:
+                logger.debug("[Feedback] DB statistics fallback to memory: %s", exc)
 
         with self._lock:
             recent = [r for r in self._buffer if r.timestamp >= cutoff]
@@ -424,6 +480,29 @@ class FeedbackCollector:
                         "confidence": float(row.get("confidence") or 0),
                         "message_preview": str(row.get("message_text", ""))[:100],
                         "reason": "low_confidence_db",
+                    })
+
+                neg_rows = db.execute(
+                    sql_text("""
+                        SELECT session_id, turn_id, COALESCE(intent, '') AS intent,
+                               COALESCE(confidence, 0) AS confidence,
+                               COALESCE(correction_text, notes, '') AS message_preview
+                        FROM agent_feedback_events
+                        WHERE feedback_type IN ('negative', 'correction')
+                        ORDER BY created_at DESC
+                        LIMIT :limit
+                    """),
+                    {"limit": limit},
+                ).mappings().all()
+                for row in neg_rows:
+                    candidates.append({
+                        "session_id": str(row["session_id"]),
+                        "turn_id": int(row.get("turn_id") or 0),
+                        "intent": str(row.get("intent") or ""),
+                        "confidence": float(row.get("confidence") or 0),
+                        "message_preview": str(row.get("message_preview") or "")[:100],
+                        "feedback_type": "negative",
+                        "reason": "negative_feedback_db",
                     })
             except Exception as exc:
                 logger.debug("[Feedback] DB query for uncertain predictions failed: %s", exc)

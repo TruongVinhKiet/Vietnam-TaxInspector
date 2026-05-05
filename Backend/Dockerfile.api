@@ -1,0 +1,63 @@
+# ════════════════════════════════════════════════════════════════
+#  Dockerfile.api – TaxInspector FastAPI Main Server
+# ════════════════════════════════════════════════════════════════
+#  Container: tax-api-server (Port 8000)
+#  Role: Multi-Agent Orchestrator, LLM, RAG, CRUD, SSE Streaming
+# ════════════════════════════════════════════════════════════════
+
+FROM python:3.10-slim
+
+LABEL maintainer="TaxInspector Team"
+LABEL description="Main FastAPI server for Multi-Agent Tax Intelligence"
+
+# System dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    libpq-dev \
+    tesseract-ocr \
+    tesseract-ocr-vie \
+    poppler-utils \
+    libgl1-mesa-glx \
+    libglib2.0-0 \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Install Python dependencies (cached layer)
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Create non-root user for security
+RUN addgroup --system taxapp && adduser --system --ingroup taxapp taxapp
+
+# Copy application code
+COPY app/ ./app/
+COPY ml_engine/ ./ml_engine/
+COPY run.py .
+
+# Copy data directory (models, training data, etc.)
+# Note: In production, mount this as a volume instead
+COPY data/models/ ./data/models/
+
+# Environment defaults (overridable via docker-compose)
+ENV PYTHONPATH=/app
+ENV PYTHONUNBUFFERED=1
+ENV PORT=8000
+ENV DB_HOST=tax-postgres
+ENV DB_PORT=5432
+ENV DB_USER=postgres
+ENV DB_NAME=TaxInspector
+ENV REDIS_URL=redis://tax-redis:6379/0
+ENV KAFKA_BOOTSTRAP_SERVERS=tax-kafka:9092
+ENV MODEL_SERVER_URL=http://tax-model-server:8001
+
+EXPOSE 8000
+
+# Switch to non-root user
+USER taxapp
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/tax-agent/status')" || exit 1
+
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "2"]

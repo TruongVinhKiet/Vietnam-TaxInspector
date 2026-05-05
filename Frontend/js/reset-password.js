@@ -101,7 +101,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }, 1200);
         } catch (err) {
             console.error('[ResetPassword]', err);
-            showResetToast('Không kết nối được máy chủ API (http://localhost:8000).');
+            showResetToast('Không kết nối được máy chủ API.');
         } finally {
             submitBtn.disabled = false;
             submitBtn.textContent = originalText;

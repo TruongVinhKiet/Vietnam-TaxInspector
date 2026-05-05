@@ -135,7 +135,7 @@ class NLQueryExecutor:
             try:
                 rows = db.execute(
                     sql_text("""
-                        SELECT tax_code, company_name, industry
+                        SELECT tax_code, name as company_name, industry
                         FROM companies
                         ORDER BY tax_code
                         LIMIT :n
@@ -190,12 +190,12 @@ class NLQueryExecutor:
             # Try exact-ish match first (ILIKE)
             rows = db.execute(
                 sql_text("""
-                    SELECT c.tax_code, c.company_name, c.industry
+                    SELECT c.tax_code, c.name as company_name, c.industry
                     FROM companies c
-                    WHERE c.company_name ILIKE :pattern
+                    WHERE c.name ILIKE :pattern
                     ORDER BY
-                        CASE WHEN c.company_name ILIKE :exact THEN 0 ELSE 1 END,
-                        c.company_name
+                        CASE WHEN c.name ILIKE :exact THEN 0 ELSE 1 END,
+                        c.name
                     LIMIT 20
                 """),
                 {

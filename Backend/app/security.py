@@ -4,6 +4,7 @@ security.py – Tầng Bảo mật Trung tâm (Central Security Layer)
 Modules:
     1. Rate Limiting (slowapi) – Chống Brute Force / DDoS
     2. Security Headers Middleware – Chống Clickjacking, XSS, MIME sniffing
+    3. HSTS – Chống downgrade attacks (auto-enabled khi HSTS_ENABLED=true)
 """
 
 import os
@@ -16,13 +17,16 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 
 # =============================================================================
-# 1. RATE LIMITER (Global)
+# 1. RATE LIMITER (Global) — Redis-backed in Production
 # =============================================================================
+
+_redis_url = os.getenv("REDIS_URL", "")
+_storage_uri = _redis_url if _redis_url else "memory://"
 
 limiter = Limiter(
     key_func=get_remote_address,
     default_limits=["200/minute"],         # Default: 200 req/min per IP
-    storage_uri="memory://",               # In-memory store (switch to Redis in production)
+    storage_uri=_storage_uri,              # Redis in Docker, memory in dev
 )
 
 
@@ -41,6 +45,15 @@ def rate_limit_exceeded_handler(request: Request, exc: RateLimitExceeded):
 # 2. SECURITY HEADERS MIDDLEWARE
 # =============================================================================
 
+# Configurable connect-src for CSP — supports both dev localhost and Docker Nginx proxy
+_csp_connect_extra = os.getenv(
+    "CSP_CONNECT_SRC",
+    "http://localhost:8000 http://127.0.0.1:8000 http://localhost:3000"
+)
+
+_hsts_enabled = os.getenv("HSTS_ENABLED", "false").lower() == "true"
+
+
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
     """
     Inject OWASP-recommended security headers into every response.
@@ -49,7 +62,8 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         - MIME sniffing attacks (X-Content-Type-Options)
         - XSS reflection (X-XSS-Protection)
         - Information leakage (X-Powered-By removal, Referrer-Policy)
-        - Downgrade attacks (Strict-Transport-Security in production)
+        - Downgrade attacks (Strict-Transport-Security when HSTS_ENABLED=true)
+        - Code injection (Content-Security-Policy)
     """
 
     async def dispatch(self, request: Request, call_next):
@@ -78,10 +92,12 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
             "script-src 'self' 'unsafe-inline' 'unsafe-eval' "
             "https://cdn.tailwindcss.com https://cdn.jsdelivr.net; "
             "style-src 'self' 'unsafe-inline' "
-            "https://fonts.googleapis.com https://cdn.tailwindcss.com; "
-            "font-src 'self' https://fonts.gstatic.com https://fonts.googleapis.com; "
+            "https://fonts.googleapis.com https://cdn.tailwindcss.com "
+            "https://cdnjs.cloudflare.com; "
+            "font-src 'self' https://fonts.gstatic.com https://fonts.googleapis.com "
+            "https://cdnjs.cloudflare.com; "
             "img-src 'self' data: blob:; "
-            "connect-src 'self' http://localhost:8000 http://127.0.0.1:8000 "
+            f"connect-src 'self' {_csp_connect_extra} "
             "https://cdn.jsdelivr.net https://raw.githubusercontent.com; "
             "media-src 'self' blob:; "
             "frame-ancestors 'none';"
@@ -92,7 +108,11 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         if "server" in response.headers:
             del response.headers["server"]
 
-        # --- HSTS (Uncomment in production behind HTTPS reverse proxy) ---
-        # response.headers["Strict-Transport-Security"] = "max-age=63072000; includeSubDomains; preload"
+        # --- HSTS (enabled via HSTS_ENABLED env var in production behind HTTPS) ---
+        if _hsts_enabled:
+            response.headers["Strict-Transport-Security"] = (
+                "max-age=63072000; includeSubDomains; preload"
+            )
 
         return response
+

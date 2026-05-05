@@ -118,9 +118,10 @@ class DebateResult:
     minority_opinions: list[dict[str, Any]]
     recommendation: str             # Final actionable recommendation
     debate_summary: str             # Vietnamese narrative summary
+    adjudicator_verdict: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict:
-        return {
+        result = {
             "consensus_score": round(self.consensus_score, 2),
             "consensus_pct": round(self.consensus_score * 100, 1),
             "consensus_stance": self.consensus_stance.value,
@@ -132,6 +133,9 @@ class DebateResult:
             "summary": self.debate_summary,
             "agent_count": len(self.stances),
         }
+        if self.adjudicator_verdict:
+            result["adjudicator_verdict"] = self.adjudicator_verdict
+        return result
 
 
 # ════════════════════════════════════════════════════════════════
@@ -513,6 +517,25 @@ class AgentDebateProtocol:
         # Step 7: Consensus label
         consensus_label = self._consensus_label(consensus_score, consensus_stance)
 
+        # Step 8: Adjudicator — triggers when consensus is low or critical disagreements exist
+        adjudicator_verdict = {}
+        _has_critical = any(
+            d.severity in (DisagreementSeverity.CRITICAL, DisagreementSeverity.MAJOR)
+            for d in disagreements
+        )
+        if consensus_score < 0.58 or _has_critical:
+            adjudicator = AdjudicatorAgent()
+            adjudicator_verdict = adjudicator.adjudicate(
+                stances=stances,
+                disagreements=disagreements,
+                consensus_score=consensus_score,
+                consensus_stance=consensus_stance,
+                minority_opinions=minority_opinions,
+            )
+            # Override recommendation with adjudicator's if available
+            if adjudicator_verdict.get("recommended_action"):
+                recommendation = adjudicator_verdict["recommended_action"]
+
         return DebateResult(
             consensus_score=consensus_score,
             consensus_stance=consensus_stance,
@@ -522,6 +545,7 @@ class AgentDebateProtocol:
             minority_opinions=minority_opinions,
             recommendation=recommendation,
             debate_summary=summary,
+            adjudicator_verdict=adjudicator_verdict,
         )
 
     def _extract_minority(
@@ -637,3 +661,187 @@ class AgentDebateProtocol:
             StanceType.DANGEROUS: "Nguy hiểm",
         }
         return f"{stance_vi.get(stance, '?')} — Đồng thuận {pct}%"
+
+
+# ════════════════════════════════════════════════════════════════
+#  Adjudicator Agent — Arbiter for Serious Disagreements
+# ════════════════════════════════════════════════════════════════
+
+class AdjudicatorAgent:
+    """
+    Trọng tài AI — chỉ kích hoạt khi agents bất đồng nghiêm trọng.
+
+    When the debate consensus drops below 0.58 or critical/major
+    disagreements are detected, the Adjudicator steps in with
+    structured reasoning about WHY the final decision should lean
+    one way or another.
+
+    Design: Deterministic, rule-based — no LLM calls.
+    Evaluates evidence weight per agent based on:
+      - Citation count / authority score (legal)
+      - ML model confidence (analytics)
+      - Pattern detection count (investigation)
+    """
+
+    # Evidence quality weights for adjudication
+    EVIDENCE_WEIGHTS = {
+        "legal": {
+            "citation_count": 0.25,
+            "authority_score": 0.35,
+            "confidence": 0.40,
+        },
+        "analytics": {
+            "model_confidence": 0.50,
+            "data_coverage": 0.30,
+            "trend_signal": 0.20,
+        },
+        "investigation": {
+            "patterns_found": 0.40,
+            "confidence": 0.35,
+            "escalation_weight": 0.25,
+        },
+    }
+
+    def adjudicate(
+        self,
+        *,
+        stances: list[AgentStance],
+        disagreements: list[Disagreement],
+        consensus_score: float,
+        consensus_stance: StanceType,
+        minority_opinions: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        """
+        Produce a structured adjudicator verdict.
+
+        Returns:
+            Dict with verdict, reasoning, evidence_weights, and recommended_action.
+        """
+        evidence_scores: dict[str, dict[str, Any]] = {}
+        for stance in stances:
+            evidence_scores[stance.agent_name] = self._evaluate_evidence(stance)
+
+        # Determine which agent has strongest evidence
+        agent_totals = {
+            name: scores.get("total", 0.0)
+            for name, scores in evidence_scores.items()
+        }
+        strongest_agent = max(agent_totals, key=agent_totals.get) if agent_totals else "analytics"
+        strongest_stance = next(
+            (s for s in stances if s.agent_name == strongest_agent), None
+        )
+
+        # Build reasoning chain
+        reasoning_lines = []
+        for stance in stances:
+            score_info = evidence_scores.get(stance.agent_name, {})
+            total = score_info.get("total", 0)
+            reasoning_lines.append(
+                f"{stance.agent_label} ({stance.stance.value}, "
+                f"risk={stance.risk_score:.0f}%): "
+                f"evidence weight = {total:.2f}"
+            )
+
+        # Disagreement analysis
+        critical_topics = [
+            d.topic for d in disagreements
+            if d.severity in (DisagreementSeverity.CRITICAL, DisagreementSeverity.MAJOR)
+        ]
+
+        # Verdict
+        if strongest_stance and strongest_stance.risk_score > 65:
+            verdict = "high_risk_confirmed"
+            verdict_vi = "Xác nhận rủi ro cao"
+            action = (
+                "⚖️ Trọng tài phán quyết: Bằng chứng mạnh nhất đến từ "
+                f"{strongest_stance.agent_label} (weight={agent_totals[strongest_agent]:.2f}). "
+                "Khuyến nghị: Ưu tiên thanh tra thực địa, thu thập thêm hồ sơ trước khi kết luận."
+            )
+        elif strongest_stance and strongest_stance.risk_score < 30:
+            verdict = "low_risk_confirmed"
+            verdict_vi = "Xác nhận rủi ro thấp"
+            action = (
+                "⚖️ Trọng tài phán quyết: Dù có bất đồng, bằng chứng chính từ "
+                f"{strongest_stance.agent_label} cho thấy rủi ro thấp. "
+                "Đề xuất: Giám sát theo quy trình thường xuyên."
+            )
+        else:
+            verdict = "inconclusive"
+            verdict_vi = "Chưa đủ bằng chứng để kết luận"
+            action = (
+                "⚖️ Trọng tài phán quyết: Bất đồng chưa giải quyết được. "
+                "Cần thu thập thêm dữ liệu từ "
+                + ", ".join(critical_topics[:2])
+                + ". Chuyển hồ sơ cho chuyên gia cấp cao."
+            )
+
+        return {
+            "verdict": verdict,
+            "verdict_vi": verdict_vi,
+            "strongest_agent": strongest_agent,
+            "strongest_agent_label": strongest_stance.agent_label if strongest_stance else "N/A",
+            "evidence_weights": evidence_scores,
+            "agent_ranking": sorted(
+                agent_totals.items(), key=lambda x: x[1], reverse=True,
+            ),
+            "reasoning": reasoning_lines,
+            "critical_topics": critical_topics,
+            "consensus_score": round(consensus_score, 3),
+            "minority_count": len(minority_opinions),
+            "recommended_action": action,
+        }
+
+    def _evaluate_evidence(self, stance: AgentStance) -> dict[str, Any]:
+        """Score the quality of evidence behind this agent's stance."""
+        raw = stance.raw_data or {}
+        agent = stance.agent_name
+
+        if agent == "legal":
+            citations = len(raw.get("applicable_laws", []) or raw.get("citation_chain", []))
+            authority = float(raw.get("authority_score", 0))
+            conf = stance.confidence
+            w = self.EVIDENCE_WEIGHTS["legal"]
+            total = (
+                min(1.0, citations / 5) * w["citation_count"]
+                + authority * w["authority_score"]
+                + conf * w["confidence"]
+            )
+            return {
+                "citations": citations,
+                "authority": round(authority, 3),
+                "confidence": round(conf, 3),
+                "total": round(total, 4),
+            }
+
+        elif agent == "analytics":
+            conf = stance.confidence
+            risk = stance.risk_score / 100.0
+            trend = 0.5 if raw.get("risk_trend") else 0.3
+            w = self.EVIDENCE_WEIGHTS["analytics"]
+            total = conf * w["model_confidence"] + risk * w["data_coverage"] + trend * w["trend_signal"]
+            return {
+                "model_confidence": round(conf, 3),
+                "risk_signal": round(risk, 3),
+                "trend_signal": round(trend, 3),
+                "total": round(total, 4),
+            }
+
+        elif agent == "investigation":
+            patterns = int(raw.get("patterns_count", 0))
+            conf = stance.confidence
+            escalation = 0.8 if raw.get("escalation_level") in ("high", "critical") else 0.3
+            w = self.EVIDENCE_WEIGHTS["investigation"]
+            total = (
+                min(1.0, patterns / 5) * w["patterns_found"]
+                + conf * w["confidence"]
+                + escalation * w["escalation_weight"]
+            )
+            return {
+                "patterns_count": patterns,
+                "confidence": round(conf, 3),
+                "escalation": round(escalation, 3),
+                "total": round(total, 4),
+            }
+
+        # Unknown agent
+        return {"total": round(stance.confidence * 0.5, 4)}

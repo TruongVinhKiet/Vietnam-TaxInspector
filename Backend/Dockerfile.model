@@ -1,0 +1,54 @@
+# ════════════════════════════════════════════════════════════════
+#  Dockerfile.model – TaxInspector Model Inference Server
+# ════════════════════════════════════════════════════════════════
+#  Container: tax-model-server (Port 8001, internal only)
+#  Role: Isolated DL model inference (VAE, Transformer, GNN)
+#  Memory: Dedicated RAM budget, no interference with main API
+# ════════════════════════════════════════════════════════════════
+
+FROM python:3.10-slim
+
+LABEL maintainer="TaxInspector Team"
+LABEL description="Isolated Deep Learning model inference microservice"
+
+# Minimal system deps for PyTorch CPU
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Install only what the model server needs (lighter than full requirements)
+COPY requirements.txt .
+RUN pip install --no-cache-dir \
+    fastapi \
+    uvicorn \
+    torch --index-url https://download.pytorch.org/whl/cpu \
+    torch_geometric \
+    numpy \
+    redis
+
+# Create non-root user for security
+RUN addgroup --system taxmodel && adduser --system --ingroup taxmodel taxmodel
+
+# Copy ML engine code
+COPY ml_engine/ ./ml_engine/
+
+# Copy trained model weights
+COPY data/models/ ./data/models/
+
+ENV PYTHONPATH=/app
+ENV PYTHONUNBUFFERED=1
+ENV REDIS_URL=redis://tax-redis:6379/0
+ENV MODEL_SERVING_MAX_CACHE=6
+
+EXPOSE 8001
+
+# Switch to non-root user
+USER taxmodel
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8001/health')" || exit 1
+
+CMD ["uvicorn", "ml_engine.model_api_server:app", "--host", "0.0.0.0", "--port", "8001", "--workers", "1"]

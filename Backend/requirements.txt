@@ -17,6 +17,9 @@ shap
 celery[redis]
 redis
 
+# Infrastructure (Phase B)
+kafka-python
+
 passlib[bcrypt]
 PyJWT
 

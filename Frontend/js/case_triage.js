@@ -1,4 +1,4 @@
-const API = typeof API_BASE !== 'undefined' ? API_BASE : "http://localhost:8000/api";
+const API = typeof API_BASE !== 'undefined' ? API_BASE : (window.API_BASE_URL || "http://localhost:8000/api");
 
 function getUrgencyDot(urgency) {
     const u = String(urgency || "").toLowerCase();
