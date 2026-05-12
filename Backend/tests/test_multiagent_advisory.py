@@ -170,7 +170,7 @@ TEST_CASES = [
 # ═══════════════════════════════════════════════════════════════════════
 
 @dataclass
-class TestResult:
+class AdvisoryResult:
     test_id: str
     label: str
     status: str = "pending"
@@ -189,8 +189,8 @@ class TestResult:
     warnings: list[str] = field(default_factory=list)
 
 
-def run_stream_test(case: dict) -> TestResult:
-    result = TestResult(test_id=case["id"], label=case["label"])
+def run_stream_test(case: dict) -> AdvisoryResult:
+    result = AdvisoryResult(test_id=case["id"], label=case["label"])
     payload = {
         "message": case["message"],
         "model_mode": case["model_mode"],
@@ -279,7 +279,7 @@ def run_stream_test(case: dict) -> TestResult:
 #  Report Generator
 # ═══════════════════════════════════════════════════════════════════════
 
-def print_report(results: list[TestResult]) -> None:
+def print_report(results: list[AdvisoryResult]) -> None:
     sep = "=" * 90
     print(f"\n{sep}")
     print("  MULTI-AGENT TAX ADVISORY SYSTEM — TEST REPORT")
@@ -383,7 +383,7 @@ def main() -> None:
     print(f"Target: {STREAM_URL}")
     print(f"Test cases: {len(TEST_CASES)}\n")
 
-    results: list[TestResult] = []
+    results: list[AdvisoryResult] = []
     for i, case in enumerate(TEST_CASES):
         print(f"[{i+1}/{len(TEST_CASES)}] Running: {case['id']} — {case['label']}...")
         result = run_stream_test(case)

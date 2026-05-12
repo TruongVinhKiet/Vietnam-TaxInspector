@@ -1,0 +1,48 @@
+=== Agent Evaluation Report ===
+Total: 203 | Pass: 168 | Fail: 34 | Warn: 0 | Skip: 1
+Pass Rate: 83% | Overall Score: 83%
+Latency: 6481ms
+
+Category Scores:
+  functional   ████████░░ 84%
+  adversarial  ░░░░░░░░░░ 0%
+
+Failed Tests:
+  ✗ [F-EXT-064] Intent: osint_ownership: Expected osint_ownership, got company_name_lookup
+  ✗ [F-EXT-065] Intent: osint_ownership: Expected osint_ownership, got company_name_lookup
+  ✗ [F-EXT-084] Intent: transfer_pricing: Expected transfer_pricing, got invoice_risk
+  ✗ [F-GEN-092] Intent: transfer_pricing (Generated): Expected transfer_pricing, got osint_ownership
+  ✗ [F-GEN-093] Intent: transfer_pricing (Generated): Expected transfer_pricing, got osint_ownership
+  ✗ [F-GEN-094] Intent: transfer_pricing (Generated): Expected transfer_pricing, got osint_ownership
+  ✗ [F-EXT-124] Intent: top_n_query: Expected top_n_query, got audit_selection
+  ✗ [F-GEN-127] Intent: top_n_query (Generated): Expected top_n_query, got audit_selection
+  ✗ [F-GEN-130] Intent: top_n_query (Generated): Expected top_n_query, got audit_selection
+  ✗ [F-GEN-133] Intent: top_n_query (Generated): Expected top_n_query, got audit_selection
+  ✗ [F-GEN-136] Intent: top_n_query (Generated): Expected top_n_query, got audit_selection
+  ✗ [F-GEN-139] Intent: top_n_query (Generated): Expected top_n_query, got audit_selection
+  ✗ [F-EXT-144] Intent: company_name_lookup: Expected company_name_lookup, got audit_selection
+  ✗ [F-GEN-147] Intent: company_name_lookup (Generated): Expected company_name_lookup, got audit_selection
+  ✗ [F-GEN-150] Intent: company_name_lookup (Generated): Expected company_name_lookup, got audit_selection
+  ✗ [F-GEN-153] Intent: company_name_lookup (Generated): Expected company_name_lookup, got audit_selection
+  ✗ [F-GEN-156] Intent: company_name_lookup (Generated): Expected company_name_lookup, got audit_selection
+  ✗ [F-GEN-159] Intent: company_name_lookup (Generated): Expected company_name_lookup, got audit_selection
+  ✗ [F-EXT-162] Intent: batch_analysis: Expected batch_analysis, got top_n_query
+  ✗ [F-GEN-167] Intent: batch_analysis (Generated): Expected batch_analysis, got audit_selection
+  ✗ [F-GEN-170] Intent: batch_analysis (Generated): Expected batch_analysis, got audit_selection
+  ✗ [F-GEN-173] Intent: batch_analysis (Generated): Expected batch_analysis, got audit_selection
+  ✗ [F-GEN-174] Intent: batch_analysis (Generated): Expected batch_analysis, got top_n_query
+  ✗ [F-GEN-175] Intent: batch_analysis (Generated): Expected batch_analysis, got top_n_query
+  ✗ [F-GEN-176] Intent: batch_analysis (Generated): Expected batch_analysis, got audit_selection
+  ✗ [F-GEN-179] Intent: batch_analysis (Generated): Expected batch_analysis, got audit_selection
+  ✗ [F-EXT-185] Intent: general_tax_query: Expected general_tax_query, got vat_refund_risk
+  ✗ [F-GEN-187] Intent: general_tax_query (Generated): Expected general_tax_query, got vat_refund_risk
+  ✗ [F-GEN-189] Intent: general_tax_query (Generated): Expected general_tax_query, got vat_refund_risk
+  ✗ [F-GEN-190] Intent: general_tax_query (Generated): Expected general_tax_query, got audit_selection
+  ✗ [F-GEN-193] Intent: general_tax_query (Generated): Expected general_tax_query, got audit_selection
+  ✗ [F-GEN-196] Intent: general_tax_query (Generated): Expected general_tax_query, got audit_selection
+  ✗ [F-GEN-199] Intent: general_tax_query (Generated): Expected general_tax_query, got audit_selection
+  ✗ [A-EDGE-203] SQL Injection: failed
+
+Recommendations:
+  🔴 Adversarial robustness below 80% — expand prompt injection detection.
+  🎯 Misclassified intents: check company_name_lookup, top_n_query, vat_refund_risk, osint_ownership, audit_selection, invoice_risk

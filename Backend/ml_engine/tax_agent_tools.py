@@ -31,8 +31,11 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import inspect
 import json
 import logging
+import random
+import threading
 import time
 import traceback
 from concurrent.futures import ThreadPoolExecutor
@@ -84,6 +87,30 @@ class ToolCallRequest:
     request_id: str = ""
     timeout_override: float | None = None
     max_retries_override: int | None = None
+
+
+@dataclass
+class ToolExecutionContext:
+    """Execution budget passed to long-running/cooperative tools."""
+    deadline_at: float | None = None
+    cancel_event: threading.Event | None = None
+    request_id: str = ""
+    attempt: int = 0
+
+    def remaining_seconds(self) -> float | None:
+        if self.deadline_at is None:
+            return None
+        return max(0.0, self.deadline_at - time.perf_counter())
+
+    def is_cancelled(self) -> bool:
+        return bool(self.cancel_event and self.cancel_event.is_set())
+
+    def raise_if_cancelled(self) -> None:
+        if self.is_cancelled():
+            raise RuntimeError("tool_execution_cancelled")
+        remaining = self.remaining_seconds()
+        if remaining is not None and remaining <= 0:
+            raise TimeoutError("tool_execution_timeout")
 
 
 @dataclass
@@ -178,11 +205,13 @@ class ToolExecutor:
         self.max_workers = max_workers
         self.db_factory = db_factory
         self._executor = ThreadPoolExecutor(max_workers=max_workers)
+        self._handler_context_support: dict[str, bool] = {}
 
     def execute_single(
         self,
         request: ToolCallRequest,
         db=None,
+        execution_context: ToolExecutionContext | None = None,
     ) -> ToolCallResult:
         """Execute a single tool call."""
         tool = self.registry.get(request.tool_name)
@@ -203,6 +232,16 @@ class ToolExecutor:
         timeout = request.timeout_override or tool.timeout_seconds
         retries = 0
         last_error = None
+        last_status = ToolStatus.ERROR
+        request_id = request.request_id or f"{request.tool_name}-{hashlib.sha1(json.dumps(request.inputs, sort_keys=True, default=str).encode('utf-8')).hexdigest()[:10]}"
+        if execution_context is None:
+            execution_context = ToolExecutionContext(
+                deadline_at=time.perf_counter() + timeout,
+                cancel_event=threading.Event(),
+                request_id=request_id,
+            )
+        elif not execution_context.request_id:
+            execution_context.request_id = request_id
 
         max_retries = request.max_retries_override if request.max_retries_override is not None else tool.max_retries
 
@@ -211,15 +250,23 @@ class ToolExecutor:
             attempt_db = db
             owns_db = False
             try:
+                execution_context.attempt = retries
+                execution_context.raise_if_cancelled()
                 # Build kwargs
                 kwargs = dict(request.inputs)
                 if tool.requires_db:
                     if attempt_db is None and self.db_factory:
                         attempt_db = self.db_factory()
                         owns_db = True
+                    remaining = execution_context.remaining_seconds()
+                    statement_timeout = min(timeout, remaining) if remaining is not None else timeout
+                    self._set_local_statement_timeout(attempt_db, statement_timeout)
                     kwargs["db"] = attempt_db
+                if self._handler_accepts_execution_context(tool):
+                    kwargs["execution_context"] = execution_context
 
-                # Execute with timeout
+                # Execute. Hard wall-clock bounds are enforced by execute_parallel,
+                # while this inline path provides DB and cooperative cancellation.
                 result = tool.handler(**kwargs)
                 if owns_db and attempt_db is not None:
                     attempt_db.commit()
@@ -231,6 +278,11 @@ class ToolExecutor:
                     outputs=result if isinstance(result, dict) else {"result": result},
                     latency_ms=latency,
                     retries=retries,
+                    metadata={
+                        "request_id": execution_context.request_id,
+                        "attempt": retries,
+                        "deadline_remaining_ms": self._remaining_ms(execution_context),
+                    },
                 )
 
             except Exception as exc:
@@ -241,13 +293,16 @@ class ToolExecutor:
                         pass
                 latency = (time.perf_counter() - t0) * 1000.0
                 last_error = str(exc)
+                last_status = self._status_for_exception(exc)
                 retries += 1
                 logger.warning(
                     "[ToolExecutor] %s failed (attempt %d/%d): %s",
                     request.tool_name, retries, max_retries + 1, last_error,
                 )
-                if retries <= max_retries:
-                    time.sleep(0.1 * retries)  # Simple backoff
+                if retries <= max_retries and self._should_retry(exc, retries, max_retries):
+                    time.sleep(self._retry_delay_seconds(exc, retries))
+                else:
+                    break
             finally:
                 if owns_db and attempt_db is not None:
                     try:
@@ -257,10 +312,16 @@ class ToolExecutor:
 
         return ToolCallResult(
             tool_name=request.tool_name,
-            status=ToolStatus.ERROR,
+            status=last_status,
             error=last_error,
             latency_ms=(time.perf_counter() - t0) * 1000.0,
-            retries=retries - 1,
+            retries=max(0, retries - 1),
+            metadata={
+                "request_id": execution_context.request_id,
+                "attempts": retries,
+                "deadline_remaining_ms": self._remaining_ms(execution_context),
+                "cancelled": execution_context.is_cancelled(),
+            },
         )
 
     def execute_parallel(
@@ -272,22 +333,31 @@ class ToolExecutor:
         if not requests:
             return []
 
-        if len(requests) == 1:
-            return [self.execute_single(requests[0], db=db)]
-
         futures_map = {}
+        contexts_by_future: dict[Any, ToolExecutionContext] = {}
+        index_by_future: dict[Any, int] = {}
         submit_db = None if self.db_factory else db
-        for req in requests:
-            future = self._executor.submit(self.execute_single, req, submit_db)
+        for idx, req in enumerate(requests):
+            tool = self.registry.get(req.tool_name)
+            timeout = req.timeout_override or (tool.timeout_seconds if tool else 55.0)
+            context = ToolExecutionContext(
+                deadline_at=time.perf_counter() + timeout,
+                cancel_event=threading.Event(),
+                request_id=req.request_id or f"{req.tool_name}-{idx}-{int(time.time() * 1000)}",
+            )
+            future = self._executor.submit(self.execute_single, req, submit_db, context)
             futures_map[future] = req
+            contexts_by_future[future] = context
+            index_by_future[future] = idx
 
-        results = []
+        results: dict[int, ToolCallResult] = {}
         pending = set(futures_map.keys())
         deadline_by_future = {}
         for future, req in futures_map.items():
             tool = self.registry.get(req.tool_name)
             timeout = req.timeout_override or (tool.timeout_seconds if tool else 55.0)
-            deadline_by_future[future] = time.perf_counter() + timeout + 2.0
+            grace = min(0.25, max(0.05, timeout * 0.1))
+            deadline_by_future[future] = time.perf_counter() + timeout + grace
 
         while pending:
             now = time.perf_counter()
@@ -296,14 +366,15 @@ class ToolExecutor:
             for future in completed:
                 pending.remove(future)
                 req = futures_map[future]
+                idx = index_by_future[future]
                 try:
-                    results.append(future.result())
+                    results[idx] = future.result()
                 except Exception as exc:
-                    results.append(ToolCallResult(
+                    results[idx] = ToolCallResult(
                         tool_name=req.tool_name,
                         status=ToolStatus.ERROR,
                         error=str(exc),
-                    ))
+                    )
 
             expired = [
                 future for future in pending
@@ -312,23 +383,30 @@ class ToolExecutor:
             for future in expired:
                 pending.remove(future)
                 req = futures_map[future]
+                idx = index_by_future[future]
+                context = contexts_by_future.get(future)
+                if context and context.cancel_event:
+                    context.cancel_event.set()
                 future.cancel()
-                results.append(ToolCallResult(
+                results[idx] = ToolCallResult(
                     tool_name=req.tool_name,
                     status=ToolStatus.TIMEOUT,
                     error=f"Tool exceeded timeout budget for {req.tool_name}",
-                ))
+                    metadata={
+                        "request_id": context.request_id if context else req.request_id,
+                        "cancel_requested": True,
+                    },
+                )
 
             if pending:
                 time.sleep(0.02)
 
         # Maintain original order
-        result_map = {r.tool_name: r for r in results}
-        return [result_map.get(req.tool_name, ToolCallResult(
+        return [results.get(idx, ToolCallResult(
             tool_name=req.tool_name,
             status=ToolStatus.ERROR,
             error="Result not found",
-        )) for req in requests]
+        )) for idx, req in enumerate(requests)]
 
     def execute_dag(
         self,
@@ -356,6 +434,69 @@ class ToolExecutor:
             stage_results = self.execute_parallel(stage, db=db)
             all_results.extend(stage_results)
         return all_results
+
+    def _handler_accepts_execution_context(self, tool: ToolSpec) -> bool:
+        cache_key = tool.name
+        if cache_key in self._handler_context_support:
+            return self._handler_context_support[cache_key]
+        try:
+            signature = inspect.signature(tool.handler)
+            supported = "execution_context" in signature.parameters or any(
+                p.kind == inspect.Parameter.VAR_KEYWORD
+                for p in signature.parameters.values()
+            )
+        except Exception:
+            supported = False
+        self._handler_context_support[cache_key] = supported
+        return supported
+
+    def _set_local_statement_timeout(self, db, timeout_seconds: float | None) -> None:
+        if db is None or not timeout_seconds:
+            return
+        try:
+            bind = db.get_bind() if hasattr(db, "get_bind") else None
+            dialect = getattr(getattr(bind, "dialect", None), "name", "")
+            if dialect != "postgresql":
+                return
+            from sqlalchemy import text as sql_text
+            timeout_ms = max(100, int(float(timeout_seconds) * 1000))
+            db.execute(sql_text("SET LOCAL statement_timeout = :timeout_ms"), {"timeout_ms": timeout_ms})
+        except Exception as exc:
+            logger.debug("[ToolExecutor] statement_timeout skipped for %s: %s", type(db).__name__, exc)
+
+    def _status_for_exception(self, exc: Exception) -> ToolStatus:
+        if isinstance(exc, TimeoutError):
+            return ToolStatus.TIMEOUT
+        if "timeout" in str(exc).lower():
+            return ToolStatus.TIMEOUT
+        if "cancel" in str(exc).lower():
+            return ToolStatus.SKIPPED
+        return ToolStatus.ERROR
+
+    def _should_retry(self, exc: Exception, retries: int, max_retries: int) -> bool:
+        if retries > max_retries:
+            return False
+        if isinstance(exc, (ValueError, KeyError, TypeError)):
+            return False
+        message = str(exc).lower()
+        if "cancel" in message:
+            return False
+        if "validation" in message or "invalid" in message:
+            return False
+        if isinstance(exc, TimeoutError) or "timeout" in message:
+            return retries <= min(max_retries, 1)
+        return True
+
+    def _retry_delay_seconds(self, exc: Exception, retries: int) -> float:
+        message = str(exc).lower()
+        base = 0.08 if "timeout" in message else 0.15
+        return min(1.5, base * (2 ** max(0, retries - 1)) + random.uniform(0.0, 0.05))
+
+    def _remaining_ms(self, context: ToolExecutionContext | None) -> float | None:
+        if context is None:
+            return None
+        remaining = context.remaining_seconds()
+        return None if remaining is None else round(remaining * 1000.0, 1)
 
 
 # ─── Pre-built Tool Handlers ──────────────────────────────────────────────────
@@ -810,6 +951,30 @@ def _tool_knowledge_search(
             },
         })
 
+    # Citizen-facing fallback: when the formal KB has sparse coverage, provide
+    # practical guidance snippets for common everyday Vietnamese tax questions.
+    # These snippets are marked as guidance_not_normative and never replace
+    # official GraphRAG citations when those are available.
+    try:
+        from ml_engine.tax_agent_citizen_legal import retrieve_citizen_legal_snippets
+
+        fallback_needed = max(0, int(top_k) - len(final))
+        fallback_hits = retrieve_citizen_legal_snippets(
+            effective_query,
+            top_k=max(1, fallback_needed) if fallback_needed else 1,
+        )
+        if fallback_hits and (fallback_needed > 0 or not final):
+            existing_keys = {str(item.get("chunk_key")) for item in final}
+            for hit in fallback_hits:
+                if len(final) >= int(top_k):
+                    break
+                if str(hit.get("chunk_key")) in existing_keys:
+                    continue
+                final.append(hit)
+                existing_keys.add(str(hit.get("chunk_key")))
+    except Exception as exc:
+        logger.debug("[knowledge_search] citizen fallback skipped: %s", exc)
+
     latency_ms = (time.perf_counter() - t_start) * 1000.0
     corpus_versions = sorted({h.get("corpus_version") for h in final if h.get("corpus_version")})
     retrieval_scores = {
@@ -920,35 +1085,99 @@ def _tool_delinquency_check(
     tax_code: str,
     **kwargs,
 ) -> dict[str, Any]:
-    """Check delinquency risk using DelinquencyPipeline."""
-    from sqlalchemy import text as sql_text
-    import pandas as pd
+    """Canonical delinquency prediction (same contract as /api/delinquency/{tax_code})."""
+    from app.routers import delinquency as delinquency_router
 
-    # Fetch payment history
-    payments = db.execute(
-        sql_text("""
-            SELECT due_date, actual_payment_date, amount_due, amount_paid,
-                   penalty_amount, tax_period, status
-            FROM debt_details
-            WHERE tax_code = :tax_code
-            ORDER BY due_date DESC
-            LIMIT 100
-        """),
-        {"tax_code": tax_code},
-    ).mappings().all()
+    payload = delinquency_router.get_delinquency_detail(tax_code=tax_code, db=db)
+    if not isinstance(payload, dict):
+        return {"status": "error", "tax_code": tax_code, "error": "Invalid delinquency payload"}
 
-    if not payments:
-        return {"status": "no_data", "tax_code": tax_code, "message": "Không có dữ liệu thanh toán."}
+    if payload.get("tax_code") is None:
+        return {"status": "no_data", "tax_code": tax_code, "message": "Không có dữ liệu dự báo nợ đọng."}
 
-    payments_df = pd.DataFrame([dict(r) for r in payments])
+    return {
+        "status": "analyzed",
+        "tax_code": str(payload.get("tax_code") or tax_code),
+        "company_name": str(payload.get("company_name") or ""),
+        "prob_30d": float(payload.get("prob_30d") or 0.0),
+        "prob_60d": float(payload.get("prob_60d") or 0.0),
+        "prob_90d": float(payload.get("prob_90d") or 0.0),
+        "risk_level": str(payload.get("cluster") or ""),
+        "top_reasons": payload.get("top_reasons") or [],
+        "model_version": str(payload.get("model_version") or ""),
+        "score_source": str(payload.get("score_source") or "canonical_api"),
+        "prediction_age_days": payload.get("prediction_age_days"),
+        "freshness": payload.get("freshness"),
+        "payment_history_summary": payload.get("payment_history_summary"),
+        "early_warning": payload.get("early_warning"),
+        "intervention_uplift": payload.get("intervention_uplift"),
+        "split_trigger_status": payload.get("split_trigger_status"),
+    }
 
-    from ml_engine.delinquency_model import DelinquencyPipeline
-    pipeline = DelinquencyPipeline()
-    pipeline.load_models()
-    result = pipeline.predict_single(payments_df)
-    result["tax_code"] = tax_code
-    result["status"] = "analyzed"
-    return result
+
+def _tool_macro_forecast(
+    db,
+    scenario: dict | None = None,
+    action: str = "run",
+    **kwargs,
+) -> dict[str, Any]:
+    """
+    Canonical macro simulation tool backed by /api/simulation.
+    action:
+      - baseline: return baseline only
+      - run: run a single scenario (default)
+      - compare: compare multiple scenarios (scenario must include "scenarios": [...])
+      - sensitivity: run sensitivity analysis
+      - monte-carlo: run monte-carlo simulation
+    """
+    from app.routers import simulation as sim_router
+    from app.routers.simulation import ScenarioInput, CompareRequest, SensitivityRequest
+
+    def _plain(value: Any) -> Any:
+        if hasattr(value, "model_dump"):
+            try:
+                return value.model_dump()
+            except Exception:
+                pass
+        if isinstance(value, dict):
+            return {str(k): _plain(v) for k, v in value.items()}
+        if isinstance(value, (list, tuple)):
+            return [_plain(v) for v in value]
+        return value
+
+    safe_action = (action or "run").strip().lower()
+    scenario = scenario if isinstance(scenario, dict) else {}
+
+    if safe_action == "baseline":
+        baseline = sim_router.get_baseline(db=db)
+        return {"status": "analyzed", "action": "baseline", "baseline": _plain(baseline)}
+
+    if safe_action == "compare":
+        req_payload = scenario.get("request") or scenario
+        if not isinstance(req_payload, dict):
+            return {"status": "error", "error": "Invalid compare payload"}
+        req = CompareRequest(**req_payload)
+        result = sim_router.compare_scenarios(req=req, db=db)
+        return {"status": "analyzed", "action": "compare", "result": _plain(result)}
+
+    if safe_action == "sensitivity":
+        req_payload = scenario.get("request") or scenario
+        if not isinstance(req_payload, dict):
+            return {"status": "error", "error": "Invalid sensitivity payload"}
+        req = SensitivityRequest(**req_payload)
+        result = sim_router.sensitivity_analysis(req=req, db=db)
+        return {"status": "analyzed", "action": "sensitivity", "result": _plain(result)}
+
+    if safe_action in ("monte-carlo", "montecarlo", "mc"):
+        params = ScenarioInput(**(scenario.get("params") or scenario))
+        n_iter = int(scenario.get("n_iterations") or 300)
+        result = sim_router.monte_carlo_simulation(params=params, n_iterations=n_iter, db=db)
+        return {"status": "analyzed", "action": "monte-carlo", "result": _plain(result)}
+
+    # default: run-scenario
+    params = ScenarioInput(**scenario)
+    result = sim_router.run_scenario(params=params, db=db)
+    return {"status": "analyzed", "action": "run", "result": _plain(result)}
 
 
 def _tool_invoice_risk_scan(
@@ -1022,6 +1251,122 @@ def _tool_motif_detection(
     result = detector.detect_all(companies, [dict(r) for r in invoices])
     result["status"] = "analyzed"
     return result
+
+
+def _tool_ring_scoring(
+    db,
+    tax_code: str | None = None,
+    max_rings: int = 10,
+    **kwargs,
+) -> dict[str, Any]:
+    """Score circular VAT transaction rings using the motif detector output."""
+    execution_context = kwargs.get("execution_context")
+    if execution_context is not None:
+        execution_context.raise_if_cancelled()
+
+    try:
+        motifs = _tool_motif_detection(db=db, tax_code=tax_code)
+    except Exception as exc:
+        return {
+            "status": "fallback",
+            "tax_code": tax_code,
+            "ring_score": 0.0,
+            "rings": [],
+            "reason": f"motif_detection_unavailable: {exc}",
+        }
+
+    raw_rings = (
+        motifs.get("rings")
+        or motifs.get("cycles")
+        or motifs.get("circular_patterns")
+        or motifs.get("motifs", {}).get("cycles", [])
+        if isinstance(motifs, dict)
+        else []
+    )
+    rings = raw_rings if isinstance(raw_rings, list) else []
+    total_amount = 0.0
+    for ring in rings:
+        if isinstance(ring, dict):
+            total_amount += float(ring.get("amount") or ring.get("total_amount") or 0.0)
+    ring_score = min(100.0, len(rings) * 18.0 + min(total_amount / 1_000_000_000.0, 40.0))
+    return {
+        "status": "analyzed",
+        "tax_code": tax_code,
+        "ring_score": round(ring_score, 2),
+        "ring_count": len(rings),
+        "rings": rings[: max(1, int(max_rings))],
+        "source": "motif_detection",
+    }
+
+
+def _tool_vat_refund_risk(
+    db,
+    tax_code: str,
+    limit: int = 5,
+    **kwargs,
+) -> dict[str, Any]:
+    """Read the latest VAT refund case predictions for a taxpayer."""
+    execution_context = kwargs.get("execution_context")
+    if execution_context is not None:
+        execution_context.raise_if_cancelled()
+    from sqlalchemy import text as sql_text
+
+    try:
+        rows = db.execute(
+            sql_text("""
+                SELECT
+                    c.case_id,
+                    c.tax_code,
+                    c.period,
+                    c.requested_amount,
+                    c.status AS case_status,
+                    p.as_of_date,
+                    p.model_version,
+                    p.risk_score,
+                    p.expected_loss,
+                    p.reason_codes
+                FROM vat_refund_cases c
+                LEFT JOIN LATERAL (
+                    SELECT case_id, as_of_date, model_version, risk_score, expected_loss, reason_codes
+                    FROM vat_refund_predictions
+                    WHERE case_id = c.case_id
+                    ORDER BY as_of_date DESC, created_at DESC
+                    LIMIT 1
+                ) p ON TRUE
+                WHERE c.tax_code = :tax_code
+                ORDER BY c.submitted_at DESC
+                LIMIT :limit
+            """),
+            {"tax_code": tax_code, "limit": max(1, int(limit))},
+        ).mappings().all()
+    except Exception as exc:
+        return {
+            "status": "fallback",
+            "tax_code": tax_code,
+            "available": False,
+            "risk_score": None,
+            "cases": [],
+            "reason": f"vat_refund_predictions_unavailable: {exc}",
+        }
+
+    cases = []
+    for row in rows:
+        item = dict(row)
+        if isinstance(item.get("reason_codes"), str):
+            try:
+                item["reason_codes"] = json.loads(item["reason_codes"])
+            except Exception:
+                item["reason_codes"] = [item["reason_codes"]]
+        cases.append(item)
+    max_score = max((float(c.get("risk_score") or 0.0) for c in cases), default=0.0)
+    return {
+        "status": "found" if cases else "not_found",
+        "tax_code": tax_code,
+        "available": bool(cases),
+        "risk_score": round(max_score, 4) if cases else None,
+        "cases": cases,
+        "model_version": next((c.get("model_version") for c in cases if c.get("model_version")), "vat-refund-heuristic"),
+    }
 
 
 def _tool_ownership_analysis(
@@ -1724,6 +2069,18 @@ def build_default_registry() -> ToolRegistry:
     ))
 
     registry.register(ToolSpec(
+        name="vat_refund_risk",
+        description="Truy vết hồ sơ hoàn thuế GTGT và điểm rủi ro VAT refund theo MST.",
+        category=ToolCategory.ANALYTICS,
+        input_schema={"tax_code": "string", "limit": "int"},
+        output_schema={"risk_score": "float", "cases": "list", "model_version": "string"},
+        handler=_tool_vat_refund_risk,
+        requires_tax_code=True,
+        timeout_seconds=10.0,
+        priority=3,
+    ))
+
+    registry.register(ToolSpec(
         name="gnn_analysis",
         description="Phân tích rủi ro gian lận VAT bằng Graph Neural Network (GATv2). Sử dụng cấu trúc đồ thị giao dịch.",
         category=ToolCategory.ANALYTICS,
@@ -1742,6 +2099,18 @@ def build_default_registry() -> ToolRegistry:
         input_schema={"tax_code": "string"},
         output_schema={"motifs": "dict", "summary": "dict"},
         handler=_tool_motif_detection,
+        requires_tax_code=True,
+        timeout_seconds=20.0,
+        priority=5,
+    ))
+
+    registry.register(ToolSpec(
+        name="ring_scoring",
+        description="Chấm điểm vòng giao dịch VAT khép kín dựa trên motif/cycle detection.",
+        category=ToolCategory.INVESTIGATION,
+        input_schema={"tax_code": "string", "max_rings": "int"},
+        output_schema={"ring_score": "float", "ring_count": "int", "rings": "list"},
+        handler=_tool_ring_scoring,
         requires_tax_code=True,
         timeout_seconds=20.0,
         priority=5,
@@ -1886,6 +2255,19 @@ def build_default_registry() -> ToolRegistry:
         requires_tax_code=False,
         timeout_seconds=30.0,
         priority=3,
+    ))
+
+    registry.register(ToolSpec(
+        name="macro_forecast",
+        description="Mô phỏng kịch bản vĩ mô (thuế suất, thanh tra, lãi suất, tăng trưởng...) dựa trên baseline từ DB. Đồng nhất với trang mô phỏng vĩ mô.",
+        category=ToolCategory.FORECASTING,
+        input_schema={"scenario": "dict", "action": "string"},
+        output_schema={"result": "dict"},
+        handler=_tool_macro_forecast,
+        requires_db=True,
+        requires_tax_code=False,
+        timeout_seconds=25.0,
+        priority=4,
     ))
 
     logger.info("[ToolRegistry] ✓ Default registry built with %d tools", registry.count())

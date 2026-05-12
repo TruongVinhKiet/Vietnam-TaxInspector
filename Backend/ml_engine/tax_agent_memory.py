@@ -30,6 +30,7 @@ logger = logging.getLogger(__name__)
 SLIDING_WINDOW_SIZE = 10       # Keep last N turns in context
 MAX_CONTEXT_TOKENS = 2000      # Approximate token budget for context window
 ENTITY_MEMORY_LIMIT = 50       # Max entities tracked per session
+SNAPSHOT_TTL_SECONDS = 6 * 60 * 60
 
 
 @dataclass
@@ -61,6 +62,12 @@ class ConversationContext:
     active_intent_history: list[str] = field(default_factory=list)
     # Session summary (long-term)
     session_summary: str | None = None
+    # Session memory — batch data from uploaded files (persists within session)
+    last_batch_data: dict[str, Any] | None = None
+    last_vat_snapshot: dict[str, Any] | None = None
+    last_attachment_summary: str | None = None
+    prior_answer_facts: list[dict[str, Any]] = field(default_factory=list)
+    active_artifact_refs: list[dict[str, Any]] = field(default_factory=list)
     # Metadata
     context_token_estimate: int = 0
 
@@ -156,12 +163,17 @@ class ConversationMemory:
     def __init__(self, db):
         self.db = db
         self._entity_cache: dict[str, list[TrackedEntity]] = {}
+        # Session-scoped cache for batch analysis results (in-memory, lost on restart)
+        self._batch_data_cache: dict[str, dict[str, Any]] = {}
+        self._vat_snapshot_cache: dict[str, dict[str, Any]] = {}
+        self._attachment_summary_cache: dict[str, str] = {}
 
     def build_context(
         self,
         session_id: str,
         current_turn_index: int,
         current_message: str = "",
+        model_mode: str | None = None,
     ) -> ConversationContext:
         """
         Assemble full conversation context for the current turn.
@@ -209,6 +221,8 @@ class ConversationMemory:
 
         # 8. Get session summary
         session_summary = self._get_session_summary(session_id)
+        prior_answer_facts = self.get_prior_answer_facts(session_id, mode=model_mode)
+        active_artifact_refs = self._build_active_artifact_refs(session_id)
 
         # Estimate context token count (rough: 1 token ≈ 3 chars for Vietnamese)
         context_chars = sum(
@@ -226,6 +240,11 @@ class ConversationMemory:
             active_tax_period=active_tax_period,
             active_intent_history=intent_history,
             session_summary=session_summary,
+            last_batch_data=self.get_batch_data(session_id),
+            last_vat_snapshot=self.get_vat_snapshot(session_id),
+            last_attachment_summary=self.get_attachment_summary(session_id),
+            prior_answer_facts=prior_answer_facts,
+            active_artifact_refs=active_artifact_refs,
             context_token_estimate=token_estimate,
         )
 
@@ -238,6 +257,256 @@ class ConversationMemory:
         )
 
         return context
+
+    def get_report_context(self, session_id: str) -> dict[str, Any]:
+        """Aggregate all session context for report generation."""
+        summary = self._get_session_summary(session_id)
+        batch = self.get_batch_data(session_id)
+        vat = self.get_vat_snapshot(session_id)
+        facts = self.get_prior_answer_facts(session_id, limit=50)
+        recent_turns = self._get_recent_turns(session_id, 9999)
+        
+        # Calculate readiness: Do we have enough analytical payload?
+        score = len(facts)
+        if batch: score += 5
+        if vat: score += 5
+        
+        # Try to find the most recent visualization data in recent turns
+        viz_data = {}
+        for turn in recent_turns:
+            if isinstance(turn.get("visualization_data"), dict) and turn["visualization_data"]:
+                viz_data = turn["visualization_data"]
+                break
+
+        return {
+            "session_summary": summary,
+            "batch_data": batch,
+            "vat_snapshot": vat,
+            "facts": facts,
+            "recent_turns": recent_turns,
+            "viz_data": viz_data,
+            "report_readiness_score": score,
+            "is_ready": score >= 3
+        }
+
+    def save_batch_data(self, session_id: str, batch_data: dict[str, Any]) -> None:
+        """Save batch analysis results in session-scoped memory."""
+        self._batch_data_cache[session_id] = batch_data
+        self._save_snapshot(session_id, "risk_batch", batch_data)
+        logger.debug("[Memory] Batch data saved for session=%s (%d companies)",
+                     session_id, len(batch_data.get("companies", [])))
+
+    def save_vat_snapshot(self, session_id: str, snapshot: dict[str, Any]) -> None:
+        """VAT graph / invoice snapshot for follow-up questions in the same session."""
+        self._vat_snapshot_cache[session_id] = snapshot
+        self._save_snapshot(session_id, "vat_snapshot", snapshot)
+        logger.debug(
+            "[Memory] VAT snapshot saved for session=%s (batch_id=%s)",
+            session_id, snapshot.get("batch_id"),
+        )
+
+    def save_attachment_summary(self, session_id: str, summary: str) -> None:
+        """Save a human-readable summary of the last uploaded attachment."""
+        self._attachment_summary_cache[session_id] = summary
+        self._save_snapshot(session_id, "attachment_summary", {"summary": summary})
+
+    def get_batch_data(self, session_id: str) -> dict[str, Any] | None:
+        cached = self._batch_data_cache.get(session_id)
+        if cached:
+            return cached
+        payload = self._load_snapshot(session_id, "risk_batch")
+        if isinstance(payload, dict):
+            self._batch_data_cache[session_id] = payload
+        return payload
+
+    def get_vat_snapshot(self, session_id: str) -> dict[str, Any] | None:
+        cached = self._vat_snapshot_cache.get(session_id)
+        if cached:
+            return cached
+        payload = self._load_snapshot(session_id, "vat_snapshot")
+        if isinstance(payload, dict):
+            self._vat_snapshot_cache[session_id] = payload
+        return payload
+
+    def get_attachment_summary(self, session_id: str) -> str | None:
+        cached = self._attachment_summary_cache.get(session_id)
+        if cached:
+            return cached
+        payload = self._load_snapshot(session_id, "attachment_summary")
+        if isinstance(payload, dict):
+            summary = str(payload.get("summary") or "")
+            if summary:
+                self._attachment_summary_cache[session_id] = summary
+                return summary
+        return None
+
+    def save_prior_answer_facts(
+        self,
+        session_id: str,
+        *,
+        turn_id: int | None,
+        mode: str,
+        intent: str,
+        facts: list[dict[str, Any]],
+        ttl_seconds: int = SNAPSHOT_TTL_SECONDS,
+    ) -> None:
+        """Persist structured facts extracted from assistant answers."""
+        if not facts:
+            return
+        try:
+            for fact in facts[:80]:
+                claim = str(fact.get("claim_text") or fact.get("claim") or "").strip()
+                if not claim:
+                    continue
+                self.db.execute(
+                    sql_text(
+                        """
+                        INSERT INTO agent_prior_answer_facts
+                        (session_id, turn_id, mode, intent, subject_key, fact_type,
+                         claim_text, value_json, source_tool, confidence, expires_at)
+                        VALUES
+                        (:session_id, :turn_id, :mode, :intent, :subject_key, :fact_type,
+                         :claim_text, CAST(:value_json AS jsonb), :source_tool,
+                         :confidence, NOW() + (:ttl_seconds || ' seconds')::interval)
+                        """
+                    ),
+                    {
+                        "session_id": session_id,
+                        "turn_id": turn_id,
+                        "mode": mode or "full",
+                        "intent": intent,
+                        "subject_key": fact.get("subject_key"),
+                        "fact_type": fact.get("fact_type") or "claim",
+                        "claim_text": claim[:1000],
+                        "value_json": json.dumps(fact.get("value_json") or fact.get("value") or {}, ensure_ascii=False, default=str),
+                        "source_tool": fact.get("source_tool"),
+                        "confidence": float(fact.get("confidence") or 0.75),
+                        "ttl_seconds": int(ttl_seconds),
+                    },
+                )
+            self.db.commit()
+        except Exception as exc:
+            try:
+                self.db.rollback()
+            except Exception:
+                pass
+            logger.debug("[Memory] Prior answer facts persist skipped: %s", exc)
+
+    def get_prior_answer_facts(
+        self,
+        session_id: str,
+        *,
+        mode: str | None = None,
+        limit: int = 24,
+    ) -> list[dict[str, Any]]:
+        """Retrieve prior facts to ground follow-up questions."""
+        try:
+            rows = self.db.execute(
+                sql_text(
+                    """
+                    SELECT id, turn_id, mode, intent, subject_key, fact_type,
+                           claim_text, value_json, source_tool, confidence, created_at
+                    FROM agent_prior_answer_facts
+                    WHERE session_id = :session_id
+                      AND (:mode IS NULL OR mode = :mode OR mode = 'full')
+                      AND (expires_at IS NULL OR expires_at > NOW())
+                    ORDER BY created_at DESC, id DESC
+                    LIMIT :limit
+                    """
+                ),
+                {"session_id": session_id, "mode": mode, "limit": int(limit)},
+            ).mappings().all()
+        except Exception:
+            try:
+                self.db.rollback()
+            except Exception:
+                pass
+            return []
+        facts: list[dict[str, Any]] = []
+        for row in rows:
+            facts.append({
+                "id": int(row.get("id") or 0),
+                "turn_id": row.get("turn_id"),
+                "mode": row.get("mode"),
+                "intent": row.get("intent"),
+                "subject_key": row.get("subject_key"),
+                "fact_type": row.get("fact_type"),
+                "claim_text": row.get("claim_text"),
+                "value_json": row.get("value_json") if isinstance(row.get("value_json"), dict) else {},
+                "source_tool": row.get("source_tool"),
+                "confidence": float(row.get("confidence") or 0.0),
+            })
+        return facts
+
+    def _build_active_artifact_refs(self, session_id: str) -> list[dict[str, Any]]:
+        refs: list[dict[str, Any]] = []
+        batch = self.get_batch_data(session_id)
+        if isinstance(batch, dict):
+            refs.append({
+                "scope": "risk_batch",
+                "filename": batch.get("filename"),
+                "total": batch.get("total") or len(batch.get("companies") or []),
+                "canonical_batch_id": batch.get("canonical_batch_id"),
+            })
+        vat = self.get_vat_snapshot(session_id)
+        if isinstance(vat, dict):
+            refs.append({
+                "scope": "vat_snapshot",
+                "filename": vat.get("filename"),
+                "batch_id": vat.get("batch_id"),
+                "invoice_count": len(vat.get("top_invoice_risks") or []),
+            })
+        summary = self.get_attachment_summary(session_id)
+        if summary:
+            refs.append({"scope": "attachment_summary", "summary": summary[:400]})
+        return refs
+
+    def _save_snapshot(self, session_id: str, scope: str, payload: dict[str, Any]) -> None:
+        try:
+            self.db.execute(
+                sql_text(
+                    """
+                    INSERT INTO agent_session_snapshots (session_id, scope, payload_json, updated_at, expires_at)
+                    VALUES (:session_id, :scope, CAST(:payload AS JSONB), NOW(), NOW() + (:ttl_seconds || ' seconds')::interval)
+                    ON CONFLICT (session_id, scope) DO UPDATE
+                    SET payload_json = EXCLUDED.payload_json,
+                        updated_at = NOW(),
+                        expires_at = EXCLUDED.expires_at
+                    """
+                ),
+                {
+                    "session_id": session_id,
+                    "scope": scope,
+                    "payload": json.dumps(payload, ensure_ascii=False, default=str),
+                    "ttl_seconds": int(SNAPSHOT_TTL_SECONDS),
+                },
+            )
+            self.db.commit()
+        except Exception:
+            self.db.rollback()
+
+    def _load_snapshot(self, session_id: str, scope: str) -> dict[str, Any] | None:
+        try:
+            row = self.db.execute(
+                sql_text(
+                    """
+                    SELECT payload_json
+                    FROM agent_session_snapshots
+                    WHERE session_id = :session_id
+                      AND scope = :scope
+                      AND (expires_at IS NULL OR expires_at > NOW())
+                    LIMIT 1
+                    """
+                ),
+                {"session_id": session_id, "scope": scope},
+            ).mappings().first()
+        except Exception:
+            self.db.rollback()
+            return None
+        if not row:
+            return None
+        payload = row.get("payload_json")
+        return payload if isinstance(payload, dict) else None
 
     def _get_recent_turns(
         self,
@@ -441,6 +710,18 @@ class ConversationMemory:
         # Session summary
         if context.session_summary:
             parts.append(f"[Tóm tắt session: {context.session_summary[:200]}]")
+
+        if context.prior_answer_facts:
+            parts.append("\n--- Facts tu cau tra loi truoc ---")
+            for fact in context.prior_answer_facts[:6]:
+                parts.append(f"- {str(fact.get('claim_text') or '')[:180]}")
+
+        if context.active_artifact_refs:
+            refs = [
+                f"{ref.get('scope')}:{ref.get('filename') or ref.get('batch_id') or ref.get('summary', '')}"
+                for ref in context.active_artifact_refs[:4]
+            ]
+            parts.append(f"[Artifact refs: {', '.join(refs)}]")
 
         # Recent conversation (abbreviated)
         if context.recent_turns:

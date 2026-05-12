@@ -671,10 +671,18 @@ def _train_horizon_regression(rows: List[Dict[str, float]], horizon_years: int, 
     use_residual_mode = horizon_years >= 5
     train_target = (y - y_det) if use_residual_mode else y
 
+    # Feature names for tree-based models (prevents UserWarning about feature names)
+    _FEATURE_NAMES = [
+        "intercept", "log_revenue", "growth_1q", "growth_4q", "det_growth",
+        "gold_price", "birth_rate", "disaster_risk", "demographic_pressure", "signal_confidence",
+    ]
+    import pandas as pd  # noqa: E402
+    X_df = pd.DataFrame(X, columns=_FEATURE_NAMES)
+
     # Lightweight hyper-parameter search for ridge stability on noisy macro signals.
     split_idx = max(1, int(len(y) * 0.75))
     split_idx = min(split_idx, len(y) - 1)
-    X_train, X_val = X[:split_idx], X[split_idx:]
+    X_train, X_val = X_df.iloc[:split_idx], X_df.iloc[split_idx:]
     y_train, y_val = train_target[:split_idx], train_target[split_idx:]
     y_det_val = y_det[split_idx:]
 
@@ -699,7 +707,7 @@ def _train_horizon_regression(rows: List[Dict[str, float]], horizon_years: int, 
     latest_prev_1 = rows[max(0, len(rows) - 2)]["total_revenue"]
     latest_prev_4 = rows[max(0, len(rows) - 5)]["total_revenue"]
     deterministic_latest = _deterministic_growth_from_history(revenue_series, horizon_quarters, growth_bounds)
-    latest_vec = np.array([
+    latest_vec = pd.DataFrame([[
         1.0,
         np.log1p(latest_rev),
         (latest_rev / max(1.0, latest_prev_1)) - 1.0,
@@ -710,9 +718,9 @@ def _train_horizon_regression(rows: List[Dict[str, float]], horizon_years: int, 
         latest["disaster_risk_index"],
         latest["demographic_pressure_index"],
         latest["signal_confidence"],
-    ], dtype=float)
+    ]], columns=_FEATURE_NAMES)
     lower_bound, upper_bound = growth_bounds
-    raw_component = float(model_obj.predict(latest_vec.reshape(1, -1))[0])
+    raw_component = float(model_obj.predict(latest_vec)[0])
     if use_residual_mode:
         residual_growth = raw_component
         predicted_growth = float(np.clip(deterministic_latest + residual_growth, lower_bound, upper_bound))
@@ -720,7 +728,7 @@ def _train_horizon_regression(rows: List[Dict[str, float]], horizon_years: int, 
         residual_growth = raw_component - deterministic_latest
         predicted_growth = float(np.clip(raw_component, lower_bound, upper_bound))
 
-    train_preds_raw = model_obj.predict(X)
+    train_preds_raw = model_obj.predict(X_df)
     train_preds = (y_det + train_preds_raw) if use_residual_mode else train_preds_raw
     residual = y - train_preds
     residual_std = float(np.std(residual)) if len(residual) else 0.2

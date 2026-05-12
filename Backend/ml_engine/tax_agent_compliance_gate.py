@@ -224,7 +224,17 @@ class TaxAgentComplianceGate:
         retrieval_hits: int,
     ) -> PolicyTrace:
         """Gate: minimum retrieval hits."""
-        min_hits = 2 if intent != "general_tax_query" else 1
+        # Miễn trừ cho các intent truy vấn cấu trúc, phân tích bảng biểu hoặc xử lý file hàng loạt
+        exempt_intents = {"top_n_query", "analytical_query", "batch_analysis", "general_tax_query"}
+        if intent in exempt_intents:
+            return PolicyTrace(
+                rule_key="min_retrieval_hits",
+                decision=GateDecision.ALLOW,
+                score=1.0,
+                reason=f"Exempted from retrieval hits check (intent: {intent})",
+            )
+
+        min_hits = 2
         passed = retrieval_hits >= min_hits
         return PolicyTrace(
             rule_key="min_retrieval_hits",

@@ -133,6 +133,12 @@
         .risk-high { background: #ea580c; color: #fff; }
         .risk-medium { background: #eab308; color: #000; }
         .risk-low { background: #16a34a; color: #fff; }
+        /* Injected Invoice Risk Dashboard styles */
+        .chart-container { width: 100%; height: 320px; }
+        .chart-container-large { width: 100%; height: 400px; }
+        .fade-in-up { animation: fadeSlideUp 0.5s cubic-bezier(0.16, 1, 0.3, 1) forwards; opacity: 0; transform: translateY(20px); }
+        .delay-100 { animation-delay: 100ms; }
+        .delay-200 { animation-delay: 200ms; }
 
         /* What-If slider style */
         .whatif-slider {
@@ -259,6 +265,9 @@
     </style>
 <link rel="stylesheet" href="../css/global.css?v=3.2">
 <link rel="icon" type="image/png" href="../assets/logo.png">
+
+<!-- ECharts for Invoice Risk Dashboard -->
+<script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
 </head>
 <body class="bg-background font-body text-on-surface antialiased">
 <!-- Toast Container -->
@@ -303,6 +312,8 @@
 <span class="material-symbols-outlined">gavel</span>
 <span class="text-sm">Chuyên đề Thanh tra</span>
 </a>
+
+
 <a class="nav-item text-slate-400 hover:text-white transition-colors hover:bg-white/5 flex items-center gap-3 px-4 py-3 scale-95 active:scale-90 transition-transform rounded-lg" href="profile.html" data-page="profile.html" data-title="Tài khoản Cán bộ">
 <span class="material-symbols-outlined">account_circle</span>
 <span class="text-sm">Tài khoản</span>
@@ -379,7 +390,7 @@ Phân tích Lô (CSV)
 </button>
 <button class="tab-btn px-6 py-2.5 rounded-lg text-xs font-bold uppercase tracking-widest flex items-center gap-2" id="tab-nlp-btn" type="button">
 <span class="material-symbols-outlined text-[18px]">document_scanner</span>
-NLP Hóa Đơn
+PHÂN TÍCH HÓA ĐƠN (NLP & RISK)
 </button>
 <button class="tab-btn px-6 py-2.5 rounded-lg text-xs font-bold uppercase tracking-widest flex items-center gap-2" id="tab-ocr-btn" type="button">
 <span class="material-symbols-outlined text-[18px]">center_focus_strong</span>
@@ -502,6 +513,10 @@ Phân tích AI
 <div id="red-flags-list" class="space-y-3">
 <!-- Dynamically populated -->
 </div>
+</div>
+
+<!-- Forensic Argumentation AI -->
+<div id="forensic-argumentation-panel" class="bg-surface-container-lowest p-6 rounded-2xl border border-outline-variant/10" style="display:none;">
 </div>
 
 <!-- Decision Intelligence (integrated action guidance) -->
@@ -1133,98 +1148,579 @@ Danh sách Doanh nghiệp theo Điểm Rủi ro
 </div>
 </div>
 </div>
-
-<!-- ================================================ -->
-<!-- TAB 4: NLP RED FLAG SCAN                         -->
-<!-- ================================================ -->
-<div class="tab-content" id="tab-nlp">
-    <div class="bg-surface-container-lowest p-8 rounded-2xl border border-outline-variant/10 mb-8">
-        <h3 class="text-lg font-bold text-primary-container mb-4 flex items-center gap-2">
-            <span class="material-symbols-outlined">document_scanner</span>
-            Phân tích Ngữ nghĩa Hóa đơn (NLP Red Flags)
-        </h3>
-        <p class="text-sm text-slate-500 mb-6">Mô hình BERT/DistilBERT phân tích mô tả hàng hóa trên hóa đơn để tự động phát hiện các cụm từ đáng ngờ, rủi ro rửa tiền hoặc trốn thuế.</p>
-        
-        <div class="flex gap-4 mb-6">
-            <input type="text" id="nlp-mst-input" placeholder="Nhập Mã số thuế để quét hóa đơn..." class="flex-1 bg-surface-container border border-outline-variant/20 rounded-lg px-4 py-3 text-sm focus:ring-1 focus:ring-primary-container">
-            <button id="btn-scan-nlp" type="button" class="bg-primary px-8 py-3 rounded-lg text-white text-xs font-black uppercase tracking-widest flex items-center gap-2 hover:bg-primary-container transition-all">
-                <span class="material-symbols-outlined text-[18px]">radar</span> Quét NLP
-            </button>
-        </div>
-
-        <div id="nlp-results" class="hidden">
-            <div class="grid grid-cols-3 gap-6 mb-8">
-                <div class="bg-surface-container-low p-5 rounded-xl border border-outline-variant/10">
-                    <p class="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Tổng hóa đơn</p>
-                    <p class="text-3xl font-black text-primary-container" id="nlp-total">0</p>
-                </div>
-                <div class="bg-red-50 p-5 rounded-xl border border-red-100">
-                    <p class="text-[10px] font-black text-red-400 uppercase tracking-widest mb-1">Cảnh báo rủi ro</p>
-                    <p class="text-3xl font-black text-red-600" id="nlp-high-risk">0</p>
-                </div>
-                <div class="bg-surface-container-low p-5 rounded-xl border border-outline-variant/10">
-                    <p class="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Tỷ lệ rủi ro</p>
-                    <p class="text-3xl font-black text-amber-600" id="nlp-ratio">0%</p>
-                </div>
-            </div>
-
-            <h4 class="text-sm font-bold text-primary-container mb-4">Các phát hiện đáng chú ý:</h4>
-            <div id="nlp-flags-list" class="space-y-3">
-                <!-- JS populated -->
-            </div>
-        </div>
-    </div>
 </div>
 
 <!-- ================================================ -->
-<!-- TAB 5: OCR DOCUMENT PROCESS                      -->
+<!-- TAB 4: NLP RED FLAG SCAN (UPGRADED)              -->
 <!-- ================================================ -->
-<div class="tab-content" id="tab-ocr">
-    <div class="bg-surface-container-lowest p-8 rounded-2xl border border-outline-variant/10 mb-8">
-        <h3 class="text-lg font-bold text-primary-container mb-4 flex items-center gap-2">
-            <span class="material-symbols-outlined">center_focus_strong</span>
-            Trích xuất Chứng từ Tự động (PaddleOCR)
-        </h3>
-        <p class="text-sm text-slate-500 mb-6">Tải lên ảnh hoặc PDF hóa đơn, chứng từ. Hệ thống AI OCR sẽ tự động đọc nội dung và đối chiếu chéo với dữ liệu khai báo.</p>
+<div class="tab-content" id="tab-nlp">
+<!-- INJECTED INVOICE RISK DASHBOARD -->
+
+    <div class="max-w-[1400px] mx-auto space-y-6">
         
-        <div id="ocr-upload-zone" class="drop-zone bg-surface-container-lowest p-12 rounded-2xl text-center border border-outline-variant/10 mb-6 cursor-pointer hover:bg-slate-50 transition-colors">
-            <input type="file" id="ocr-file-input" accept="image/*,.pdf" class="hidden">
-            <span class="material-symbols-outlined text-6xl text-slate-300 mb-4 block">upload_file</span>
-            <p class="text-lg font-bold text-primary-container mb-2">Tải ảnh/PDF hóa đơn lên</p>
-            <p class="text-sm text-slate-400">Hỗ trợ JPG, PNG, PDF tối đa 10MB</p>
+        <!-- Headers -->
+        <div class="fade-in-up">
+            <h2 class="text-2xl font-black text-primary-container flex items-center gap-2">
+                <span class="material-symbols-outlined text-rose-600 text-[28px]">receipt_long</span> 
+                Điều Tra Dấu Hiệu Tội Phạm Hóa Đơn
+            </h2>
+            <p class="text-sm text-slate-500 mt-1">Phân tích chuyên sâu 360 độ (Graph, Temporal, Price) cho một hóa đơn hoặc toàn bộ lịch sử xuất hóa đơn của doanh nghiệp.</p>
         </div>
 
-        <div id="ocr-progress" class="hidden mb-6 flex items-center gap-3 bg-blue-50 p-4 rounded-xl border border-blue-100">
-            <span class="material-symbols-outlined text-blue-500 animate-spin">autorenew</span>
-            <span class="text-sm font-medium text-blue-700">Đang nhận diện ký tự (OCR) bằng PaddleOCR...</span>
-        </div>
-
-        <div id="ocr-results" class="hidden grid grid-cols-12 gap-6">
-            <div class="col-span-12 lg:col-span-5">
-                <div class="bg-surface-container-low rounded-xl border border-outline-variant/10 p-2 h-full min-h-[400px] flex items-center justify-center overflow-hidden relative" id="ocr-preview-container">
-                    <img id="ocr-preview-img" src="" alt="Preview" class="max-w-full max-h-[500px] object-contain rounded">
-                    <!-- Laser Scanner effect -->
-                    <div id="ocr-laser-scanner" class="absolute top-0 left-0 w-full h-0.5 bg-blue-400 shadow-[0_0_15px_4px_rgba(96,165,250,0.9)] opacity-0 pointer-events-none"></div>
+        <!-- Search Bars -->
+        <div class="grid grid-cols-2 gap-6 fade-in-up delay-100">
+            <!-- Single Invoice Search -->
+            <div class="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm flex flex-col justify-center">
+                <h3 class="text-sm font-bold text-slate-800 mb-4 flex items-center gap-2">
+                    <span class="material-symbols-outlined text-[18px] text-primary-container">search</span> 
+                    Điều tra theo Số Hóa Đơn
+                </h3>
+                <div class="flex gap-3">
+                    <input id="inv-number-input" type="text" class="flex-1 rounded-lg border border-slate-200 px-4 py-2 text-sm font-mono focus:ring-2 focus:ring-primary-container focus:border-transparent outline-none" placeholder="VD: HD2024-001234"/>
+                    <button id="inv-lookup-btn" class="bg-primary-container text-white px-6 py-2 rounded-lg text-xs font-bold uppercase tracking-wide hover:bg-slate-800 transition-colors shadow-md">
+                        Phân Tích
+                    </button>
                 </div>
             </div>
-            <div class="col-span-12 lg:col-span-7 bg-surface-container-low p-6 rounded-xl border border-outline-variant/10">
-                <div class="flex justify-between items-start mb-6">
-                    <h4 class="text-sm font-bold text-primary-container">Dữ liệu trích xuất</h4>
-                    <span id="ocr-confidence" class="px-2 py-1 bg-emerald-100 text-emerald-700 rounded text-xs font-bold">Độ tin cậy: --%</span>
-                </div>
-                <div class="grid grid-cols-2 gap-4" id="ocr-fields">
-                    <!-- JS populated -->
-                </div>
-                <div class="mt-6 pt-6 border-t border-outline-variant/10">
-                    <button class="w-full bg-slate-900 text-white py-2 rounded-lg text-xs font-bold uppercase tracking-wider hover:bg-slate-800 transition-colors">
-                        Đưa vào CSDL Phân tích
+
+            <!-- MST History Search -->
+            <div class="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm flex flex-col justify-center">
+                <h3 class="text-sm font-bold text-slate-800 mb-4 flex items-center gap-2">
+                    <span class="material-symbols-outlined text-[18px] text-primary-container">history</span> 
+                    Giám sát Lịch sử xuất theo MST
+                </h3>
+                <div class="flex gap-3">
+                    <input id="inv-list-mst" type="text" class="flex-1 rounded-lg border border-slate-200 px-4 py-2 text-sm font-mono focus:ring-2 focus:ring-primary-container focus:border-transparent outline-none" placeholder="VD: 0108765432"/>
+                    <button id="inv-list-load-btn" class="bg-white border border-slate-300 text-slate-700 px-6 py-2 rounded-lg text-xs font-bold uppercase tracking-wide hover:bg-slate-50 transition-colors shadow-sm">
+                        Quét Dữ Liệu
                     </button>
                 </div>
             </div>
         </div>
+
+        <!-- Analysis Results Area (Hidden initially, shown after click) -->
+        <div id="analysis-results" class="hidden space-y-6 fade-in-up delay-200">
+            <!-- Single Invoice Dashboard -->
+            <div id="single-dashboard" class="grid grid-cols-3 gap-6">
+                <!-- Gauge Chart -->
+                <div class="col-span-1 bg-white rounded-2xl border border-slate-200 shadow-sm p-6 flex flex-col items-center justify-center">
+                    <h3 class="text-sm font-bold text-slate-800 mb-1 w-full text-center">Mức độ Rủi ro Tổng hợp</h3>
+                    <p class="text-[10px] text-slate-400 w-full text-center mb-2">Isolation Forest + GNN Score</p>
+                    <div id="chart-gauge" class="chart-container"></div>
+                </div>
+
+                <!-- Radar Chart -->
+                <div class="col-span-1 bg-white rounded-2xl border border-slate-200 shadow-sm p-6">
+                    <h3 class="text-sm font-bold text-slate-800 mb-1 text-center">Hồ sơ Rủi ro Đa chiều</h3>
+                    <p class="text-[10px] text-slate-400 w-full text-center mb-2">Phân tách nguồn gốc rủi ro (Radar Chart)</p>
+                    <div id="chart-radar" class="chart-container"></div>
+                </div>
+
+                <!-- Waterfall Chart -->
+                <div class="col-span-1 bg-white rounded-2xl border border-slate-200 shadow-sm p-6">
+                    <h3 class="text-sm font-bold text-slate-800 mb-1 text-center">Cấu thành Điểm (Penalties)</h3>
+                    <p class="text-[10px] text-slate-400 w-full text-center mb-2">Cơ chế cộng dồn Base Score (Waterfall)</p>
+                    <div id="chart-waterfall" class="chart-container"></div>
+                </div>
+            </div>
+
+            <!-- MST History Dashboard -->
+            <div id="history-dashboard" class="grid grid-cols-3 gap-6">
+                <!-- Control Chart -->
+                <div class="col-span-2 bg-white rounded-2xl border border-slate-200 shadow-sm p-6">
+                    <h3 class="text-sm font-bold text-slate-800 mb-1">Giám sát Điểm Rủi ro Chuỗi Thời Gian</h3>
+                    <p class="text-[10px] text-slate-400 mb-4">Biểu đồ kiểm soát (Control Chart) - Đánh dấu các HĐ vượt ngưỡng (UCL)</p>
+                    <div id="chart-control" class="chart-container-large"></div>
+                </div>
+
+                <div class="col-span-1 space-y-6">
+                    <!-- Treemap -->
+                    <div class="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 h-[190px]">
+                        <h3 class="text-sm font-bold text-slate-800 mb-2">Cơ cấu Lý do Vi phạm</h3>
+                        <div id="chart-treemap" class="w-full h-[120px]"></div>
+                    </div>
+                    <!-- Detailed Info Card -->
+                    <div class="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 h-[186px] overflow-hidden">
+                        <h3 class="text-sm font-bold text-slate-800 mb-3">Tín hiệu Cảnh báo Trực tiếp</h3>
+                        <div class="space-y-3" id="reason-codes-list">
+                            <div class="bg-rose-50 rounded-lg p-3 border-l-4 border-rose-500">
+                                <p class="text-xs font-bold text-rose-700">RỦI RO: Mạng lưới mua bán chéo</p>
+                                <p class="text-[10px] text-rose-600 mt-1">Đối tác thuộc mạng lưới F1 của doanh nghiệp bỏ trốn (Graph Centrality cao).</p>
+                            </div>
+                            <div class="bg-orange-50 rounded-lg p-3 border-l-4 border-orange-500">
+                                <p class="text-xs font-bold text-orange-700">BẤT THƯỜNG: Hành vi xuất HĐ</p>
+                                <p class="text-[10px] text-orange-600 mt-1">Xuất HĐ lúc 23:45 Thứ 7 (Temporal Anomaly).</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Data Table Section -->
+            <div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+                <div class="px-6 py-4 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
+                    <h3 class="text-sm font-bold text-slate-800">Lịch sử Hóa đơn Chi tiết</h3>
+                    <button class="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-[11px] font-bold text-slate-700 hover:bg-slate-50 transition-all shadow-sm">
+                        <span class="material-symbols-outlined text-[16px]">file_download</span> Tải CSV
+                    </button>
+                </div>
+                
+                <div class="overflow-x-auto">
+                    <table class="min-w-full text-sm">
+                        <thead class="bg-slate-50 text-left text-[11px] uppercase tracking-wide text-slate-500 border-b border-slate-200">
+                            <tr>
+                                <th class="px-6 py-4 font-semibold">Số Hóa Đơn</th>
+                                <th class="px-6 py-4 font-semibold">Ngày Xuất</th>
+                                <th class="px-6 py-4 font-semibold">Đối Tác Mua</th>
+                                <th class="px-6 py-4 font-semibold text-right">Tổng Tiền (VND)</th>
+                                <th class="px-6 py-4 font-semibold text-center">Rủi Ro</th>
+                                <th class="px-6 py-4 font-semibold">Phân Loại Model</th>
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y divide-slate-100" id="inv-risk-table-body">
+                            <!-- JS Will Render Here -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+<!-- END INJECTED -->
+
+    <!-- Header -->
+    <div class="bg-surface-container-lowest p-6 rounded-2xl border border-outline-variant/10 mb-6">
+        <div class="flex items-center justify-between">
+            <div>
+                <h3 class="text-xl font-black text-primary-container flex items-center gap-3">
+                    <span class="material-symbols-outlined text-blue-600 text-[28px]">document_scanner</span>
+                    NLP Invoice Intelligence
+                </h3>
+                <p class="text-xs text-slate-500 mt-1">BERT Embedding + Keyword Analysis — Phát hiện hóa đơn khống & Industry Mismatch</p>
+            </div>
+            <div class="flex items-center gap-2">
+                <span class="relative flex h-3 w-3"><span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span><span class="relative inline-flex rounded-full h-3 w-3 bg-blue-500"></span></span>
+                <span class="text-[10px] font-bold text-blue-600 uppercase tracking-widest">NLP Engine Active</span>
+            </div>
+        </div>
+        <!-- Sub-tab Navigation -->
+        <div class="mt-4 flex items-center gap-1 bg-slate-100 p-1 rounded-xl w-max">
+            <button type="button" id="nlp-subtab-btn-batch" onclick="switchNLPSubTab('batch')" class="px-5 py-2 text-[11px] font-black rounded-lg bg-white text-blue-700 shadow-sm transition-all uppercase tracking-widest flex items-center gap-2">
+                <span class="material-symbols-outlined text-[16px]">analytics</span> Quét Lô CSV
+            </button>
+            <button type="button" id="nlp-subtab-btn-single" onclick="switchNLPSubTab('single')" class="px-5 py-2 text-[11px] font-black rounded-lg text-slate-500 hover:text-slate-700 transition-all uppercase tracking-widest flex items-center gap-2">
+                <span class="material-symbols-outlined text-[16px]">person_search</span> Phân tích Đơn lẻ
+            </button>
+        </div>
+    </div>
+
+    <!-- ════════════════════════════════════════ -->
+    <!-- SUB-TAB: BATCH CSV                      -->
+    <!-- ════════════════════════════════════════ -->
+    <div id="nlp-subtab-batch">
+        <!-- Upload Zone -->
+        <div id="nlp-batch-upload-zone" class="drop-zone bg-surface-container-lowest p-12 rounded-2xl text-center border-2 border-dashed border-blue-200 hover:border-blue-400 mb-6 cursor-pointer transition-all relative group">
+            <input type="file" id="nlp-file-input" accept=".csv,.xlsx" class="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10">
+            <div class="relative z-0 flex flex-col items-center">
+                <div class="w-20 h-20 bg-blue-50 rounded-full flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
+                    <span class="material-symbols-outlined text-4xl text-blue-500">cloud_upload</span>
+                </div>
+                <p class="text-base font-black text-slate-700 mb-2">Kéo thả file CSV hóa đơn vào đây</p>
+                <p class="text-[11px] text-slate-400">Hỗ trợ CSV/XLSX • Cần cột: tax_code, industry, description • Tối đa 50MB</p>
+                <p class="text-[10px] text-blue-500 font-bold mt-2 uppercase tracking-widest">Hệ thống sẽ quét TOÀN BỘ dữ liệu</p>
+            </div>
+        </div>
+
+        <!-- Progress -->
+        <div id="nlp-batch-progress" class="hidden mb-6">
+            <div class="bg-surface-container-lowest p-6 rounded-2xl border border-outline-variant/10 flex flex-col items-center">
+                <span class="material-symbols-outlined text-4xl text-blue-500 animate-spin mb-3">autorenew</span>
+                <p class="text-sm font-black text-slate-700">Đang phân tích NLP toàn bộ dataset...</p>
+                <p id="nlp-batch-progress-text" class="text-[10px] text-slate-400 mt-1 uppercase tracking-widest">Xử lý 0 / 0 dòng</p>
+                <div class="w-full max-w-md mt-3 h-2 bg-slate-100 rounded-full overflow-hidden">
+                    <div id="nlp-batch-progress-bar" class="h-full bg-gradient-to-r from-blue-500 to-indigo-500 rounded-full transition-all duration-500" style="width:0%"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Dashboard (hidden until analysis done) -->
+        <div id="nlp-batch-dashboard" class="hidden space-y-6">
+            <!-- KPI Cards -->
+            <div class="grid grid-cols-5 gap-4" id="nlp-kpi-cards"></div>
+
+            <!-- Charts Row 1: Donut + Industry Bar -->
+            <div class="grid grid-cols-12 gap-6">
+                <div class="col-span-5 bg-surface-container-lowest p-6 rounded-2xl border border-outline-variant/10">
+                    <h4 class="text-xs font-black uppercase tracking-widest text-primary-container mb-1 flex items-center gap-2">
+                        <span class="material-symbols-outlined text-[16px]">donut_large</span> Cơ cấu Mức Rủi ro
+                    </h4>
+                    <p class="text-[9px] text-slate-400 mb-3">Phân bổ hóa đơn theo 4 mức: An toàn, Trung bình, Cao, Nguy hiểm</p>
+                    <div id="nlp-chart-donut" style="height:350px;"></div>
+                </div>
+                <div class="col-span-7 bg-surface-container-lowest p-6 rounded-2xl border border-outline-variant/10">
+                    <h4 class="text-xs font-black uppercase tracking-widest text-primary-container mb-1 flex items-center gap-2">
+                        <span class="material-symbols-outlined text-[16px]">bar_chart</span> Top Ngành Rủi ro Cao Nhất
+                    </h4>
+                    <p class="text-[9px] text-slate-400 mb-3">Tỷ lệ hóa đơn bị gắn cờ theo từng ngành nghề</p>
+                    <div id="nlp-chart-industry-bar" style="height:350px;"></div>
+                </div>
+            </div>
+
+            <!-- Charts Row 2: Histogram + Scatter -->
+            <div class="grid grid-cols-12 gap-6">
+                <div class="col-span-5 bg-surface-container-lowest p-6 rounded-2xl border border-outline-variant/10">
+                    <h4 class="text-xs font-black uppercase tracking-widest text-primary-container mb-1 flex items-center gap-2">
+                        <span class="material-symbols-outlined text-[16px]">equalizer</span> Phân phối Điểm Rủi ro
+                    </h4>
+                    <p class="text-[9px] text-slate-400 mb-3">Histogram phân bổ điểm rủi ro theo 5 khoảng</p>
+                    <div id="nlp-chart-histogram" style="height:350px;"></div>
+                </div>
+                <div class="col-span-7 bg-surface-container-lowest p-6 rounded-2xl border border-outline-variant/10">
+                    <h4 class="text-xs font-black uppercase tracking-widest text-primary-container mb-1 flex items-center gap-2">
+                        <span class="material-symbols-outlined text-[16px]">scatter_plot</span> Bản đồ Rủi ro theo Công ty
+                    </h4>
+                    <p class="text-[9px] text-slate-400 mb-3">Mỗi bong bóng = 1 MST • X = Điểm TB • Y = Số hóa đơn • Size = Flags</p>
+                    <div id="nlp-chart-scatter" style="height:350px;"></div>
+                </div>
+            </div>
+
+            <!-- Charts Row 3: Treemap + Stacked Bar -->
+            <div class="grid grid-cols-12 gap-6">
+                <div class="col-span-7 bg-surface-container-lowest p-6 rounded-2xl border border-outline-variant/10">
+                    <h4 class="text-xs font-black uppercase tracking-widest text-primary-container mb-1 flex items-center gap-2">
+                        <span class="material-symbols-outlined text-[16px]">grid_view</span> Treemap Cơ cấu Ngành
+                    </h4>
+                    <p class="text-[9px] text-slate-400 mb-3">Diện tích tỷ lệ với số hóa đơn, màu sắc theo mức rủi ro trung bình</p>
+                    <div id="nlp-chart-treemap" style="height:380px;"></div>
+                </div>
+                <div class="col-span-5 bg-surface-container-lowest p-6 rounded-2xl border border-outline-variant/10">
+                    <h4 class="text-xs font-black uppercase tracking-widest text-primary-container mb-1 flex items-center gap-2">
+                        <span class="material-symbols-outlined text-[16px]">stacked_bar_chart</span> Loại vi phạm theo Ngành
+                    </h4>
+                    <p class="text-[9px] text-slate-400 mb-3">Keyword Match vs Industry Mismatch — phân loại gian lận</p>
+                    <div id="nlp-chart-stacked" style="height:380px;"></div>
+                </div>
+            </div>
+
+            <!-- Charts Row 4: Heatmap + Top Keywords -->
+            <div class="grid grid-cols-12 gap-6">
+                <div class="col-span-7 bg-surface-container-lowest p-6 rounded-2xl border border-outline-variant/10">
+                    <h4 class="text-xs font-black uppercase tracking-widest text-primary-container mb-1 flex items-center gap-2">
+                        <span class="material-symbols-outlined text-[16px]">grid_on</span> Heatmap Ngành × Mức Rủi ro
+                    </h4>
+                    <p class="text-[9px] text-slate-400 mb-3">Cường độ màu = số lượng hóa đơn tại mỗi ô ngành-mức rủi ro</p>
+                    <div id="nlp-chart-heatmap" style="height:380px;"></div>
+                </div>
+                <div class="col-span-5 bg-surface-container-lowest p-6 rounded-2xl border border-outline-variant/10">
+                    <h4 class="text-xs font-black uppercase tracking-widest text-primary-container mb-1 flex items-center gap-2">
+                        <span class="material-symbols-outlined text-[16px]">label</span> Từ khóa Nhạy cảm Phổ biến
+                    </h4>
+                    <p class="text-[9px] text-slate-400 mb-3">Top từ khóa gian lận xuất hiện nhiều nhất trong dataset</p>
+                    <div id="nlp-chart-keywords" style="height:380px;"></div>
+                </div>
+            </div>
+
+            <!-- Company Table (CSDL style) -->
+            <div class="bg-surface-container-lowest rounded-2xl border border-outline-variant/10 overflow-hidden">
+                <div class="p-6 border-b border-outline-variant/10">
+                    <div class="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
+                        <div>
+                            <h4 class="text-xs font-black uppercase tracking-widest text-primary-container flex items-center gap-2">
+                                <span class="material-symbols-outlined text-[16px]">corporate_fare</span>
+                                Danh sách Doanh nghiệp theo Rủi ro NLP
+                            </h4>
+                            <p class="text-[10px] text-slate-400 mt-1">Click "Phân tích chi tiết" để xem chuyên sâu từng công ty</p>
+                        </div>
+                        <div class="flex items-center gap-2">
+                            <input type="text" id="nlp-table-search" class="text-xs px-4 py-2 rounded-lg bg-surface-container border border-outline-variant/10 focus:ring-1 focus:ring-primary-container w-[280px]" placeholder="Tìm kiếm MST / Ngành...">
+                            <select id="nlp-table-level-filter" class="text-xs px-3 py-2 rounded-lg bg-surface-container border border-outline-variant/10">
+                                <option value="">Tất cả mức</option>
+                                <option value="critical">Nguy hiểm</option>
+                                <option value="high">Cao</option>
+                                <option value="medium">Trung bình</option>
+                                <option value="low">An toàn</option>
+                            </select>
+                        </div>
+                    </div>
+                    <p id="nlp-table-summary" class="text-[10px] text-slate-500 font-medium mt-2">Đang chờ dữ liệu...</p>
+                </div>
+                <div class="overflow-x-auto bg-white">
+                    <table class="w-full text-xs">
+                        <thead class="bg-surface-container-low text-left">
+                            <tr>
+                                <th class="px-4 py-3 font-bold text-[10px] uppercase tracking-widest text-slate-400">#</th>
+                                <th class="px-4 py-3 font-bold text-[10px] uppercase tracking-widest text-slate-400">MST</th>
+                                <th class="px-4 py-3 font-bold text-[10px] uppercase tracking-widest text-slate-400">Ngành nghề</th>
+                                <th class="px-4 py-3 font-bold text-[10px] uppercase tracking-widest text-slate-400">Hóa đơn</th>
+                                <th class="px-4 py-3 font-bold text-[10px] uppercase tracking-widest text-slate-400">Điểm TB</th>
+                                <th class="px-4 py-3 font-bold text-[10px] uppercase tracking-widest text-slate-400">Mức độ</th>
+                                <th class="px-4 py-3 font-bold text-[10px] uppercase tracking-widest text-slate-400">Flags</th>
+                                <th class="px-4 py-3 font-bold text-[10px] uppercase tracking-widest text-slate-400 text-right">Thao tác</th>
+                            </tr>
+                        </thead>
+                        <tbody id="nlp-table-body" class="divide-y divide-slate-100"></tbody>
+                    </table>
+                </div>
+                <div class="px-6 py-4 border-t border-outline-variant/10 flex items-center justify-between bg-surface-container-low/50">
+                    <p class="text-[10px] text-slate-400" id="nlp-table-pagination-info">Hiển thị 0 - 0 / 0</p>
+                    <div class="flex items-center gap-1" id="nlp-table-pagination-controls"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ════════════════════════════════════════ -->
+    <!-- SUB-TAB: SINGLE ANALYSIS                -->
+    <!-- ════════════════════════════════════════ -->
+    <div id="nlp-subtab-single" class="hidden">
+        <!-- Auto-fill banner (from batch) -->
+        <div id="nlp-single-from-batch" class="hidden mb-4 p-4 bg-blue-50 border border-blue-200 rounded-2xl flex items-center justify-between">
+            <div class="flex items-center gap-3">
+                <span class="material-symbols-outlined text-blue-600">link</span>
+                <p class="text-xs text-blue-700"><strong>Đang phân tích từ kết quả Lô CSV</strong> — MST: <span id="nlp-single-from-mst" class="font-mono font-bold">---</span></p>
+            </div>
+            <button onclick="switchNLPSubTab('batch')" class="text-[10px] font-bold text-blue-600 hover:underline flex items-center gap-1">
+                <span class="material-symbols-outlined text-[14px]">arrow_back</span> Quay lại Bảng Lô
+            </button>
+        </div>
+
+        <!-- Input Section -->
+        <div class="bg-surface-container-lowest p-6 rounded-2xl border border-outline-variant/10 mb-6">
+            <h4 class="text-sm font-black text-primary-container mb-4 flex items-center gap-2">
+                <span class="material-symbols-outlined text-[18px]">person_search</span>
+                Phân tích NLP Đơn lẻ
+            </h4>
+            <div class="grid grid-cols-12 gap-4">
+                <div class="col-span-3">
+                    <label class="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1 block">Mã số thuế</label>
+                    <input type="text" id="nlp-mst-input" placeholder="VD: 0101234567" class="w-full bg-white border border-outline-variant/20 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-blue-500/50 outline-none font-mono text-slate-700">
+                </div>
+                <div class="col-span-3">
+                    <label class="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1 block">Ngành nghề</label>
+                    <select id="nlp-industry-select" class="w-full bg-white border border-outline-variant/20 rounded-xl px-4 py-3 text-sm text-slate-700 outline-none focus:ring-2 focus:ring-blue-500/50">
+                        <option value="">Tự động đoán</option>
+                        <option value="Xây dựng">Xây dựng</option>
+                        <option value="Sản xuất phần mềm">Sản xuất phần mềm</option>
+                        <option value="Bán buôn thực phẩm">Bán buôn thực phẩm</option>
+                        <option value="Sản xuất công nghiệp">Sản xuất công nghiệp</option>
+                        <option value="Hoạt động tư vấn quản lý">Tư vấn quản lý</option>
+                        <option value="Thương mại dịch vụ">Thương mại dịch vụ</option>
+                    </select>
+                </div>
+                <div class="col-span-6">
+                    <div class="flex items-center justify-between mb-1">
+                        <label class="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Mô tả hàng hóa (Mỗi dòng 1 Item)</label>
+                        <button type="button" id="nlp-paste-sample" class="text-[10px] text-blue-600 font-bold hover:underline">Dán mẫu thử</button>
+                    </div>
+                    <textarea id="nlp-desc-input" rows="3" class="w-full bg-white border border-outline-variant/20 rounded-xl p-4 text-sm focus:ring-2 focus:ring-blue-500/50 outline-none resize-none text-slate-700 placeholder:text-slate-300" placeholder="Chi phí tư vấn quản lý rủi ro&#10;Thiết kế website&#10;..."></textarea>
+                </div>
+            </div>
+            <div class="mt-4 flex items-center gap-3">
+                <button type="button" id="btn-scan-nlp" class="group px-8 py-3 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white rounded-xl text-[11px] font-black uppercase tracking-widest transition-all shadow-lg flex items-center gap-2">
+                    <span class="material-symbols-outlined text-[20px] group-hover:rotate-180 transition-transform duration-700">radar</span> Chạy Phân tích NLP
+                </button>
+                <span id="nlp-confidence-badge" class="hidden px-3 py-1.5 bg-blue-50 text-blue-700 border border-blue-100 rounded-xl text-[10px] font-bold"></span>
+            </div>
+        </div>
+
+        <!-- Single Results Dashboard -->
+        <div id="nlp-single-dashboard" class="hidden space-y-6">
+            <!-- Score + Level Row -->
+            <div class="grid grid-cols-12 gap-6">
+                <div class="col-span-4 bg-surface-container-lowest p-6 rounded-2xl border border-outline-variant/10 flex flex-col items-center justify-center">
+                    <div id="nlp-single-gauge" style="height:220px;width:100%;"></div>
+                </div>
+                <div class="col-span-4 bg-surface-container-lowest p-6 rounded-2xl border border-outline-variant/10">
+                    <h5 class="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3">Phân tích Ngữ nghĩa</h5>
+                    <div id="nlp-single-radar" style="height:200px;"></div>
+                </div>
+                <div class="col-span-4 bg-surface-container-lowest p-6 rounded-2xl border border-outline-variant/10">
+                    <h5 class="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3">Tỷ lệ Item An toàn / Rủi ro</h5>
+                    <div id="nlp-single-pie" style="height:200px;"></div>
+                </div>
+            </div>
+
+            <!-- Per-item Bar Chart -->
+            <div class="bg-surface-container-lowest p-6 rounded-2xl border border-outline-variant/10">
+                <h5 class="text-xs font-black uppercase tracking-widest text-primary-container mb-1 flex items-center gap-2">
+                    <span class="material-symbols-outlined text-[16px]">bar_chart</span> Điểm Rủi ro theo Từng Dòng Mô tả
+                </h5>
+                <p class="text-[9px] text-slate-400 mb-3">Mỗi bar = 1 dòng mô tả hàng hóa — Phát hiện item nào gây rủi ro cao nhất</p>
+                <div id="nlp-single-items-bar" style="height:250px;"></div>
+            </div>
+
+            <!-- Red Flags -->
+            <div class="bg-surface-container-lowest p-6 rounded-2xl border border-outline-variant/10">
+                <h4 class="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3 border-b border-slate-100 pb-2 flex items-center gap-2">
+                    <span class="material-symbols-outlined text-[14px] text-red-500">flag</span> Chi tiết Red Flags
+                </h4>
+                <div id="nlp-flags-list" class="space-y-3 max-h-[300px] overflow-y-auto pr-2 custom-scrollbar"></div>
+            </div>
+
+            <!-- Action buttons -->
+            <div class="flex items-center gap-3">
+                <button onclick="switchNLPSubTab('batch')" class="px-5 py-2.5 bg-slate-100 hover:bg-slate-200 rounded-xl text-[10px] font-black uppercase tracking-widest text-slate-600 transition-all flex items-center gap-2">
+                    <span class="material-symbols-outlined text-[14px]">arrow_back</span> Quay lại Bảng Lô
+                </button>
+                <button id="nlp-goto-single-main" class="px-5 py-2.5 bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-700 hover:to-blue-700 text-white rounded-xl text-[10px] font-black uppercase tracking-widest transition-all shadow-lg flex items-center gap-2">
+                    <span class="material-symbols-outlined text-[14px]">open_in_new</span> Tra cứu sâu (Tab Đơn lẻ chính)
+                </button>
+            </div>
+        </div>
     </div>
 </div>
+<!-- ================================================ -->
+<!-- TAB 5: OCR DOCUMENT PROCESS                      -->
+<!-- ================================================ -->
+<div class="tab-content" id="tab-ocr">
+    <div class="bg-surface-container-lowest p-8 rounded-3xl border border-outline-variant/10 shadow-sm mb-8 relative overflow-hidden">
+        <div class="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-teal-400 via-emerald-500 to-teal-400"></div>
+        <div class="flex items-center justify-between mb-8">
+            <div>
+                <h3 class="text-xl font-black text-primary-container flex items-center gap-3">
+                    <span class="material-symbols-outlined text-emerald-600 text-[28px]">document_scanner</span>
+                    OCR AI Extractor
+                </h3>
+                <p class="text-xs text-slate-500 mt-2">Công nghệ PaddleOCR + Table Transformer trích xuất dữ liệu hóa đơn giấy tự động.</p>
+            </div>
+            <div class="flex items-center gap-2">
+                <span class="relative flex h-3 w-3">
+                    <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                    <span class="relative inline-flex rounded-full h-3 w-3 bg-emerald-500"></span>
+                </span>
+                <span class="text-[10px] font-bold text-emerald-600 uppercase tracking-widest">Engine Active</span>
+            </div>
+        </div>
+        
+        <!-- Drag Drop Zone -->
+        <div id="ocr-upload-zone" class="relative group bg-slate-50/50 border-2 border-dashed border-slate-300 hover:border-emerald-500 rounded-3xl p-12 text-center cursor-pointer transition-all duration-300 overflow-hidden mb-8">
+            <div class="absolute inset-0 bg-emerald-500/5 opacity-0 group-hover:opacity-100 transition-opacity"></div>
+            <input type="file" id="ocr-file-input" accept="image/*,.pdf" class="hidden">
+            <div class="relative z-10 flex flex-col items-center">
+                <div class="w-20 h-20 bg-white rounded-full shadow-sm flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
+                    <span class="material-symbols-outlined text-4xl text-emerald-500">cloud_upload</span>
+                </div>
+                <p class="text-base font-black text-slate-700 mb-2">Kéo thả ảnh/PDF chứng từ vào đây</p>
+                <p class="text-[11px] text-slate-400 font-medium">Hỗ trợ JPG, PNG, PDF tối đa 10MB. Để demo, có thể click để tải ảnh có sẵn.</p>
+                <button id="ocr-file-btn" class="mt-4 px-6 py-2 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-600 shadow-sm hover:shadow group-hover:bg-emerald-50 group-hover:border-emerald-200 group-hover:text-emerald-700 transition-all pointer-events-none">
+                    Hoặc chọn file
+                </button>
+            </div>
+        </div>
 
+        <div id="ocr-progress" class="hidden mb-8">
+            <div class="bg-slate-50 p-6 rounded-2xl border border-slate-100 flex flex-col items-center justify-center relative overflow-hidden">
+                <div class="absolute left-0 top-0 h-1 bg-emerald-500 w-1/3 animate-pulse"></div>
+                <span class="material-symbols-outlined text-4xl text-emerald-500 animate-spin mb-3">document_scanner</span>
+                <p class="text-sm font-black text-slate-700 tracking-wide">Đang phân tích và bóc tách dữ liệu...</p>
+                <p class="text-[10px] text-slate-400 mt-1 uppercase tracking-widest">Sử dụng PaddleOCR v2 & LayoutLM</p>
+            </div>
+        </div>
+
+        <!-- Results UI -->
+        <div id="ocr-results" class="hidden grid grid-cols-12 gap-8">
+            <!-- Image Preview -->
+            <div class="col-span-12 lg:col-span-5 flex flex-col">
+                <div class="bg-slate-100 rounded-2xl border border-slate-200 p-2 h-full min-h-[500px] flex items-center justify-center overflow-hidden relative group" id="ocr-preview-container">
+                    <img id="ocr-preview-img" src="" alt="Preview" class="max-w-full max-h-[600px] object-contain rounded-xl shadow-sm z-10">
+                    
+                    <!-- Laser Scanner effect -->
+                    <div id="ocr-laser-scanner" class="absolute top-0 left-0 w-full h-1 bg-emerald-400 shadow-[0_0_20px_5px_rgba(52,211,153,0.8)] z-20 pointer-events-none hidden"></div>
+                </div>
+            </div>
+            
+            <!-- Extracted Data -->
+            <div class="col-span-12 lg:col-span-7 flex flex-col">
+                <div class="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm h-full flex flex-col">
+                    <div class="flex justify-between items-center mb-6 border-b border-slate-100 pb-4">
+                        <h4 class="text-sm font-black text-slate-800 uppercase tracking-widest">Dữ liệu trích xuất</h4>
+                        <div class="flex items-center gap-2">
+                            <span class="text-[10px] font-bold text-slate-400 uppercase">Độ tin cậy</span>
+                            <span id="ocr-confidence" class="px-2.5 py-1 bg-emerald-100 text-emerald-700 rounded-lg text-xs font-black">--%</span>
+                        </div>
+                    </div>
+                    
+                    <!-- Form Fields Grid -->
+                    <div class="grid grid-cols-2 gap-5 mb-6">
+                        <!-- Left col -->
+                        <div class="space-y-4">
+                            <div>
+                                <p class="text-[9px] font-bold text-slate-400 uppercase tracking-widest mb-1">Mã Số Thuế Bên Bán</p>
+                                <div class="bg-slate-50 px-3 py-2 rounded-lg border border-slate-200 text-sm font-mono text-slate-800 font-medium" id="ocr-seller-mst">---</div>
+                            </div>
+                            <div>
+                                <p class="text-[9px] font-bold text-slate-400 uppercase tracking-widest mb-1">Tên Đơn vị Bán</p>
+                                <div class="bg-slate-50 px-3 py-2 rounded-lg border border-slate-200 text-xs text-slate-800 font-medium truncate" id="ocr-seller-name" title="">---</div>
+                            </div>
+                            <div>
+                                <p class="text-[9px] font-bold text-slate-400 uppercase tracking-widest mb-1">Số Hóa Đơn</p>
+                                <div class="bg-slate-50 px-3 py-2 rounded-lg border border-slate-200 text-sm font-mono text-slate-800 font-medium" id="ocr-invoice-no">---</div>
+                            </div>
+                        </div>
+                        <!-- Right col -->
+                        <div class="space-y-4">
+                            <div>
+                                <p class="text-[9px] font-bold text-slate-400 uppercase tracking-widest mb-1">Tổng Tiền (Chưa VAT)</p>
+                                <div class="bg-slate-50 px-3 py-2 rounded-lg border border-slate-200 text-sm font-mono text-slate-800 font-black text-right" id="ocr-subtotal">---</div>
+                            </div>
+                            <div class="grid grid-cols-2 gap-2">
+                                <div>
+                                    <p class="text-[9px] font-bold text-slate-400 uppercase tracking-widest mb-1">Thuế suất</p>
+                                    <div class="bg-slate-50 px-3 py-2 rounded-lg border border-slate-200 text-sm font-mono text-slate-800 text-center" id="ocr-vat-rate">---</div>
+                                </div>
+                                <div>
+                                    <p class="text-[9px] font-bold text-slate-400 uppercase tracking-widest mb-1">Tiền VAT</p>
+                                    <div class="bg-slate-50 px-3 py-2 rounded-lg border border-slate-200 text-sm font-mono text-slate-800 text-right" id="ocr-vat-amount">---</div>
+                                </div>
+                            </div>
+                            <div>
+                                <p class="text-[9px] font-bold text-slate-400 uppercase tracking-widest mb-1 text-emerald-600">Tổng Thanh Toán</p>
+                                <div class="bg-emerald-50 px-3 py-2 rounded-lg border border-emerald-200 text-sm font-mono text-emerald-700 font-black text-right" id="ocr-grand-total">---</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Line Items Table -->
+                    <div class="flex-1 flex flex-col">
+                        <p class="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Chi tiết Hàng Hóa / Dịch Vụ</p>
+                        <div class="flex-1 border border-slate-200 rounded-xl overflow-hidden bg-white">
+                            <div class="overflow-y-auto max-h-[160px] custom-scrollbar">
+                                <table class="w-full text-xs">
+                                    <thead class="bg-slate-50 sticky top-0 border-b border-slate-200">
+                                        <tr>
+                                            <th class="px-3 py-2 text-left font-bold text-slate-500 uppercase">Tên hàng hóa</th>
+                                            <th class="px-3 py-2 text-right font-bold text-slate-500 uppercase">SL</th>
+                                            <th class="px-3 py-2 text-right font-bold text-slate-500 uppercase">Đơn giá</th>
+                                            <th class="px-3 py-2 text-right font-bold text-slate-500 uppercase">Thành tiền</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="ocr-line-items-body" class="divide-y divide-slate-100 text-slate-600">
+                                        <tr><td colspan="4" class="px-3 py-4 text-center text-slate-400 italic">Trống</td></tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+
+
+                    <!-- AI Verdict -->
+                    <div id="ocr-ai-verdict" class="hidden mt-4 p-5 rounded-2xl border border-slate-200 bg-gradient-to-br from-slate-50 to-white">
+                    </div>
+
+                    <div class="mt-6 flex gap-3">
+                        <button type="button" class="flex-1 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest transition-colors flex items-center justify-center gap-2">
+                            <span class="material-symbols-outlined text-[16px]">edit</span> Chỉnh sửa
+                        </button>
+                        <button type="button" class="flex-[2] bg-slate-800 text-white py-3 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-slate-900 transition-colors shadow-lg flex items-center justify-center gap-2">
+                            <span class="material-symbols-outlined text-[16px]">database</span> Lưu vào CSDL Phân tích
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
 </div></main>
 
 <!-- Report Preview Modal -->
@@ -1293,4 +1789,5 @@ window.addEventListener('pageshow', function() {
 });
 </script>
 <script type="module" src="../js/agent_widget.js"></script>
+<script src="../js/invoice_risk.js?v=2.0"></script>
 </body></html>

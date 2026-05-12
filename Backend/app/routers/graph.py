@@ -19,7 +19,12 @@ from datetime import datetime, timezone
 
 from ..database import get_db
 from ..observability import get_structured_logger, log_event
-from ..multimodal_analysis import analyze_vat_csv_upload, get_vat_batch_results, get_vat_batch_status
+from ..multimodal_analysis import (
+    analyze_vat_csv_upload,
+    get_vat_batch_results,
+    get_vat_batch_status,
+    normalize_agent_upload_bytes,
+)
 from . import monitoring as monitoring_router
 
 router = APIRouter(prefix="/api", tags=["VAT Invoice Graph (GNN)"])
@@ -990,10 +995,13 @@ async def vat_graph_batch_upload(
 ):
     """Upload a VAT invoice CSV, persist entities/invoices, and run graph analysis."""
     filename = file.filename or "vat_graph.csv"
-    if not filename.lower().endswith(".csv"):
-        raise HTTPException(status_code=400, detail="Only CSV files are accepted for VAT graph batch analysis.")
-
     content = await file.read()
+    try:
+        content, normalized_name, original_name = normalize_agent_upload_bytes(content, filename)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    if not normalized_name.lower().endswith(".csv"):
+        raise HTTPException(status_code=400, detail="Only CSV/Excel files are accepted for VAT graph batch analysis.")
     file_size_mb = len(content) / (1024 * 1024)
     if file_size_mb > 200:
         raise HTTPException(status_code=400, detail="File too large. Maximum size is 200MB.")
@@ -1002,7 +1010,7 @@ async def vat_graph_batch_upload(
         result = analyze_vat_csv_upload(
             db,
             content=content,
-            filename=filename,
+            filename=normalized_name,
             content_type=file.content_type,
             source="graph_batch_upload",
             persist=persist,
@@ -1011,7 +1019,7 @@ async def vat_graph_batch_upload(
         return {
             "batch_id": result["batch_id"],
             "upload_id": result["upload_id"],
-            "filename": filename,
+            "filename": original_name,
             "file_size_mb": round(file_size_mb, 2),
             "status": result["status"],
             "detected_schema": result["detected_schema"],
@@ -1206,6 +1214,87 @@ def get_vat_invoice_graph(
         except Exception:
             _safe_rollback(db)
             result["top_invoice_risks"] = []
+
+        # ── Temporal Graph Engine ──
+        try:
+            from ml_engine.temporal_graph_engine import TemporalGraphEngine as _TGE
+            _tge = _TGE()
+            _target_codes = {
+                str(c.get("tax_code", "")).strip()
+                for c in companies
+                if isinstance(c, dict) and str(c.get("tax_code", "")).strip()
+            }
+            _tge_result = _tge.analyze(
+                invoices,
+                target_tax_codes=_target_codes or None,
+            )
+
+            # Restructure patterns by type for frontend consumption
+            _grouped_patterns: dict[str, list] = {
+                "network_migration": [],
+                "temporal_burst": [],
+                "dormancy_reactivation": [],
+                "seasonal_carousel": [],
+            }
+            for _pat in _tge_result.get("patterns", []):
+                _ptype = str(_pat.get("type", "")).strip()
+                _evidence = _pat.get("evidence", {})
+                _entities = _pat.get("entities", [])
+                _entry = {
+                    "company": _entities[0] if _entities else "unknown",
+                    "entities": _entities,
+                    "severity": _pat.get("severity", "medium"),
+                    "confidence": _pat.get("confidence", 0.5),
+                    "description": _pat.get("description", ""),
+                    "time_range": _pat.get("time_range", []),
+                    "risk_score": _pat.get("confidence", 0.5) * 100,
+                }
+                if _ptype == "network_migration":
+                    _entry["new_partners"] = _evidence.get("new_companions_count", 0)
+                    _entry["disappear_rate"] = _evidence.get("disappear_rate", 0)
+                    _entry["snapshot_index"] = (_evidence.get("periods", [None, None, None]))[1] or ""
+                    _grouped_patterns["network_migration"].append(_entry)
+                elif _ptype == "temporal_burst":
+                    _entry["burst_multiplier"] = _evidence.get("burst_ratio", 0)
+                    _entry["burst_volume"] = _evidence.get("burst_volume", 0)
+                    _grouped_patterns["temporal_burst"].append(_entry)
+                elif _ptype == "dormancy_reactivation":
+                    _entry["dormancy_quarters"] = _evidence.get("dormancy_quarters", 0)
+                    _entry["reactivation_volume"] = _evidence.get("reactivation_volume", 0)
+                    _grouped_patterns["dormancy_reactivation"].append(_entry)
+                elif _ptype == "seasonal_carousel":
+                    _entry["appearance_periods"] = _evidence.get("appearance_periods", [])
+                    _grouped_patterns["seasonal_carousel"].append(_entry)
+
+            result["temporal_analysis"] = {
+                "snapshots": _tge_result.get("snapshots", []),
+                "patterns": _grouped_patterns,
+                "risk_scores": _tge_result.get("risk_scores", {}),
+                "summary": _tge_result.get("summary", {}),
+            }
+            log_event(
+                logger, "info", "graph_temporal_analysis_complete",
+                tax_code=tax_code,
+                pattern_count=_tge_result.get("summary", {}).get("total_patterns", 0),
+                snapshot_count=_tge_result.get("summary", {}).get("snapshot_count", 0),
+            )
+        except Exception as _tge_err:
+            log_event(
+                logger, "warning", "graph_temporal_analysis_skipped",
+                error_type=type(_tge_err).__name__,
+                error=str(_tge_err)[:200],
+            )
+            result["temporal_analysis"] = {
+                "snapshots": [],
+                "patterns": {
+                    "network_migration": [],
+                    "temporal_burst": [],
+                    "dormancy_reactivation": [],
+                    "seasonal_carousel": [],
+                },
+                "risk_scores": {},
+                "summary": {"status": "unavailable", "message": str(_tge_err)[:200]},
+            }
 
         # ── Forensic Compatibility v2 ──
         if GRAPH_FORENSIC_FEATURE_FLAG:

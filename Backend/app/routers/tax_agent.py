@@ -20,27 +20,111 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
+import threading
 import time
 import uuid
+from datetime import datetime
 from enum import Enum
 from typing import Any
 
 import numpy as np
 from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Request, UploadFile
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from ..database import get_db
 from ml_engine.model_registry import AuditContext, ModelRegistryService
+from ml_engine.tax_agent_mode_contracts import (
+    AGENT_RESPONSE_SCHEMA_VERSION,
+    MODE_CONTRACT_VERSION,
+    canonical_run_state,
+)
+from ml_engine.tax_agent_services import AgentChatService, AgentFileAnalysisService, normalize_agent_mode
+from ml_engine.tax_agent_turns import AgentTurnRepository
 from ml_engine.tax_agent_intent_model import TaxAgentIntentModel
 from ml_engine.tax_agent_retrieval import RetrievalCandidate, bm25_scores, embed_hash_tfidf, hybrid_score, tokenize
 from ml_engine.tax_agent_reranker import TaxAgentReranker
 
 
 router = APIRouter(prefix="/api/tax-agent", tags=["Tax Agent"])
+_async_file_jobs: dict[str, dict[str, Any]] = {}
+_async_file_jobs_lock = threading.Lock()
+_async_file_job_cancel_flags: dict[str, threading.Event] = {}
+_MAX_TOOL_LIST_ITEMS = 80
+_ASYNC_FILE_JOB_STALE_SECONDS = int(os.getenv("AGENT_ASYNC_FILE_JOB_STALE_SECONDS", "1800"))
+
+
+def _parse_simulation_params(value: Any) -> dict[str, Any]:
+    if isinstance(value, dict):
+        return value
+    if value is None:
+        return {}
+    text_value = str(value).strip()
+    if not text_value:
+        return {}
+    try:
+        parsed = json.loads(text_value)
+        return parsed if isinstance(parsed, dict) else {}
+    except Exception:
+        return {}
+
+
+def _trim_list(value: Any, limit: int = _MAX_TOOL_LIST_ITEMS) -> list[Any]:
+    if not isinstance(value, list):
+        return []
+    return value[: max(0, int(limit))]
+
+
+def _compact_attachment_analysis(payload: dict[str, Any]) -> dict[str, Any]:
+    compact = dict(payload or {})
+    graph = compact.get("graph")
+    if isinstance(graph, dict):
+        compact["graph"] = {
+            "nodes": _trim_list(graph.get("nodes"), 180),
+            "edges": _trim_list(graph.get("edges"), 260),
+            "top_invoice_risks": _trim_list(graph.get("top_invoice_risks"), 25),
+            "rings": _trim_list(graph.get("rings") or graph.get("ring_findings"), 25),
+        }
+    if isinstance(compact.get("assessments"), list):
+        compact["assessments"] = _trim_list(compact.get("assessments"), 60)
+    compact.pop("canonical_batch_results", None)
+    return compact
+
+
+def _compact_tool_results(tool_results: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(tool_results, dict):
+        return {}
+    compact: dict[str, Any] = {}
+    for key, value in tool_results.items():
+        if not isinstance(value, dict):
+            compact[key] = value
+            continue
+        item = dict(value)
+        if isinstance(item.get("assessments"), list):
+            item["assessments"] = _trim_list(item["assessments"], 60)
+        if isinstance(item.get("companies"), list):
+            item["companies"] = _trim_list(item["companies"], 80)
+        if isinstance(item.get("results"), list):
+            item["results"] = _trim_list(item["results"], 120)
+        if isinstance(item.get("nodes"), list):
+            item["nodes"] = _trim_list(item["nodes"], 180)
+        if isinstance(item.get("edges"), list):
+            item["edges"] = _trim_list(item["edges"], 260)
+        if isinstance(item.get("top_invoice_risks"), list):
+            item["top_invoice_risks"] = _trim_list(item["top_invoice_risks"], 25)
+        if isinstance(item.get("graph"), dict):
+            graph = dict(item["graph"])
+            graph["nodes"] = _trim_list(graph.get("nodes"), 180)
+            graph["edges"] = _trim_list(graph.get("edges"), 260)
+            graph["top_invoice_risks"] = _trim_list(graph.get("top_invoice_risks"), 25)
+            item["graph"] = graph
+        item.pop("canonical_batch_results", None)
+        compact[key] = item
+    return compact
 
 _MODEL_DIR = None
 try:
@@ -89,6 +173,12 @@ INTENT_RULES = {
         "miễn thuế", "giảm thuế", "đầu tư mở rộng", "dự án đầu tư",
         "khu công nghiệp", "luật thuế", "quy định", "chính sách thuế",
         "quản lý thuế", "công văn",
+        "thuế tncn", "tncn", "lương gross", "khấu trừ thuế",
+        "người phụ thuộc", "hoàn thuế", "đóng thừa",
+        "hộ kinh doanh", "bán hàng online", "shopee", "tiktok",
+        "thương mại điện tử", "cho thuê nhà", "thuế môn bài",
+        "nộp tờ khai", "kê khai", "chi phí được trừ", "tiếp khách",
+        "thanh toán tiền mặt", "freelancer", "cá nhân kinh doanh",
     ],
 }
 
@@ -112,11 +202,14 @@ class ModelMode(str, Enum):
 # ═══════════════════════════════════════════════════════════════════════
 
 class ChatRequest(BaseModel):
+    model_config = ConfigDict(protected_namespaces=())
+
     session_id: str | None = None
     user_id: int | None = None
     message: str = Field(..., min_length=1, max_length=12000)
     top_k: int = Field(5, ge=1, le=20)
     model_mode: ModelMode = ModelMode.FULL
+    simulation_params: dict[str, Any] = Field(default_factory=dict)
 
 
 class ChatResponse(BaseModel):
@@ -134,6 +227,14 @@ class ChatResponse(BaseModel):
 
 class ChatResponseV2(BaseModel):
     """Enhanced v2 response with full orchestration data."""
+    model_config = ConfigDict(protected_namespaces=())
+
+    schema_version: str = AGENT_RESPONSE_SCHEMA_VERSION
+    mode_contract_version: str = MODE_CONTRACT_VERSION
+    run_id: str = ""
+    run_state: str = "finalized"
+    mode_workspace: dict[str, Any] = Field(default_factory=dict)
+    error_detail: dict[str, Any] = Field(default_factory=dict)
     session_id: str
     # Intent
     intent: str
@@ -176,6 +277,171 @@ class ChatResponseV2(BaseModel):
     routing_decision: dict[str, Any] = Field(default_factory=dict)
     focus_score: float = 1.0
     route_violation: bool = False
+    selected_model_bundle: list[str] = Field(default_factory=list)
+    mode_validation: dict[str, Any] = Field(default_factory=dict)
+    mode_mismatch: bool = False
+    suggested_mode: str | None = None
+    suppressed_domains: list[str] = Field(default_factory=list)
+    analysis_blocks: list[dict[str, Any]] = Field(default_factory=list)
+    legal_workspace: dict[str, Any] = Field(default_factory=dict)
+    simulation_workspace: dict[str, Any] = Field(default_factory=dict)
+    intent_model_version: str = ""
+    planner_policy_version: str = ""
+    debate_session_id: str | None = None
+    graph_reasoning_path: list[dict[str, Any]] = Field(default_factory=list)
+
+
+def _set_async_job(job_id: str, **fields: Any) -> None:
+    with _async_file_jobs_lock:
+        current = _async_file_jobs.get(job_id, {})
+        current.update(fields)
+        _async_file_jobs[job_id] = current
+    _persist_async_job(job_id, current)
+
+
+def _get_async_job(job_id: str) -> dict[str, Any] | None:
+    persisted = _load_async_job(job_id)
+    if persisted:
+        persisted = _mark_async_job_stale_if_needed(job_id, persisted)
+        with _async_file_jobs_lock:
+            _async_file_jobs[job_id] = dict(persisted)
+        return persisted
+    with _async_file_jobs_lock:
+        value = _async_file_jobs.get(job_id)
+        job = dict(value) if value else None
+    return _mark_async_job_stale_if_needed(job_id, job) if job else None
+
+
+def _get_async_cancel_event(job_id: str) -> threading.Event:
+    with _async_file_jobs_lock:
+        event = _async_file_job_cancel_flags.get(job_id)
+        if event is None:
+            event = threading.Event()
+            _async_file_job_cancel_flags[job_id] = event
+        return event
+
+
+def _is_async_cancelled(job_id: str) -> bool:
+    event = _get_async_cancel_event(job_id)
+    if event.is_set():
+        return True
+    job = _get_async_job(job_id) or {}
+    return str(job.get("status") or "").lower() == "cancelled"
+
+
+def _raise_if_async_cancelled(job_id: str) -> None:
+    if _is_async_cancelled(job_id):
+        raise RuntimeError("__async_job_cancelled__")
+
+
+def _mark_async_job_stale_if_needed(job_id: str, job: dict[str, Any]) -> dict[str, Any]:
+    status = str(job.get("status") or "").lower()
+    if status not in {"pending", "processing"}:
+        return job
+    try:
+        updated_at = float(job.get("updated_at") or job.get("created_at") or time.time())
+    except Exception:
+        updated_at = time.time()
+    if time.time() - updated_at <= _ASYNC_FILE_JOB_STALE_SECONDS:
+        return job
+    stale = dict(job)
+    stale.update({
+        "status": "error",
+        "phase": "stale_timeout",
+        "progress": 100.0,
+        "error": "Async file job exceeded stale processing TTL.",
+        "error_detail": {"phase": "stale_timeout", "stale_after_seconds": _ASYNC_FILE_JOB_STALE_SECONDS},
+        "updated_at": time.time(),
+    })
+    _set_async_job(
+        job_id,
+        status="error",
+        phase="stale_timeout",
+        progress=100.0,
+        error=stale["error"],
+        error_detail=stale["error_detail"],
+    )
+    return stale
+
+
+def _persist_async_job(job_id: str, payload: dict[str, Any]) -> None:
+    try:
+        from app.database import SessionLocal
+        db = SessionLocal()
+        try:
+            db.execute(
+                text(
+                    """
+                    INSERT INTO agent_async_file_jobs
+                        (job_id, session_id, filename, status, phase, progress, error_message, response_json, cancelled_at, created_at, updated_at)
+                    VALUES
+                        (:job_id, :session_id, :filename, :status, :phase, :progress, :error_message, CAST(:response_json AS JSONB), :cancelled_at, NOW(), NOW())
+                    ON CONFLICT (job_id) DO UPDATE SET
+                        session_id = COALESCE(EXCLUDED.session_id, agent_async_file_jobs.session_id),
+                        filename = COALESCE(EXCLUDED.filename, agent_async_file_jobs.filename),
+                        status = EXCLUDED.status,
+                        phase = EXCLUDED.phase,
+                        progress = EXCLUDED.progress,
+                        error_message = EXCLUDED.error_message,
+                        response_json = COALESCE(EXCLUDED.response_json, agent_async_file_jobs.response_json),
+                        cancelled_at = COALESCE(EXCLUDED.cancelled_at, agent_async_file_jobs.cancelled_at),
+                        updated_at = NOW()
+                    """
+                ),
+                {
+                    "job_id": job_id,
+                    "session_id": payload.get("session_id"),
+                    "filename": payload.get("filename"),
+                    "status": str(payload.get("status") or "pending"),
+                    "phase": payload.get("phase"),
+                    "progress": float(payload.get("progress") or 0.0),
+                    "error_message": payload.get("error"),
+                    "response_json": json.dumps(payload.get("response"), ensure_ascii=False, default=str) if payload.get("response") is not None else None,
+                    "cancelled_at": payload.get("cancelled_at"),
+                },
+            )
+            db.commit()
+        finally:
+            db.close()
+    except Exception:
+        # Keep in-memory path as fallback; durability best-effort.
+        return
+
+
+def _load_async_job(job_id: str) -> dict[str, Any] | None:
+    try:
+        from app.database import SessionLocal
+        db = SessionLocal()
+        try:
+            row = db.execute(
+                text(
+                    """
+                    SELECT job_id, session_id, filename, status, phase, progress, error_message, response_json, cancelled_at, created_at, updated_at
+                    FROM agent_async_file_jobs
+                    WHERE job_id = :job_id
+                    """
+                ),
+                {"job_id": job_id},
+            ).mappings().first()
+        finally:
+            db.close()
+    except Exception:
+        return None
+    if not row:
+        return None
+    return {
+        "job_id": row.get("job_id"),
+        "session_id": row.get("session_id"),
+        "filename": row.get("filename"),
+        "status": row.get("status"),
+        "phase": row.get("phase"),
+        "progress": float(row.get("progress") or 0.0),
+        "error": row.get("error_message"),
+        "response": row.get("response_json"),
+        "cancelled_at": row.get("cancelled_at").timestamp() if isinstance(row.get("cancelled_at"), datetime) else row.get("cancelled_at"),
+        "created_at": row.get("created_at").timestamp() if isinstance(row.get("created_at"), datetime) else time.time(),
+        "updated_at": row.get("updated_at").timestamp() if isinstance(row.get("updated_at"), datetime) else time.time(),
+    }
 
 
 class AgentStatus(BaseModel):
@@ -441,8 +707,50 @@ def _compose_answer(intent: str, retrieval_context: list[dict[str, Any]], abstai
 
 
 # ═══════════════════════════════════════════════════════════════════════
+#  Report Generation Endpoint
+# ═══════════════════════════════════════════════════════════════════════
+
+from fastapi.responses import StreamingResponse
+
+@router.post("/export-report")
+def export_report(
+    session_id: str = Form(...),
+    format: str = Form("docx"),
+    db: Session = Depends(get_db),
+):
+    """Export the conversation context as an official tax report."""
+    from ml_engine.tax_agent_memory import ConversationMemory
+    from ml_engine.tax_agent_report_generator import TaxReportGenerator
+
+    memory = ConversationMemory(db)
+    context_data = memory.get_report_context(session_id)
+    
+    if not context_data.get("is_ready") and not context_data.get("facts"):
+        # Still generate even if empty, just tell them it's empty
+        pass
+
+    generator = TaxReportGenerator(context_data)
+    
+    if format.lower() == "pdf":
+        file_bytes = generator.generate_pdf()
+        filename = f"BaoCao_PhanTich_TaxInspector_{datetime.now().strftime('%Y%m%d')}.pdf"
+        media_type = "application/pdf"
+    else:
+        file_bytes = generator.generate_docx()
+        filename = f"BaoCao_PhanTich_TaxInspector_{datetime.now().strftime('%Y%m%d')}.docx"
+        media_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+
+    import io
+    return StreamingResponse(
+        io.BytesIO(file_bytes),
+        media_type=media_type,
+        headers={"Content-Disposition": f"attachment; filename={filename}"}
+    )
+
+# ═══════════════════════════════════════════════════════════════════════
 #  V1 Endpoint (Backward Compatible — Legacy Single-Agent)
 # ═══════════════════════════════════════════════════════════════════════
+
 
 @router.post("/chat", response_model=ChatResponse)
 def chat_tax_agent(payload: ChatRequest, db: Session = Depends(get_db)):
@@ -456,8 +764,8 @@ def chat_tax_agent(payload: ChatRequest, db: Session = Depends(get_db)):
         # Try the new orchestrator first
         from ml_engine.tax_agent_orchestrator import get_orchestrator
 
-        orchestrator = get_orchestrator()
-        orch_response = orchestrator.process(
+        service = AgentChatService(get_orchestrator())
+        orch_response = service.process(
             db,
             session_id=session_id,
             message=payload.message,
@@ -493,33 +801,11 @@ def _legacy_chat(payload: ChatRequest, db: Session, session_id: str) -> ChatResp
     """Legacy single-agent pipeline (fallback)."""
     _ensure_session(db, session_id=session_id, user_id=payload.user_id)
 
-    turn_index_row = db.execute(
-        text("SELECT COALESCE(MAX(turn_index), 0) FROM agent_turns WHERE session_id = :session_id"),
-        {"session_id": session_id},
-    ).fetchone()
-    turn_index = int(turn_index_row[0] or 0) + 1
-    db.execute(
-        text(
-            """
-            INSERT INTO agent_turns (session_id, turn_index, role, message_text)
-            VALUES (:session_id, :turn_index, 'user', :message_text)
-            """
-        ),
-        {"session_id": session_id, "turn_index": turn_index, "message_text": payload.message},
+    turn_pair = AgentTurnRepository(db).allocate_turn_pair(
+        session_id=session_id,
+        user_message=payload.message,
     )
-    turn_row = db.execute(
-        text(
-            """
-            INSERT INTO agent_turns (session_id, turn_index, role, message_text)
-            VALUES (:session_id, :turn_index, 'assistant', '')
-            RETURNING id
-            """
-        ),
-        {"session_id": session_id, "turn_index": turn_index + 1},
-    ).fetchone()
-    if not turn_row:
-        raise HTTPException(status_code=500, detail="Không thể tạo assistant turn.")
-    assistant_turn_id = int(turn_row[0])
+    assistant_turn_id = turn_pair.assistant_turn_id
 
     intent, intent_conf = _infer_intent(payload.message)
     retrieval_context, _ = _run_retrieval(
@@ -548,21 +834,12 @@ def _legacy_chat(payload: ChatRequest, db: Session, session_id: str) -> ChatResp
             }
         )
 
-    db.execute(
-        text(
-            """
-            UPDATE agent_turns
-            SET message_text = :message_text, normalized_intent = :normalized_intent, confidence = :confidence, citations_json = CAST(:citations_json AS jsonb)
-            WHERE id = :turn_id
-            """
-        ),
-        {
-            "turn_id": assistant_turn_id,
-            "message_text": answer,
-            "normalized_intent": intent,
-            "confidence": intent_conf,
-            "citations_json": json.dumps(citations),
-        },
+    AgentTurnRepository(db).update_assistant_turn(
+        turn_id=assistant_turn_id,
+        message_text=answer,
+        normalized_intent=intent,
+        confidence=intent_conf,
+        citations_json=json.dumps(citations),
     )
     db.execute(
         text(
@@ -640,14 +917,15 @@ def chat_tax_agent_v2(payload: ChatRequest, db: Session = Depends(get_db)):
 
     from ml_engine.tax_agent_orchestrator import get_orchestrator
 
-    orchestrator = get_orchestrator()
-    orch_response = orchestrator.process(
+    service = AgentChatService(get_orchestrator())
+    orch_response = service.process(
         db,
         session_id=session_id,
         message=payload.message,
         user_id=payload.user_id,
         top_k=payload.top_k,
         model_mode=payload.model_mode.value,
+        simulation_params=payload.simulation_params,
     )
 
     return _build_v2_response(orch_response, model_mode=payload.model_mode.value)
@@ -657,8 +935,9 @@ def chat_tax_agent_v2(payload: ChatRequest, db: Session = Depends(get_db)):
 async def chat_with_file(
     message: str = Form(..., min_length=1, max_length=12000),
     session_id: str = Form(None),
-    model_mode: str = Form("full"),
+    mode: str = Form("full", alias="model_mode"),
     user_id: int = Form(None),
+    simulation_params: str = Form(None),
     file: UploadFile = File(None),
     db: Session = Depends(get_db),
 ):
@@ -667,11 +946,11 @@ async def chat_with_file(
     If a CSV file is attached, triggers inline batch analysis and merges results.
     """
     session_id = session_id or f"sess-{uuid.uuid4().hex[:10]}"
-    resolved_mode = model_mode if model_mode in ("fraud", "vat", "delinquency", "macro", "legal", "full") else "full"
+    resolved_mode = normalize_agent_mode(mode)
 
     from ml_engine.tax_agent_orchestrator import get_orchestrator
 
-    orchestrator = get_orchestrator()
+    service = AgentChatService(get_orchestrator())
 
     # If file is attached, run multimodal analysis before orchestration.
     attachment_analysis = None
@@ -681,21 +960,45 @@ async def chat_with_file(
         if file_size_mb > 100:
             raise HTTPException(status_code=400, detail="File quá lớn (tối đa 100MB cho chat inline)")
         try:
-            from ..multimodal_analysis import analyze_attachment_for_agent
+            from ..multimodal_analysis import analyze_attachment_for_agent, detect_attachment_for_agent
+            from ..multimodal_analysis import normalize_agent_upload_bytes
 
-            attachment_analysis = analyze_attachment_for_agent(
-                db,
+            content, work_name, original_name = normalize_agent_upload_bytes(content, file.filename)
+            detection = detect_attachment_for_agent(
                 content=content,
-                filename=file.filename,
+                filename=work_name,
                 content_type=file.content_type,
-                model_mode=resolved_mode,
+                original_filename=original_name,
             )
+            if detection.get("status") == "unsupported":
+                raise ValueError(
+                    "Unsupported attachment type. Use CSV, Excel (.xlsx/.xls), PNG, JPG, JPEG, or PDF."
+                )
+            requested_domain = str(detection.get("requested_domain") or "unknown").lower()
+            legal_hints = ("phap ly", "pháp lý", "quy dinh", "quy định", "luat", "luật", "cong van", "công văn")
+            if detection.get("analysis_type") == "ocr_invoice" and any(h in message.lower() for h in legal_hints):
+                requested_domain = "legal"
+                detection["requested_domain"] = "legal"
+            explicit_modes = {"fraud", "vat", "delinquency", "macro", "legal"}
+            if resolved_mode in explicit_modes and requested_domain in explicit_modes and resolved_mode != requested_domain:
+                attachment_analysis = AgentFileAnalysisService.validate_mode_for_detection(
+                    model_mode=resolved_mode,
+                    detection=detection,
+                )
+            else:
+                attachment_analysis = analyze_attachment_for_agent(
+                    db,
+                    content=content,
+                    filename=work_name,
+                    content_type=file.content_type,
+                    model_mode=resolved_mode,
+                )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc))
         except Exception as exc:
             raise HTTPException(status_code=500, detail=f"File analysis failed: {exc}")
 
-    orch_response = orchestrator.process(
+    orch_response = service.process(
         db,
         session_id=session_id,
         message=message,
@@ -703,9 +1006,263 @@ async def chat_with_file(
         top_k=5,
         model_mode=resolved_mode,
         attachment_analysis=attachment_analysis,
+        simulation_params=_parse_simulation_params(simulation_params),
     )
 
     return _build_v2_response(orch_response, model_mode=resolved_mode)
+
+
+def _run_async_file_job(
+    *,
+    job_id: str,
+    message: str,
+    session_id: str,
+    model_mode: str,
+    user_id: int | None,
+    simulation_params: dict[str, Any] | None,
+    filename: str,
+    content_type: str | None,
+    content: bytes,
+) -> None:
+    from app.database import SessionLocal
+    from ml_engine.tax_agent_orchestrator import get_orchestrator
+    from ..multimodal_analysis import analyze_attachment_for_agent, analyze_vat_csv_upload, detect_attachment_for_agent
+    from ..multimodal_analysis import normalize_agent_upload_bytes
+
+    db = SessionLocal()
+    try:
+        _set_async_job(job_id, status="processing", progress=5.0, phase="schema_detect")
+        _raise_if_async_cancelled(job_id)
+        resolved_mode = normalize_agent_mode(model_mode)
+        content, work_name, original_name = normalize_agent_upload_bytes(content, filename)
+        detection = detect_attachment_for_agent(
+            content=content,
+            filename=work_name,
+            content_type=content_type,
+            original_filename=original_name,
+        )
+        if detection.get("status") == "unsupported":
+            raise ValueError(
+                "Unsupported attachment type. Use CSV, Excel (.xlsx/.xls), PNG, JPG, JPEG, or PDF."
+            )
+
+        requested_domain = str(detection.get("requested_domain") or "unknown").lower()
+        legal_hints = ("phap ly", "pháp lý", "quy dinh", "quy định", "luat", "luật", "cong van", "công văn")
+        if detection.get("analysis_type") == "ocr_invoice" and any(h in message.lower() for h in legal_hints):
+            requested_domain = "legal"
+            detection["requested_domain"] = "legal"
+
+        explicit_modes = {"fraud", "vat", "delinquency", "macro", "legal"}
+        if resolved_mode in explicit_modes and requested_domain in explicit_modes and resolved_mode != requested_domain:
+            attachment_analysis = AgentFileAnalysisService.validate_mode_for_detection(
+                model_mode=resolved_mode,
+                detection=detection,
+            )
+        else:
+            if str(detection.get("analysis_type")) == "risk_csv":
+                # Canonical risk batch pipeline (/api/ai) for full parity with Risk page.
+                from pathlib import Path
+                import uuid as _uuid
+                from app.routers import ai_analysis as ai_analysis_router
+                from app import models as app_models
+                from app.tasks import run_batch_analysis
+
+                upload_dir = getattr(ai_analysis_router, "UPLOAD_DIR", None)
+                if upload_dir is None:
+                    upload_dir = Path(__file__).resolve().parents[2] / "data" / "uploads"
+                upload_dir.mkdir(parents=True, exist_ok=True)
+                save_filename = f"agent_{_uuid.uuid4().hex[:8]}_{Path(work_name).name}"
+                save_path = upload_dir / save_filename
+                save_path.write_bytes(content)
+
+                batch = app_models.AIAnalysisBatch(
+                    filename=original_name,
+                    file_path=str(save_path),
+                    status="pending",
+                )
+                db.add(batch)
+                db.commit()
+                db.refresh(batch)
+
+                def _risk_hook(evt: dict):
+                    _raise_if_async_cancelled(job_id)
+                    phase = str(evt.get("phase") or "processing")
+                    processed = evt.get("processed")
+                    total = evt.get("total")
+                    pct = 10.0
+                    if isinstance(processed, int) and isinstance(total, int) and total > 0:
+                        pct = min(95.0, 10.0 + (float(processed) / float(total)) * 80.0)
+                    _set_async_job(job_id, status="processing", phase=f"risk_{phase}", progress=round(pct, 1))
+
+                run_batch_analysis(str(save_path), int(batch.id), progress_hook=_risk_hook)
+
+                # Build canonical results payload (same contract as Risk page).
+                try:
+                    canonical_payload = ai_analysis_router.batch_results(int(batch.id), db=db)
+                except Exception as exc:
+                    canonical_payload = {"status": "error", "error": str(exc), "batch_id": int(batch.id)}
+                assessments = canonical_payload.get("assessments", []) if isinstance(canonical_payload, dict) else []
+                by_level = {"critical": 0, "high": 0, "medium": 0, "low": 0}
+                if isinstance(assessments, list):
+                    for row in assessments:
+                        if not isinstance(row, dict):
+                            continue
+                        lvl = str(row.get("risk_level") or "low").lower()
+                        by_level[lvl] = by_level.get(lvl, 0) + 1
+                attachment_analysis = {
+                    **detection,
+                    "status": "success" if canonical_payload.get("status") == "done" else (canonical_payload.get("status") or "success"),
+                    "analysis_type": "risk_csv",
+                    "filename": original_name,
+                    "total": int(canonical_payload.get("total_companies") or canonical_payload.get("total_records") or len(assessments) or 0) if isinstance(canonical_payload, dict) else 0,
+                    "by_level": by_level,
+                    "top_5": (assessments[:5] if isinstance(assessments, list) else []),
+                    "assessments": (assessments[:200] if isinstance(assessments, list) else []),
+                    "statistics": (canonical_payload.get("statistics") or {}) if isinstance(canonical_payload, dict) else {},
+                    "canonical_batch_id": int(batch.id),
+                    "canonical_batch_results": canonical_payload,
+                }
+
+            elif str(detection.get("analysis_type")) == "vat_graph_csv":
+                def _progress(processed: int, total: int, phase: str) -> None:
+                    _raise_if_async_cancelled(job_id)
+                    if total <= 0:
+                        pct = 15.0
+                    else:
+                        pct = min(95.0, 15.0 + (float(processed) / float(total)) * 75.0)
+                    _set_async_job(job_id, status="processing", phase=phase, progress=round(pct, 1))
+
+                attachment_analysis = analyze_vat_csv_upload(
+                    db,
+                    content=content,
+                    filename=work_name,
+                    content_type=content_type,
+                    source="agent_attachment_async",
+                    # Match VAT tracing page behavior by default.
+                    persist=True,
+                    progress_callback=_progress,
+                )
+                # Canonical VAT results payload (same contract as /api/graph/batch-results/{batch_id})
+                try:
+                    from ..multimodal_analysis import get_vat_batch_results
+                    canonical_vat = get_vat_batch_results(db, int(attachment_analysis.get("batch_id") or 0))
+                except Exception as exc:
+                    canonical_vat = {"status": "error", "error": str(exc), "batch_id": attachment_analysis.get("batch_id")}
+                if isinstance(attachment_analysis, dict):
+                    attachment_analysis["canonical_batch_results"] = canonical_vat
+                    attachment_analysis["filename"] = original_name
+            else:
+                _set_async_job(job_id, status="processing", progress=55.0, phase="analyze_attachment")
+                _raise_if_async_cancelled(job_id)
+                attachment_analysis = analyze_attachment_for_agent(
+                    db,
+                    content=content,
+                    filename=work_name,
+                    content_type=content_type,
+                    model_mode=resolved_mode,
+                )
+
+        _set_async_job(job_id, status="processing", progress=96.0, phase="synthesis")
+        _raise_if_async_cancelled(job_id)
+        service = AgentChatService(get_orchestrator())
+        orch_response = service.process(
+            db,
+            session_id=session_id,
+            message=message,
+            user_id=user_id,
+            top_k=5,
+            model_mode=resolved_mode,
+            attachment_analysis=attachment_analysis,
+            simulation_params=simulation_params,
+        )
+        payload = _build_v2_response(orch_response, model_mode=resolved_mode, compact_async=True)
+        _set_async_job(job_id, status="done", progress=100.0, phase="done", response=payload)
+    except Exception as exc:
+        if str(exc) == "__async_job_cancelled__":
+            _set_async_job(job_id, status="cancelled", phase="cancelled", error=None, progress=100.0, cancelled_at=datetime.utcnow())
+        else:
+            _set_async_job(job_id, status="error", phase="failed", error=str(exc), progress=100.0)
+    finally:
+        db.close()
+
+
+@router.post("/chat/v2/with-file/async")
+async def chat_with_file_async(
+    message: str = Form(..., min_length=1, max_length=12000),
+    session_id: str = Form(None),
+    mode: str = Form("full", alias="model_mode"),
+    user_id: int = Form(None),
+    simulation_params: str = Form(None),
+    file: UploadFile = File(...),
+):
+    session_id = session_id or f"sess-{uuid.uuid4().hex[:10]}"
+    content = await file.read()
+    file_size_mb = len(content) / (1024 * 1024)
+    if file_size_mb > 100:
+        raise HTTPException(status_code=400, detail="File quá lớn (tối đa 100MB cho chat inline)")
+
+    job_id = f"job-{uuid.uuid4().hex[:12]}"
+    _set_async_job(
+        job_id,
+        status="pending",
+        progress=0.0,
+        phase="queued",
+        created_at=time.time(),
+        session_id=session_id,
+        filename=file.filename,
+    )
+    _get_async_cancel_event(job_id)
+    thread = threading.Thread(
+        target=_run_async_file_job,
+        kwargs={
+            "job_id": job_id,
+            "message": message,
+            "session_id": session_id,
+            "model_mode": mode,
+            "user_id": user_id,
+            "simulation_params": _parse_simulation_params(simulation_params),
+            "filename": file.filename or "upload.csv",
+            "content_type": file.content_type,
+            "content": content,
+        },
+        daemon=True,
+    )
+    thread.start()
+    return {
+        "status": "pending",
+        "job_id": job_id,
+        "session_id": session_id,
+        "poll_interval_ms": 1200,
+        "message": "Upload accepted. Processing in background.",
+    }
+
+
+@router.get("/chat/v2/with-file/async/{job_id}")
+def get_async_file_job(job_id: str):
+    job = _get_async_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Async file job not found.")
+    return job
+
+
+@router.post("/chat/v2/with-file/async/{job_id}/cancel")
+def cancel_async_file_job(job_id: str):
+    job = _get_async_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Async file job not found.")
+    if str(job.get("status") or "").lower() in {"done", "error", "cancelled"}:
+        return job
+    _get_async_cancel_event(job_id).set()
+    cancelled_at = datetime.utcnow()
+    _set_async_job(
+        job_id,
+        status="cancelled",
+        phase="cancelled",
+        progress=100.0,
+        cancelled_at=cancelled_at,
+        error=None,
+    )
+    return _get_async_job(job_id) or {"job_id": job_id, "status": "cancelled", "cancelled_at": cancelled_at.timestamp()}
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -724,7 +1281,7 @@ async def chat_tax_agent_v2_stream(payload: ChatRequest, db: Session = Depends(g
 
     session_id = payload.session_id or f"sess-{uuid.uuid4().hex[:10]}"
     from ml_engine.tax_agent_orchestrator import get_orchestrator
-    orchestrator = get_orchestrator()
+    service = AgentChatService(get_orchestrator())
 
     queue = asyncio.Queue()
     loop = asyncio.get_running_loop()
@@ -734,21 +1291,40 @@ async def chat_tax_agent_v2_stream(payload: ChatRequest, db: Session = Depends(g
         # race conditions with FastAPI's dependency-injection lifecycle.
         from app.database import SessionLocal
         thread_db = SessionLocal()
+        sequence = 0
+        done_seen = False
+
+        def emit(event_type: str, data: dict[str, Any]) -> None:
+            nonlocal sequence
+            sequence += 1
+            payload = dict(data or {})
+            payload.setdefault("sequence", sequence)
+            payload.setdefault("run_state", "streaming")
+            event_data = _json.dumps(payload, ensure_ascii=False, default=str)
+            loop.call_soon_threadsafe(queue.put_nowait, f"event: {event_type}\ndata: {event_data}\n\n")
+
         try:
-            for event in orchestrator.process_streaming(
+            emit("state", {"run_state": "queued", "session_id": session_id, "model_mode": payload.model_mode.value})
+            for event in service.stream(
                 thread_db,
                 session_id=session_id,
                 message=payload.message,
                 user_id=payload.user_id,
                 top_k=payload.top_k,
                 model_mode=payload.model_mode.value,
+                simulation_params=payload.simulation_params,
             ):
                 event_type = event.get("event", "message")
-                event_data = _json.dumps(event.get("data", {}), ensure_ascii=False, default=str)
-                loop.call_soon_threadsafe(queue.put_nowait, f"event: {event_type}\ndata: {event_data}\n\n")
+                data = event.get("data", {})
+                if event_type == "done":
+                    done_seen = True
+                    if isinstance(data, dict):
+                        data = {**data, "run_state": "finalized"}
+                emit(event_type, data if isinstance(data, dict) else {"data": data})
+            if not done_seen:
+                emit("error", {"run_state": "partial_error", "error": "Stream ended before final done event."})
         except Exception as exc:
-            error_data = _json.dumps({"error": str(exc)}, ensure_ascii=False)
-            loop.call_soon_threadsafe(queue.put_nowait, f"event: error\ndata: {error_data}\n\n")
+            emit("error", {"run_state": "error", "error": str(exc)})
         finally:
             loop.call_soon_threadsafe(queue.put_nowait, None)  # EOF
             try:
@@ -783,9 +1359,27 @@ async def chat_tax_agent_v2_stream(payload: ChatRequest, db: Session = Depends(g
     )
 
 
-def _build_v2_response(orch_response, *, model_mode: str = "full") -> dict:
+def _build_v2_response(
+    orch_response,
+    *,
+    model_mode: str = "full",
+    compact_async: bool = False,
+) -> dict:
     """Build ChatResponseV2-compatible dict from OrchestratorResponse."""
+    attachment_analysis = orch_response.tool_results.get("_attachment_analysis", {}) or {}
+    if isinstance(attachment_analysis, dict):
+        attachment_analysis = _compact_attachment_analysis(attachment_analysis)
+    tool_results = orch_response.tool_results
+    if compact_async:
+        tool_results = _compact_tool_results(tool_results)
+
     return ChatResponseV2(
+        schema_version=getattr(orch_response, "schema_version", AGENT_RESPONSE_SCHEMA_VERSION),
+        mode_contract_version=getattr(orch_response, "mode_contract_version", MODE_CONTRACT_VERSION),
+        run_id=getattr(orch_response, "run_id", ""),
+        run_state=canonical_run_state(getattr(orch_response, "run_state", "finalized")),
+        mode_workspace=getattr(orch_response, "mode_workspace", {}),
+        error_detail=getattr(orch_response, "error_detail", {}),
         session_id=orch_response.session_id,
         intent=orch_response.intent,
         intent_confidence=orch_response.intent_confidence,
@@ -808,15 +1402,23 @@ def _build_v2_response(orch_response, *, model_mode: str = "full") -> dict:
         latency_breakdown=orch_response.latency_breakdown,
         synthesis_tier=orch_response.synthesis_tier,
         policy_traces=orch_response.policy_traces,
-        tool_results=orch_response.tool_results,
+        tool_results=tool_results,
         visualization_data=orch_response.visualization_data,
         model_mode=model_mode,
-        attachment_analysis=orch_response.tool_results.get("_attachment_analysis", {}),
+        attachment_analysis=attachment_analysis,
         dialogue_act=getattr(orch_response, "dialogue_act", "task"),
         answer_contract=getattr(orch_response, "answer_contract", "risk_profile"),
         routing_decision=getattr(orch_response, "routing_decision", {}),
         focus_score=getattr(orch_response, "focus_score", 1.0),
         route_violation=getattr(orch_response, "route_violation", False),
+        selected_model_bundle=getattr(orch_response, "selected_model_bundle", []),
+        mode_validation=getattr(orch_response, "mode_validation", {}),
+        mode_mismatch=getattr(orch_response, "mode_mismatch", False),
+        suggested_mode=getattr(orch_response, "suggested_mode", None),
+        suppressed_domains=getattr(orch_response, "suppressed_domains", []),
+        analysis_blocks=getattr(orch_response, "analysis_blocks", []),
+        legal_workspace=getattr(orch_response, "legal_workspace", {}),
+        simulation_workspace=getattr(orch_response, "simulation_workspace", {}),
     )
 
 
@@ -831,6 +1433,53 @@ def chat_tax_agent_stream(payload: ChatRequest, db: Session = Depends(get_db)):
     Streams orchestration stages as they complete.
     """
     session_id = payload.session_id or f"sess-{uuid.uuid4().hex[:10]}"
+
+    def delegated_event_generator():
+        from ml_engine.tax_agent_orchestrator import get_orchestrator
+
+        sequence = 0
+
+        def emit(event_type: str, data: dict[str, Any]):
+            nonlocal sequence
+            sequence += 1
+            body = dict(data or {})
+            body.setdefault("sequence", sequence)
+            body.setdefault("run_state", "streaming")
+            yield _sse_event(event_type, body)
+
+        yield ": " + " " * 1024 + "\n\n"
+        yield from emit("state", {"run_state": "queued", "session_id": session_id, "model_mode": payload.model_mode.value})
+        done_seen = False
+        try:
+            for event in AgentChatService(get_orchestrator()).stream(
+                db,
+                session_id=session_id,
+                message=payload.message,
+                user_id=payload.user_id,
+                top_k=payload.top_k,
+                model_mode=payload.model_mode.value,
+            ):
+                event_type = event.get("event", "message")
+                data = event.get("data", {})
+                if event_type == "done":
+                    done_seen = True
+                    if isinstance(data, dict):
+                        data = {**data, "run_state": "finalized"}
+                yield from emit(event_type, data if isinstance(data, dict) else {"data": data})
+            if not done_seen:
+                yield from emit("error", {"run_state": "partial_error", "error": "Stream ended before final done event."})
+        except Exception as exc:
+            yield from emit("error", {"run_state": "error", "error": str(exc)})
+
+    return StreamingResponse(
+        delegated_event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
     def event_generator():
         try:
@@ -1280,8 +1929,11 @@ def get_model_serving_status():
     """
     try:
         from ml_engine.model_serving import get_model_gateway
+        from ml_engine.model_inventory import get_model_inventory_payload
         gateway = get_model_gateway()
-        return gateway.get_status()
+        status = gateway.get_status()
+        status["model_inventory"] = get_model_inventory_payload()
+        return status
     except Exception as exc:
         return {"status": "error", "error": str(exc)}
 
@@ -1340,5 +1992,3 @@ def preload_models(model_names: list[str] | None = None):
         return gateway.get_status()
     except Exception as exc:
         return {"status": "error", "error": str(exc)}
-
-

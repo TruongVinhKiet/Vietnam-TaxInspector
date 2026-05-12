@@ -37,19 +37,36 @@ EMBEDDING_CACHE_DIR = MODEL_DIR / "embedding_cache"
 
 # ─── Configuration ────────────────────────────────────────────────────────────
 # Tuned for i7-8th gen + 12GB RAM
-EMBEDDING_MODEL_NAME = os.getenv(
-    "TAX_AGENT_EMBEDDING_MODEL",
-    "intfloat/multilingual-e5-small",
-)
+_EXPLICIT_EMBEDDING_MODEL = os.getenv("TAX_AGENT_EMBEDDING_MODEL")
+EMBEDDING_MODEL_CANDIDATES = [
+    item.strip()
+    for item in os.getenv(
+        "TAX_AGENT_EMBEDDING_MODEL_CANDIDATES",
+        "BAAI/bge-m3,intfloat/multilingual-e5-small",
+    ).split(",")
+    if item.strip()
+]
+if _EXPLICIT_EMBEDDING_MODEL:
+    EMBEDDING_MODEL_CANDIDATES = [_EXPLICIT_EMBEDDING_MODEL]
+EMBEDDING_MODEL_NAME = EMBEDDING_MODEL_CANDIDATES[0]
 EMBEDDING_DIM = int(os.getenv("TAX_AGENT_EMBEDDING_DIM", "384"))
 MAX_SEQ_LENGTH = int(os.getenv("TAX_AGENT_MAX_SEQ_LENGTH", "256"))
 BATCH_SIZE = int(os.getenv("TAX_AGENT_EMBEDDING_BATCH", "32"))
 MAX_CACHE_ENTRIES = int(os.getenv("TAX_AGENT_EMBEDDING_CACHE_SIZE", "50000"))
 HASH_TFIDF_DIM = int(os.getenv("TAX_AGENT_HASH_TFIDF_DIM", "96"))
 
-# Query prefix for E5 family models (required by e5 for asymmetric retrieval)
+# Query prefix for E5 family models (required by e5 for asymmetric retrieval).
+# BGE/PhoBERT-like models should not be forced through E5 prompt prefixes.
 QUERY_PREFIX = "query: "
 PASSAGE_PREFIX = "passage: "
+
+
+def _local_model_path(model_dir: Path, model_name: str) -> Path:
+    return model_dir / "embeddings" / model_name.replace("/", "_")
+
+
+def _uses_e5_prefix(model_name: str) -> bool:
+    return "e5" in (model_name or "").lower()
 
 
 @dataclass
@@ -182,6 +199,7 @@ class TaxAgentEmbeddingEngine:
         device: str = "cpu",
     ):
         self.model_name = model_name
+        self.model_candidates = list(dict.fromkeys([model_name] + EMBEDDING_MODEL_CANDIDATES))
         self.model_dir = model_dir or MODEL_DIR
         self.max_seq_length = max_seq_length
         self.batch_size = batch_size
@@ -193,6 +211,8 @@ class TaxAgentEmbeddingEngine:
         self._model_tier: str = "hash_tfidf"
         self._loaded = False
         self._embedding_dim: int = EMBEDDING_DIM
+        self._query_prefix = QUERY_PREFIX if _uses_e5_prefix(model_name) else ""
+        self._passage_prefix = PASSAGE_PREFIX if _uses_e5_prefix(model_name) else ""
 
     def load(self) -> str:
         """
@@ -225,6 +245,53 @@ class TaxAgentEmbeddingEngine:
         """Try loading sentence-transformers model."""
         try:
             from sentence_transformers import SentenceTransformer
+
+            last_error: Exception | None = None
+            for candidate in self.model_candidates:
+                local_path = _local_model_path(self.model_dir, candidate)
+                explicit = bool(_EXPLICIT_EMBEDDING_MODEL and candidate == _EXPLICIT_EMBEDDING_MODEL)
+                if local_path.exists():
+                    model_path = str(local_path)
+                    logger.info("[EmbeddingEngine] Loading from local cache: %s", local_path)
+                elif candidate.lower() == "baai/bge-m3" and not explicit:
+                    logger.info("[EmbeddingEngine] BGE-M3 not cached locally; using next candidate")
+                    continue
+                else:
+                    model_path = candidate
+                    logger.info("[EmbeddingEngine] Loading from HuggingFace/cache: %s", candidate)
+
+                try:
+                    self._st_model = SentenceTransformer(model_path, device=self.device)
+                    self._st_model.max_seq_length = self.max_seq_length
+                    self.model_name = candidate
+                    self._query_prefix = QUERY_PREFIX if _uses_e5_prefix(candidate) else ""
+                    self._passage_prefix = PASSAGE_PREFIX if _uses_e5_prefix(candidate) else ""
+                    self._embedding_dim = self._st_model.get_embedding_dimension()
+                    self._model_tier = "semantic"
+                    self._loaded = True
+                    if not local_path.exists():
+                        try:
+                            local_path.mkdir(parents=True, exist_ok=True)
+                            self._st_model.save(str(local_path))
+                            logger.info("[EmbeddingEngine] Model cached to: %s", local_path)
+                        except Exception as exc:
+                            logger.warning("[EmbeddingEngine] Could not cache model: %s", exc)
+                    logger.info(
+                        "[EmbeddingEngine] Loaded sentence-transformers (%s, dim=%d, device=%s, prefix=%s)",
+                        self.model_name,
+                        self._embedding_dim,
+                        self.device,
+                        "e5" if self._query_prefix else "plain",
+                    )
+                    return "semantic"
+                except Exception as exc:
+                    last_error = exc
+                    self._st_model = None
+                    logger.warning("[EmbeddingEngine] Candidate failed (%s): %s", candidate, exc)
+
+            if last_error:
+                raise last_error
+            return None
 
             # Check for local cached model first
             local_path = self.model_dir / "embeddings" / self.model_name.replace("/", "_")
@@ -378,7 +445,7 @@ class TaxAgentEmbeddingEngine:
         Embed a single query (with query prefix for asymmetric retrieval).
         Uses cache for repeated queries.
         """
-        cached = _embedding_cache.get(query, QUERY_PREFIX, self._model_tier)
+        cached = _embedding_cache.get(query, self._query_prefix, self._model_tier)
         if cached is not None:
             return EmbeddingResult(
                 text=query, vector=cached, model_tier=self._model_tier,
@@ -386,15 +453,15 @@ class TaxAgentEmbeddingEngine:
             )
 
         t0 = time.perf_counter()
-        if self._model_tier in ("semantic", "onnx"):
-            prefixed = f"{QUERY_PREFIX}{query}"
+        if self._model_tier in ("semantic", "onnx") and self._query_prefix:
+            prefixed = f"{self._query_prefix}{query}"
         else:
             prefixed = query
 
         vec = self._encode_raw([prefixed])[0]
         latency = (time.perf_counter() - t0) * 1000.0
 
-        _embedding_cache.put(query, QUERY_PREFIX, self._model_tier, vec)
+        _embedding_cache.put(query, self._query_prefix, self._model_tier, vec)
 
         return EmbeddingResult(
             text=query, vector=vec, model_tier=self._model_tier,
@@ -405,7 +472,7 @@ class TaxAgentEmbeddingEngine:
         """
         Embed a single passage (with passage prefix for asymmetric retrieval).
         """
-        cached = _embedding_cache.get(passage, PASSAGE_PREFIX, self._model_tier)
+        cached = _embedding_cache.get(passage, self._passage_prefix, self._model_tier)
         if cached is not None:
             return EmbeddingResult(
                 text=passage, vector=cached, model_tier=self._model_tier,
@@ -413,15 +480,15 @@ class TaxAgentEmbeddingEngine:
             )
 
         t0 = time.perf_counter()
-        if self._model_tier in ("semantic", "onnx"):
-            prefixed = f"{PASSAGE_PREFIX}{passage}"
+        if self._model_tier in ("semantic", "onnx") and self._passage_prefix:
+            prefixed = f"{self._passage_prefix}{passage}"
         else:
             prefixed = passage
 
         vec = self._encode_raw([prefixed])[0]
         latency = (time.perf_counter() - t0) * 1000.0
 
-        _embedding_cache.put(passage, PASSAGE_PREFIX, self._model_tier, vec)
+        _embedding_cache.put(passage, self._passage_prefix, self._model_tier, vec)
 
         return EmbeddingResult(
             text=passage, vector=vec, model_tier=self._model_tier,
@@ -444,7 +511,7 @@ class TaxAgentEmbeddingEngine:
 
         # Check cache first
         for i, passage in enumerate(passages):
-            cached = _embedding_cache.get(passage, PASSAGE_PREFIX, self._model_tier)
+            cached = _embedding_cache.get(passage, self._passage_prefix, self._model_tier)
             if cached is not None:
                 results.append(EmbeddingResult(
                     text=passage, vector=cached, model_tier=self._model_tier,
@@ -453,8 +520,8 @@ class TaxAgentEmbeddingEngine:
             else:
                 results.append(None)  # placeholder
                 uncached_indices.append(i)
-                if self._model_tier in ("semantic", "onnx"):
-                    uncached_texts.append(f"{PASSAGE_PREFIX}{passage}")
+                if self._model_tier in ("semantic", "onnx") and self._passage_prefix:
+                    uncached_texts.append(f"{self._passage_prefix}{passage}")
                 else:
                     uncached_texts.append(passage)
 
@@ -464,7 +531,7 @@ class TaxAgentEmbeddingEngine:
             for j, idx in enumerate(uncached_indices):
                 vec = vecs[j]
                 passage = passages[idx]
-                _embedding_cache.put(passage, PASSAGE_PREFIX, self._model_tier, vec)
+                _embedding_cache.put(passage, self._passage_prefix, self._model_tier, vec)
                 results[idx] = EmbeddingResult(
                     text=passage, vector=vec, model_tier=self._model_tier,
                     dim=len(vec),

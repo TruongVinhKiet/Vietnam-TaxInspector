@@ -153,6 +153,48 @@ def ocr_process_sample(sample_id: int):
     # Simulate OCR processing time
     proc_time = round(random.uniform(0.3, 1.5), 3)
 
+    # Normalize line items to always have 'description' key
+    raw_items = invoice.get("items", [])
+    normalized_items = []
+    for it in raw_items:
+        normalized_items.append({
+            "description": it.get("name") or it.get("description", "Không xác định"),
+            "quantity": it.get("quantity") or it.get("qty", 1),
+            "unit_price": it.get("unit_price") or it.get("price", 0),
+            "amount": it.get("amount") or (it.get("quantity", it.get("qty", 1)) * it.get("unit_price", it.get("price", 0))),
+        })
+
+    # AI Verdict: heuristic check for invoice legitimacy
+    suspicious_svc = ["tư vấn", "dịch vụ", "phí quản lý", "hoa hồng", "marketing"]
+    item_descs = " ".join([(it.get("name") or it.get("description", "")).lower() for it in raw_items])
+    svc_found = [kw for kw in suspicious_svc if kw in item_descs]
+    grand = invoice.get("grand_total", 0)
+    is_round = grand > 0 and grand % 1000000 == 0
+    verdict_score = len(svc_found) * 0.2 + (0.15 if is_round else 0)
+    verdict_score = min(1.0, verdict_score)
+    if verdict_score >= 0.5:
+        verdict = "suspicious"
+        verdict_label = "Khả năng cao là hóa đơn khống"
+    elif verdict_score >= 0.2:
+        verdict = "warning"
+        verdict_label = "Có dấu hiệu đáng ngờ"
+    else:
+        verdict = "normal"
+        verdict_label = "Hóa đơn bình thường"
+
+    verdict_reasons = []
+    if svc_found:
+        verdict_reasons.append(f"Mô tả chứa từ khóa nhạy cảm: {', '.join(svc_found)}")
+    if is_round:
+        verdict_reasons.append(f"Tổng thanh toán tròn số bất thường: {grand:,.0f} đ")
+    seller = invoice.get("seller_name", "")
+    if seller and any(kw in seller.lower() for kw in ["xây dựng", "construction"]):
+        if any(kw in item_descs for kw in ["tư vấn", "marketing", "đào tạo"]):
+            verdict_reasons.append(f"Công ty Xây dựng nhưng cung cấp dịch vụ Tư vấn/Marketing — Industry Mismatch")
+            verdict_score = min(1.0, verdict_score + 0.3)
+            verdict = "suspicious"
+            verdict_label = "Khả năng cao là hóa đơn khống"
+
     return {
         "status": "success",
         "processing_time_ms": proc_time * 1000,
@@ -169,9 +211,15 @@ def ocr_process_sample(sample_id: int):
             "vat_rate": invoice.get("vat_rate", 10),
             "vat_amount": invoice.get("vat_amount", 0),
             "grand_total": invoice.get("grand_total", 0),
-            "line_items": invoice.get("items", []),
+            "line_items": normalized_items,
         },
         "image_path": invoice.get("image_path", ""),
+        "ai_verdict": {
+            "verdict": verdict,
+            "label": verdict_label,
+            "score": round(verdict_score, 2),
+            "reasons": verdict_reasons,
+        },
     }
 
 
@@ -406,6 +454,212 @@ async def redflag_analyze(payload: dict):
             "confidence": 0.7,
         }
 
+@router.post("/redflag/batch_analyze")
+async def redflag_batch_analyze(file: UploadFile = File(...)):
+    """Phân tích lô NLP toàn bộ file CSV — không giới hạn dòng."""
+    import pandas as pd
+    import io
+    from collections import Counter
+    try:
+        content = await file.read()
+        df = pd.read_csv(io.BytesIO(content))
+
+        total_records = len(df)
+        # Process ALL rows — no sampling
+        all_results = []
+        level_counts = {"low": 0, "medium": 0, "high": 0, "critical": 0}
+        industry_risk = {}
+        keyword_counter: Counter = Counter()
+        fraud_type_counter = {"keyword_match": 0, "industry_mismatch": 0, "clean": 0}
+        suspicious_kws = ["tư vấn", "dịch vụ", "phí quản lý", "chi phí khác",
+                          "hoa hồng", "marketing", "quảng cáo", "hỗ trợ",
+                          "thuê ngoài", "đào tạo", "nghiên cứu thị trường"]
+
+        for _, row in df.iterrows():
+            desc = str(row.get('description', '')).lower()
+            industry = str(row.get('industry', ''))
+            industry_lower = industry.lower()
+            tax_code = str(row.get('tax_code', ''))
+            invoice_id = str(row.get('invoice_id', ''))
+
+            found = [kw for kw in suspicious_kws if kw in desc]
+            score = min(1.0, len(found) * 0.25) if found else 0.05
+
+            industry_kws = {
+                "xây dựng": ["xi măng", "thép", "gạch", "cát", "bê tông"],
+                "sản xuất": ["nguyên liệu", "linh kiện", "máy móc"],
+                "phần mềm": ["server", "license", "cloud", "laptop", "macbook"],
+                "thực phẩm": ["gạo", "thịt", "rau", "nước mắm", "bia"],
+                "tư vấn": ["sách", "giấy", "mực in", "laptop", "chữ ký số"],
+                "thương mại": ["máy in", "văn phòng phẩm", "bàn ghế", "máy lạnh"],
+            }
+            expected = []
+            for k, v in industry_kws.items():
+                if k in industry_lower:
+                    expected = v
+
+            flag_types = []
+            for kw in found:
+                flag_types.append("keyword_match")
+                keyword_counter[kw] += 1
+
+            has_mismatch = False
+            if expected and not any(kw in desc for kw in expected):
+                flag_types.append("industry_mismatch")
+                score = min(1.0, score + 0.15)
+                has_mismatch = True
+
+            level = "critical" if score >= 0.8 else "high" if score >= 0.6 else "medium" if score >= 0.3 else "low"
+            level_counts[level] += 1
+
+            # Fraud type counting
+            if found:
+                fraud_type_counter["keyword_match"] += 1
+            if has_mismatch:
+                fraud_type_counter["industry_mismatch"] += 1
+            if not found and not has_mismatch:
+                fraud_type_counter["clean"] += 1
+
+            # Track industry risk
+            if industry not in industry_risk:
+                industry_risk[industry] = {"total": 0, "flagged": 0, "sum_score": 0}
+            industry_risk[industry]["total"] += 1
+            industry_risk[industry]["sum_score"] += score
+            if score >= 0.3:
+                industry_risk[industry]["flagged"] += 1
+
+            all_results.append({
+                "invoice_id": invoice_id,
+                "tax_code": tax_code,
+                "industry": industry,
+                "description": desc[:200],
+                "risk_score": round(score, 2),
+                "risk_level": level,
+                "flags": list(set(flag_types))
+            })
+
+        all_results.sort(key=lambda x: x['risk_score'], reverse=True)
+
+        # ── Aggregations for dashboard charts ──
+
+        # 1. Industry summary
+        industry_summary = []
+        for ind, stats in industry_risk.items():
+            industry_summary.append({
+                "industry": ind,
+                "total": stats["total"],
+                "flagged": stats["flagged"],
+                "avg_score": round(stats["sum_score"] / max(1, stats["total"]), 2),
+                "flag_rate": round(stats["flagged"] / max(1, stats["total"]) * 100, 1),
+            })
+        industry_summary.sort(key=lambda x: x['flag_rate'], reverse=True)
+
+        # 2. Score distribution (histogram bins)
+        bins = [0, 0, 0, 0, 0]  # [0-20, 20-40, 40-60, 60-80, 80-100]
+        for r in all_results:
+            s = int(r["risk_score"] * 100)
+            idx = min(s // 20, 4)
+            bins[idx] += 1
+        score_distribution = [
+            {"range": "0-20", "count": bins[0]},
+            {"range": "20-40", "count": bins[1]},
+            {"range": "40-60", "count": bins[2]},
+            {"range": "60-80", "count": bins[3]},
+            {"range": "80-100", "count": bins[4]},
+        ]
+
+        # 3. Group by tax_code for company table
+        tax_groups: dict = {}
+        for r in all_results:
+            tc = r["tax_code"]
+            if tc not in tax_groups:
+                tax_groups[tc] = {
+                    "tax_code": tc, "industry": r["industry"],
+                    "invoices": 0, "sum_score": 0, "max_score": 0,
+                    "flags": set(), "descriptions": [],
+                }
+            g = tax_groups[tc]
+            g["invoices"] += 1
+            g["sum_score"] += r["risk_score"]
+            g["max_score"] = max(g["max_score"], r["risk_score"])
+            g["flags"].update(r["flags"])
+            if len(g["descriptions"]) < 5:
+                g["descriptions"].append(r["description"])
+
+        by_tax_code = []
+        for tc, g in tax_groups.items():
+            avg = round(g["sum_score"] / max(1, g["invoices"]), 2)
+            lvl = "critical" if avg >= 0.8 else "high" if avg >= 0.6 else "medium" if avg >= 0.3 else "low"
+            by_tax_code.append({
+                "tax_code": g["tax_code"],
+                "industry": g["industry"],
+                "invoices": g["invoices"],
+                "avg_score": avg,
+                "max_score": g["max_score"],
+                "risk_level": lvl,
+                "flags": list(g["flags"]),
+                "descriptions": g["descriptions"],
+            })
+        by_tax_code.sort(key=lambda x: x["avg_score"], reverse=True)
+
+        # 4. Top keywords
+        top_keywords = [{"keyword": k, "count": c} for k, c in keyword_counter.most_common(15)]
+
+        # 5. Fraud type by industry (for stacked bar)
+        fraud_by_industry: dict = {}
+        for r in all_results:
+            ind = r["industry"]
+            if ind not in fraud_by_industry:
+                fraud_by_industry[ind] = {"keyword_match": 0, "industry_mismatch": 0, "clean": 0}
+            if "keyword_match" in r["flags"]:
+                fraud_by_industry[ind]["keyword_match"] += 1
+            if "industry_mismatch" in r["flags"]:
+                fraud_by_industry[ind]["industry_mismatch"] += 1
+            if not r["flags"]:
+                fraud_by_industry[ind]["clean"] += 1
+        fraud_type_by_industry = [
+            {"industry": k, **v} for k, v in fraud_by_industry.items()
+        ]
+
+        # 6. Heatmap: industry x risk_level
+        heatmap_data = []
+        ind_list = list(industry_risk.keys())
+        lvl_list = ["low", "medium", "high", "critical"]
+        ind_lvl_count: dict = {}
+        for r in all_results:
+            key = (r["industry"], r["risk_level"])
+            ind_lvl_count[key] = ind_lvl_count.get(key, 0) + 1
+        for i, ind in enumerate(ind_list):
+            for j, lvl in enumerate(lvl_list):
+                heatmap_data.append([i, j, ind_lvl_count.get((ind, lvl), 0)])
+
+        avg_score = sum(r['risk_score'] for r in all_results) / max(1, len(all_results))
+
+        return {
+            "total_records": total_records,
+            "total_analyzed": total_records,
+            "total_flagged": level_counts["medium"] + level_counts["high"] + level_counts["critical"],
+            "avg_risk_score": round(avg_score, 2),
+            "summary": {
+                "by_risk_level": level_counts,
+                "by_industry": industry_summary[:15],
+                "score_distribution": score_distribution,
+                "top_keywords": top_keywords,
+                "fraud_type_counts": fraud_type_counter,
+                "fraud_type_by_industry": fraud_type_by_industry,
+                "heatmap": {
+                    "industries": ind_list,
+                    "levels": lvl_list,
+                    "data": heatmap_data,
+                },
+            },
+            "by_tax_code": by_tax_code,
+            "top_risks": all_results[:500],
+            "all_results": all_results,
+        }
+    except Exception as exc:
+        logger.exception("Batch NLP error")
+        return {"error": str(exc)}
 
 @router.get("/redflag/stats")
 def redflag_stats():

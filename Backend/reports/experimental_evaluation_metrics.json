@@ -1,0 +1,445 @@
+{
+  "generated_at": "2026-05-11T02:01:59Z",
+  "seed": 42,
+  "source_generators": [
+    "Backend/data/generate_mock_data.py",
+    "Backend/app/scripts/generate_graph_mock_data.py",
+    "Backend/app/scripts/generate_ops_models_data.py",
+    "Backend/scripts/generate_nlp_data.py",
+    "Backend/ml_engine/tax_agent_citizen_legal.py"
+  ],
+  "scratch_dataset": "scratch\\experimental_evaluation\\tax_data_mock_120000_rows_seed42.csv",
+  "fraud": {
+    "dataset": {
+      "rows": 120000,
+      "companies": 40000,
+      "fraud_ratio": 0.048,
+      "feature_columns": [
+        "f1_divergence",
+        "f2_ratio_limit",
+        "f3_vat_structure",
+        "f4_peer_comparison",
+        "revenue_log",
+        "expense_log",
+        "profit_margin",
+        "revenue_growth_rate",
+        "expense_growth_rate",
+        "vat_net_ratio"
+      ],
+      "graph_feature_proxy": [
+        "vat_graph_out_pr_ratio",
+        "cycle_participation_score",
+        "invoice_count_growth_rate",
+        "avg_invoice_amount_std"
+      ]
+    },
+    "folds": 3,
+    "threshold": 0.3,
+    "models": {
+      "Logistic Regression (baseline)": {
+        "precision": {
+          "mean": 0.1096,
+          "std": 0.0004
+        },
+        "recall": {
+          "mean": 0.9368,
+          "std": 0.0051
+        },
+        "f1": {
+          "mean": 0.1963,
+          "std": 0.0007
+        },
+        "auc_roc": {
+          "mean": 0.8656,
+          "std": 0.0027
+        },
+        "average_precision": {
+          "mean": 0.4509,
+          "std": 0.0018
+        }
+      },
+      "Random Forest": {
+        "precision": {
+          "mean": 0.1477,
+          "std": 0.0008
+        },
+        "recall": {
+          "mean": 0.9186,
+          "std": 0.0051
+        },
+        "f1": {
+          "mean": 0.2544,
+          "std": 0.0013
+        },
+        "auc_roc": {
+          "mean": 0.9165,
+          "std": 0.0025
+        },
+        "average_precision": {
+          "mean": 0.5744,
+          "std": 0.008
+        }
+      },
+      "XGBoost/GBM (standalone)": {
+        "precision": {
+          "mean": 0.8348,
+          "std": 0.022
+        },
+        "recall": {
+          "mean": 0.4111,
+          "std": 0.0063
+        },
+        "f1": {
+          "mean": 0.5509,
+          "std": 0.009
+        },
+        "auc_roc": {
+          "mean": 0.9211,
+          "std": 0.0029
+        },
+        "average_precision": {
+          "mean": 0.5965,
+          "std": 0.0082
+        }
+      },
+      "Isolation Forest (standalone)": {
+        "precision": {
+          "mean": 0.1049,
+          "std": 0.0078
+        },
+        "recall": {
+          "mean": 0.5687,
+          "std": 0.0013
+        },
+        "f1": {
+          "mean": 0.177,
+          "std": 0.011
+        },
+        "auc_roc": {
+          "mean": 0.7184,
+          "std": 0.0032
+        },
+        "average_precision": {
+          "mean": 0.2927,
+          "std": 0.01
+        }
+      },
+      "XGBoost/GBM + Graph Features": {
+        "precision": {
+          "mean": 0.8403,
+          "std": 0.0265
+        },
+        "recall": {
+          "mean": 0.4076,
+          "std": 0.0034
+        },
+        "f1": {
+          "mean": 0.5488,
+          "std": 0.0069
+        },
+        "auc_roc": {
+          "mean": 0.9201,
+          "std": 0.003
+        },
+        "average_precision": {
+          "mean": 0.5941,
+          "std": 0.0082
+        }
+      },
+      "XGBoost/GBM + IF + Calibrator": {
+        "precision": {
+          "mean": 0.1531,
+          "std": 0.0043
+        },
+        "recall": {
+          "mean": 0.9069,
+          "std": 0.0139
+        },
+        "f1": {
+          "mean": 0.2619,
+          "std": 0.0058
+        },
+        "auc_roc": {
+          "mean": 0.9188,
+          "std": 0.0014
+        },
+        "average_precision": {
+          "mean": 0.5941,
+          "std": 0.0066
+        }
+      },
+      "Hybrid (GBM+IF+Graph)": {
+        "precision": {
+          "mean": 0.1508,
+          "std": 0.0048
+        },
+        "recall": {
+          "mean": 0.9052,
+          "std": 0.0162
+        },
+        "f1": {
+          "mean": 0.2584,
+          "std": 0.0066
+        },
+        "auc_roc": {
+          "mean": 0.9179,
+          "std": 0.002
+        },
+        "average_precision": {
+          "mean": 0.5909,
+          "std": 0.0077
+        }
+      }
+    },
+    "best_model": "XGBoost/GBM (standalone)"
+  },
+  "delinquency": {
+    "dataset": {
+      "rows": 120000,
+      "positive_rate": 0.2637,
+      "feature_columns": [
+        "payment_delay_mean",
+        "missed_payments",
+        "partial_ratio",
+        "debt_to_revenue",
+        "revenue_growth",
+        "liquidity",
+        "prior_enforcement",
+        "seasonal_pressure"
+      ]
+    },
+    "folds": 3,
+    "threshold": 0.3,
+    "models": {
+      "Statistical Baseline (Z-score)": {
+        "precision": {
+          "mean": 0.4738,
+          "std": 0.0154
+        },
+        "recall": {
+          "mean": 0.4022,
+          "std": 0.0344
+        },
+        "f1": {
+          "mean": 0.4336,
+          "std": 0.0131
+        },
+        "auc_roc": {
+          "mean": 0.6959,
+          "std": 0.0033
+        },
+        "rmse_days": {
+          "mean": 12.5374,
+          "std": 0.0638
+        }
+      },
+      "Logistic Regression": {
+        "precision": {
+          "mean": 0.3174,
+          "std": 0.0006
+        },
+        "recall": {
+          "mean": 0.9131,
+          "std": 0.0036
+        },
+        "f1": {
+          "mean": 0.4711,
+          "std": 0.0008
+        },
+        "auc_roc": {
+          "mean": 0.7346,
+          "std": 0.0033
+        },
+        "rmse_days": {
+          "mean": 31.3756,
+          "std": 0.0754
+        }
+      },
+      "Random Forest": {
+        "precision": {
+          "mean": 0.3101,
+          "std": 0.001
+        },
+        "recall": {
+          "mean": 0.926,
+          "std": 0.0051
+        },
+        "f1": {
+          "mean": 0.4646,
+          "std": 0.0008
+        },
+        "auc_roc": {
+          "mean": 0.7284,
+          "std": 0.0039
+        },
+        "rmse_days": {
+          "mean": 29.0422,
+          "std": 0.0195
+        }
+      },
+      "LightGBM-compatible GBDT (delinquency-temporal-v1)": {
+        "precision": {
+          "mean": 0.4631,
+          "std": 0.0033
+        },
+        "recall": {
+          "mean": 0.5616,
+          "std": 0.0069
+        },
+        "f1": {
+          "mean": 0.5076,
+          "std": 0.0048
+        },
+        "auc_roc": {
+          "mean": 0.731,
+          "std": 0.0035
+        },
+        "rmse_days": {
+          "mean": 14.795,
+          "std": 0.049
+        }
+      },
+      "Temporal sequence model (Transformer proxy)": {
+        "precision": {
+          "mean": 0.4655,
+          "std": 0.0045
+        },
+        "recall": {
+          "mean": 0.5595,
+          "std": 0.0078
+        },
+        "f1": {
+          "mean": 0.5082,
+          "std": 0.0055
+        },
+        "auc_roc": {
+          "mean": 0.7304,
+          "std": 0.0035
+        },
+        "rmse_days": {
+          "mean": 14.5313,
+          "std": 0.0988
+        }
+      }
+    },
+    "note": "Temporal Transformer full PyTorch retrain is intentionally separate; this run uses a fast temporal proxy for 100k+ scale."
+  },
+  "agent": {
+    "dataset": {
+      "cases": 300,
+      "snippet_topics": 30,
+      "source": "Backend/ml_engine/tax_agent_citizen_legal.py"
+    },
+    "metrics": {
+      "legal_route_accuracy": 0.9967,
+      "faq_grounding_rate": 0.6967,
+      "actionable_steps_rate": 1.0,
+      "citation_or_reference_rate": 1.0,
+      "mean_confidence": 0.571,
+      "mean_latency_ms": 14.924
+    },
+    "records_sample": [
+      {
+        "query": "Em hỏi về dong thua, cần làm gì cho đúng?",
+        "expected_key": "tncn_salary_dependent_refund",
+        "route_legal": true,
+        "grounded": true,
+        "has_steps": true,
+        "has_reference": true,
+        "confidence": 0.5467
+      },
+      {
+        "query": "Cho tôi hỏi con nho thì có phải nộp thuế hoặc bị phạt không?",
+        "expected_key": "tncn_salary_dependent_refund",
+        "route_legal": true,
+        "grounded": true,
+        "has_steps": true,
+        "has_reference": true,
+        "confidence": 0.581
+      },
+      {
+        "query": "Trường hợp luong, hướng dẫn từng bước giúp tôi.",
+        "expected_key": "tncn_salary_dependent_refund",
+        "route_legal": true,
+        "grounded": true,
+        "has_steps": true,
+        "has_reference": true,
+        "confidence": 0.5556
+      },
+      {
+        "query": "luong theo quy định thuế xử lý ra sao?",
+        "expected_key": "tncn_salary_dependent_refund",
+        "route_legal": true,
+        "grounded": false,
+        "has_steps": true,
+        "has_reference": true,
+        "confidence": 0.5889
+      },
+      {
+        "query": "Tôi muốn biết về luong, có quy định nào hướng dẫn không?",
+        "expected_key": "tncn_salary_dependent_refund",
+        "route_legal": true,
+        "grounded": true,
+        "has_steps": true,
+        "has_reference": true,
+        "confidence": 0.5333
+      },
+      {
+        "query": "Xin hỏi con nho thì tôi phải nộp những gì?",
+        "expected_key": "tncn_salary_dependent_refund",
+        "route_legal": true,
+        "grounded": true,
+        "has_steps": true,
+        "has_reference": true,
+        "confidence": 0.5307
+      },
+      {
+        "query": "Doanh nghiệp tôi gặp vấn đề tncn, xử lý thế nào?",
+        "expected_key": "tncn_salary_dependent_refund",
+        "route_legal": true,
+        "grounded": true,
+        "has_steps": true,
+        "has_reference": true,
+        "confidence": 0.5448
+      },
+      {
+        "query": "Hướng dẫn khau tru cho người mới bắt đầu.",
+        "expected_key": "tncn_salary_dependent_refund",
+        "route_legal": true,
+        "grounded": true,
+        "has_steps": true,
+        "has_reference": true,
+        "confidence": 0.5822
+      }
+    ]
+  },
+  "system_performance": {
+    "fraud_scoring_5000_rows_ms": {
+      "p50": 4.417,
+      "p95": 6.415,
+      "p99": 6.99
+    },
+    "batch_scoring_all_rows_ms": {
+      "rows": 120000,
+      "p50": 98.866,
+      "p95": 110.016,
+      "p99": 111.008
+    },
+    "graph_scc_5000_nodes_50000_edges_ms": {
+      "p50": 32.341,
+      "p95": 34.351,
+      "p99": 34.53
+    },
+    "agent_legal_template_ms": {
+      "p50": 13.779,
+      "p95": 18.602,
+      "p99": 22.735
+    }
+  },
+  "elapsed_seconds": 70.492,
+  "limitations": [
+    "Fraud graph features are a controlled proxy aligned to the VAT graph generator, not a full GAT retrain.",
+    "Temporal Transformer full PyTorch retrain is kept as a separate long-running job; this script reports a fast sequence proxy at 100k+ scale.",
+    "OCR accuracy is not re-measured here because image/OCR benchmarking requires engine binaries and image corpus setup."
+  ]
+}

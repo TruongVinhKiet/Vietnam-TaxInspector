@@ -112,7 +112,7 @@ def test_graph_endpoint_returns_enriched_model_contract(client, monkeypatch):
     assert response.status_code == 200
 
     payload = response.json()
-    assert payload["contract_version"] == "graph-intelligence-v1"
+    assert str(payload["contract_version"]).startswith("graph-intelligence-v2")
     assert payload["model_info"]["model_loaded"] is True
     assert payload["model_info"]["inference_mode"] == "gnn_ensemble"
     assert payload["decision_thresholds"]["node"] == pytest.approx(0.5)
@@ -467,3 +467,39 @@ def test_ownership_reports_scope_gap_status(client, monkeypatch):
     assert payload["coverage"]["ownership_pairs_in_invoice_scope"] == 0
     assert payload["query_scope"]["source"] == "graph_ownership"
     assert payload["snapshot_id"].startswith("snap-")
+
+
+def test_graph_batch_upload_accepts_excel_via_normalization(client, monkeypatch):
+    monkeypatch.setattr(
+        graph,
+        "normalize_agent_upload_bytes",
+        lambda content, filename: (
+            b"seller_tax_code,buyer_tax_code,invoice_date,vat_amount,invoice_number,amount\n0101,0102,2025-01-01,100,INV-1,1000\n",
+            "converted.csv",
+            filename,
+        ),
+    )
+    monkeypatch.setattr(
+        graph,
+        "analyze_vat_csv_upload",
+        lambda db, content, filename, content_type=None, source="graph_batch_upload", persist=True, analysis_depth="standard": {
+            "batch_id": 7,
+            "upload_id": 11,
+            "status": "done",
+            "detected_schema": {"detected_schema": "vat_graph_csv"},
+            "row_count": 1,
+            "processed_rows": 1,
+            "warnings": [],
+            "summary": {"suspect_value": 1000},
+        },
+    )
+
+    response = client.post(
+        "/api/graph/batch-upload",
+        data={"persist": "true", "analysis_depth": "standard"},
+        files={"file": ("vat.xlsx", b"dummy", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")},
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "done"
+    assert payload["filename"] == "vat.xlsx"

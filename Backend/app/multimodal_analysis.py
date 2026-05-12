@@ -13,6 +13,7 @@ from datetime import date, datetime
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
+from collections.abc import Callable
 
 import pandas as pd
 from sqlalchemy.orm import Session
@@ -24,6 +25,7 @@ UPLOAD_ROOT = Path(__file__).resolve().parents[1] / "data" / "uploads" / "multim
 TAX_CODE_RE = re.compile(r"^\d{10}$")
 ALLOWED_DOCUMENT_EXTENSIONS = {".png", ".jpg", ".jpeg", ".pdf"}
 ALLOWED_CSV_EXTENSIONS = {".csv"}
+ALLOWED_SPREADSHEET_EXTENSIONS = {".xlsx", ".xls"}
 
 RISK_REQUIRED_COLUMNS = {
     "tax_code",
@@ -40,6 +42,13 @@ VAT_REQUIRED_COLUMNS = {
     "amount",
     "vat_rate",
     "date",
+}
+VAT_HEADER_ALIASES: dict[str, set[str]] = {
+    "seller_tax_code": {"seller_tax_code", "seller_mst", "seller_taxid"},
+    "buyer_tax_code": {"buyer_tax_code", "buyer_mst", "buyer_taxid"},
+    "amount": {"amount", "total_amount", "invoice_amount", "value_before_vat", "subtotal"},
+    "vat_rate": {"vat_rate", "vat_percent", "tax_rate"},
+    "date": {"date", "invoice_date", "issued_date", "transaction_date"},
 }
 VAT_OPTIONAL_COLUMNS = {
     "invoice_number",
@@ -167,9 +176,17 @@ def detect_csv_schema(content: bytes) -> dict[str, Any]:
     headers = _csv_headers(content)
     normalized = {h.strip().lower() for h in headers}
     risk_missing = sorted(RISK_REQUIRED_COLUMNS - normalized)
-    vat_missing = sorted(VAT_REQUIRED_COLUMNS - normalized)
+    vat_presence = {
+        col: bool(VAT_HEADER_ALIASES.get(col, {col}) & normalized)
+        for col in VAT_REQUIRED_COLUMNS
+    }
+    vat_missing = sorted([col for col, ok in vat_presence.items() if not ok])
     detected = "unknown_csv"
-    if not vat_missing:
+    # Accept practical VAT exports: seller+buyer plus at least one value/time marker.
+    vat_marker_count = int(vat_presence["amount"]) + int(vat_presence["vat_rate"]) + int(vat_presence["date"])
+    if vat_presence["seller_tax_code"] and vat_presence["buyer_tax_code"] and vat_marker_count >= 1:
+        detected = "vat_graph_csv"
+    elif not vat_missing:
         detected = "vat_graph_csv"
     elif not risk_missing:
         detected = "risk_scoring_csv"
@@ -182,11 +199,63 @@ def detect_csv_schema(content: bytes) -> dict[str, Any]:
     }
 
 
+def normalize_agent_upload_bytes(content: bytes, filename: str) -> tuple[bytes, str, str]:
+    """
+    Returns (normalized_bytes, effective_filename_for_pipelines, original_filename).
+    Spreadsheets are converted to CSV bytes (first worksheet).
+    """
+    original = Path(filename or "upload.bin").name
+    ext = Path(original).suffix.lower()
+    if ext in ALLOWED_SPREADSHEET_EXTENSIONS:
+        csv_bytes, csv_name = spreadsheet_bytes_to_csv_bytes(content, filename)
+        return csv_bytes, csv_name, original
+    return content, original, original
+
+
+def spreadsheet_bytes_to_csv_bytes(content: bytes, filename: str) -> tuple[bytes, str]:
+    """
+    Convert the first worksheet of .xlsx / .xls to UTF-8 CSV bytes compatible with CSV pipelines.
+    Returns (csv_bytes, effective_filename_csv).
+    """
+    ext = Path(filename or "").suffix.lower()
+    if ext not in ALLOWED_SPREADSHEET_EXTENSIONS:
+        raise ValueError(f"spreadsheet_bytes_to_csv_bytes: expected .xlsx or .xls, got {ext!r}")
+
+    bio = io.BytesIO(content)
+    eng = "openpyxl" if ext == ".xlsx" else "xlrd"
+
+    try:
+        frame = pd.read_excel(bio, sheet_name=0, engine=eng)
+    except Exception as exc:
+        raise ValueError(
+            f"Không đọc được Excel ({ext}). Cài openpyxl (xlsx) / xlrd (xls). Chi tiết: {exc}"
+        ) from exc
+
+    frame.columns = [str(c).strip().lower() for c in frame.columns]
+    for tc_col in ("tax_code", "seller_tax_code", "buyer_tax_code"):
+        if tc_col in frame.columns:
+            s = frame[tc_col].astype(str).str.strip()
+            s = s.str.replace(r"\.0+$", "", regex=True)
+            frame[tc_col] = s
+
+    out = io.BytesIO()
+    frame.to_csv(out, index=False, encoding="utf-8-sig")
+    stem = Path(filename).stem or "upload"
+    return out.getvalue(), f"{stem}.csv"
+
+
 def _normalize_tax_code(value: Any) -> str:
     raw = str(value or "").strip()
     raw = re.sub(r"^(\d+)\.0+$", r"\1", raw)
     raw = re.sub(r"\D+", "", raw)
     return raw
+
+
+def _row_get(row: dict[str, Any], *keys: str) -> Any:
+    for key in keys:
+        if key in row and row.get(key) not in (None, ""):
+            return row.get(key)
+    return None
 
 
 def _parse_float(value: Any, default: float = 0.0) -> float:
@@ -289,6 +358,7 @@ def analyze_risk_csv_inline(db: Session, *, content: bytes, filename: str) -> di
 
     try:
         frame = pd.read_csv(io.BytesIO(content), dtype={"tax_code": "string"}, low_memory=False)
+        original_rows = len(frame)
         pipeline = _get_fraud_pipeline()
         result = pipeline.predict_batch(frame)
         assessments = sorted(result.get("assessments", []), key=lambda row: float(row.get("risk_score") or 0.0), reverse=True)
@@ -306,6 +376,9 @@ def analyze_risk_csv_inline(db: Session, *, content: bytes, filename: str) -> di
             "top_5": _jsonable(assessments[:5]),
             "assessments": _jsonable(assessments[:50]),
             "statistics": _jsonable(result.get("statistics") or {}),
+            "warnings": [],
+            "input_rows": original_rows,
+            "processed_rows": len(frame),
             "latency_ms": round((time.perf_counter() - t0) * 1000.0, 1),
         }
     except Exception as exc:
@@ -376,6 +449,7 @@ def analyze_vat_csv_upload(
     source: str = "vat_graph_csv",
     persist: bool = True,
     analysis_depth: str = "standard",
+    progress_callback: Callable[[int, int, str], None] | None = None,
 ) -> dict[str, Any]:
     t0 = time.perf_counter()
     schema = detect_csv_schema(content)
@@ -410,16 +484,18 @@ def analyze_vat_csv_upload(
         rows = _read_csv_rows(content)
         batch.total_rows = len(rows)
         db.commit()
+        if progress_callback:
+            progress_callback(0, len(rows), "schema_detect")
 
         if not rows:
             raise ValueError("CSV is empty.")
 
         for idx, row in enumerate(rows, start=1):
-            seller_tc = _normalize_tax_code(row.get("seller_tax_code"))
-            buyer_tc = _normalize_tax_code(row.get("buyer_tax_code"))
-            invoice_date = _parse_date(row.get("date"))
-            amount = _parse_float(row.get("amount"))
-            vat_rate = _parse_float(row.get("vat_rate"), 10.0)
+            seller_tc = _normalize_tax_code(_row_get(row, "seller_tax_code", "seller_mst", "seller_taxid"))
+            buyer_tc = _normalize_tax_code(_row_get(row, "buyer_tax_code", "buyer_mst", "buyer_taxid"))
+            invoice_date = _parse_date(_row_get(row, "date", "invoice_date", "issued_date", "transaction_date"))
+            amount = _parse_float(_row_get(row, "amount", "total_amount", "invoice_amount", "value_before_vat", "subtotal", "vat_amount"))
+            vat_rate = _parse_float(_row_get(row, "vat_rate", "vat_percent", "tax_rate"), 10.0)
             if not TAX_CODE_RE.fullmatch(seller_tc) or not TAX_CODE_RE.fullmatch(buyer_tc):
                 warnings.append(f"row {idx}: invalid seller/buyer tax code")
                 continue
@@ -510,6 +586,8 @@ def analyze_vat_csv_upload(
                 "goods_category": str(row.get("goods_category") or "").strip(),
                 "is_adjustment": _parse_bool(row.get("is_adjustment")),
             })
+            if progress_callback and (idx % 250 == 0 or idx == len(rows)):
+                progress_callback(idx, len(rows), "parse_rows")
 
         if not processed_invoices:
             raise ValueError("No valid VAT invoice rows were found.")
@@ -528,14 +606,16 @@ def analyze_vat_csv_upload(
         }
         scorer = _get_invoice_risk_scorer()
         top_invoice_risks: list[dict[str, Any]] = []
+        seller_day_counts: dict[tuple[str, str], int] = {}
+        total_invoices = len(processed_invoices)
+        for score_idx, inv in enumerate(processed_invoices, start=1):
+            key = (str(inv.get("seller_tax_code") or ""), str(inv.get("date") or ""))
+            seller_day_counts[key] = seller_day_counts.get(key, 0) + 1
         for inv in processed_invoices:
             edge = edge_map.get(inv["invoice_number"], {})
             edge_score = round(float(edge.get("circular_probability") or 0.0) * 100.0, 2)
             risk_result = scorer.score(inv, {
-                "same_day_pair_count": sum(
-                    1 for other in processed_invoices
-                    if other["seller_tax_code"] == inv["seller_tax_code"] and other["date"] == inv["date"]
-                ),
+                "same_day_pair_count": seller_day_counts.get((inv["seller_tax_code"], inv["date"]), 0),
                 "linked_invoice_ids": [inv["invoice_number"]],
             })
             combined_score = max(edge_score, float(risk_result.risk_score or 0.0))
@@ -576,6 +656,8 @@ def analyze_vat_csv_upload(
                 "risk_level": level,
                 "reason_codes": risk_result.reason_codes,
             })
+            if progress_callback and (score_idx % 250 == 0 or score_idx == total_invoices):
+                progress_callback(score_idx, total_invoices, "score_invoices")
 
         top_invoice_risks.sort(key=lambda row: float(row.get("edge_risk_score") or 0.0), reverse=True)
         graph_result["top_invoice_risks"] = top_invoice_risks[:20]
@@ -793,6 +875,52 @@ def analyze_invoice_document_upload(
         raise
 
 
+def detect_attachment_for_agent(
+    *,
+    content: bytes,
+    filename: str,
+    content_type: str | None = None,
+    original_filename: str | None = None,
+) -> dict[str, Any]:
+    """Lightweight schema/domain detection used before expensive model execution."""
+    ext = Path(filename or "").suffix.lower()
+    disp = Path(original_filename or filename or "").name
+    spreadsheet = Path(disp).suffix.lower() in ALLOWED_SPREADSHEET_EXTENSIONS
+
+    if ext in ALLOWED_CSV_EXTENSIONS:
+        schema = detect_csv_schema(content)
+        detected = schema.get("detected_schema", "unknown_csv")
+        requested_domain = "fraud" if detected == "risk_scoring_csv" else "vat" if detected == "vat_graph_csv" else "unknown"
+        analysis_type = "risk_csv" if detected == "risk_scoring_csv" else detected
+        return {
+            "status": "detected",
+            "analysis_type": analysis_type,
+            "detected_schema": schema,
+            "filename": disp,
+            "effective_csv_filename": filename if spreadsheet else None,
+            "content_type": content_type,
+            "requested_domain": requested_domain,
+            "original_format": "spreadsheet" if spreadsheet else "csv",
+        }
+    if ext in ALLOWED_DOCUMENT_EXTENSIONS:
+        return {
+            "status": "detected",
+            "analysis_type": "ocr_invoice",
+            "detected_schema": "document",
+            "filename": filename,
+            "content_type": content_type,
+            "requested_domain": "vat",
+        }
+    return {
+        "status": "unsupported",
+        "analysis_type": "unsupported",
+        "detected_schema": "unsupported",
+        "filename": filename,
+        "content_type": content_type,
+        "requested_domain": "unknown",
+    }
+
+
 def analyze_attachment_for_agent(
     db: Session,
     *,
@@ -801,31 +929,48 @@ def analyze_attachment_for_agent(
     content_type: str | None,
     model_mode: str,
 ) -> dict[str, Any]:
-    ext = Path(filename or "").suffix.lower()
+    content, wf, original_filename = normalize_agent_upload_bytes(content, filename)
+    ext = Path(wf).suffix.lower()
+    filename = wf
+
     if ext in ALLOWED_CSV_EXTENSIONS:
         schema = detect_csv_schema(content)
-        mode = str(model_mode or "").lower()
         if schema["detected_schema"] == "vat_graph_csv":
-            return analyze_vat_csv_upload(
+            vat_payload = analyze_vat_csv_upload(
                 db,
                 content=content,
                 filename=filename,
                 content_type=content_type,
                 source="agent_attachment",
-                persist=True,
+                persist=False,
             )
+            if isinstance(vat_payload, dict):
+                vat_payload["filename"] = original_filename
+                vat_payload["effective_csv_filename"] = filename if filename != original_filename else None
+                vat_payload["original_format"] = (
+                    "spreadsheet"
+                    if Path(original_filename or "").suffix.lower()
+                    in ALLOWED_SPREADSHEET_EXTENSIONS
+                    else "csv"
+                )
+            return vat_payload
         if schema["detected_schema"] == "risk_scoring_csv":
-            return analyze_risk_csv_inline(db, content=content, filename=filename)
-        if mode == "vat":
-            return analyze_vat_csv_upload(
-                db,
-                content=content,
-                filename=filename,
-                content_type=content_type,
-                source="agent_attachment",
-                persist=True,
+            payload = analyze_risk_csv_inline(db, content=content, filename=filename)
+            payload["filename"] = original_filename
+            payload["effective_csv_filename"] = filename
+            payload["original_format"] = (
+                "spreadsheet" if Path(original_filename or "").suffix.lower()
+                in ALLOWED_SPREADSHEET_EXTENSIONS else "csv"
             )
-        return analyze_risk_csv_inline(db, content=content, filename=filename)
+            return payload
+        return {
+            "status": "error",
+            "analysis_type": "unknown_csv",
+            "filename": filename,
+            "detected_schema": schema,
+            "requested_domain": "unknown",
+            "error": "CSV schema is not recognized as risk scoring or VAT graph input.",
+        }
     if ext in ALLOWED_DOCUMENT_EXTENSIONS:
         return analyze_invoice_document_upload(
             db,
@@ -834,4 +979,4 @@ def analyze_attachment_for_agent(
             content_type=content_type,
             source="agent_attachment",
         )
-    raise ValueError("Unsupported attachment type. Use CSV, PNG, JPG, JPEG, or PDF.")
+    raise ValueError("Unsupported attachment type. Use CSV, Excel (.xlsx/.xls), PNG, JPG, JPEG, or PDF.")

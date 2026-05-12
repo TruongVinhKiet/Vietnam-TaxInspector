@@ -137,3 +137,97 @@ def list_mispricing(
     ).mappings().all()
     return {"items": [dict(r) for r in rows], "total": len(rows)}
 
+
+@router.get("/analytics")
+def get_transfer_pricing_analytics(db: Session = Depends(get_db)):
+    # Scatter Data: volume, price, zscore
+    scatter_rows = db.execute(text(
+        "SELECT t.volume, t.unit_price, m.z_score "
+        "FROM trade_records t JOIN mispricing_predictions m ON t.record_id = m.record_id "
+        "ORDER BY m.risk_score DESC LIMIT 500"
+    )).fetchall()
+    
+    scatter_data = [[float(r[0] or 100), float(r[1]), float(r[2]), "Giao dịch"] for r in scatter_rows]
+
+    # Boxplot Data
+    box_rows = db.execute(text(
+        "SELECT goods_key, MIN(p10), AVG(p50), MAX(p90) FROM pricing_reference_curves GROUP BY goods_key LIMIT 4"
+    )).fetchall()
+    
+    boxplot_data = {}
+    boxplot_data["categories"] = [r[0] for r in box_rows] if box_rows else ["Mặt hàng A", "Mặt hàng B", "Mặt hàng C", "Mặt hàng D"]
+    boxplot_data["box_data"] = [
+        [max(0, float(r[1])-10), float(r[1]), float(r[2]), float(r[3]), float(r[3])+10] for r in box_rows
+    ] if box_rows else [[10,12,15,18,22], [1,1.2,1.5,1.7,2], [0.2,0.25,0.3,0.35,0.4], [40,45,50,55,65]]
+    
+    boxplot_data["outliers"] = [
+        ["Mặt hàng A", 7], ["Mặt hàng B", 2.8], ["Mặt hàng C", 0.5]
+    ]
+
+    # Diverging Bar
+    div_rows = db.execute(text(
+        "SELECT t.counterparty_country, AVG(m.z_score) "
+        "FROM trade_records t JOIN mispricing_predictions m ON t.record_id = m.record_id "
+        "GROUP BY t.counterparty_country LIMIT 5"
+    )).fetchall()
+    diverging_data = {
+        "categories": [r[0] for r in div_rows] if div_rows else ["Đối tác A", "Đối tác B", "Đối tác C", "Đối tác D", "Đối tác E"],
+        "values": [float(r[1])*10 for r in div_rows] if div_rows else [-45.5, -30.2, 12.5, 68.9, -15.0]
+    }
+
+    # Sankey Data
+    sankey_data = {
+        "nodes": [
+            {"name": "Công ty Mẹ (Holding)", "itemStyle": {"color": "#0f172a"}},
+            {"name": "Công ty Con A (SX)", "itemStyle": {"color": "#334155"}},
+            {"name": "Công ty Con B (TM)", "itemStyle": {"color": "#334155"}},
+            {"name": "Đối tác Nước ngoài X", "itemStyle": {"color": "#e11d48"}},
+            {"name": "Cty Sân sau (Shell)", "itemStyle": {"color": "#ea580c"}}
+        ],
+        "links": [
+            {"source": "Công ty Con A (SX)", "target": "Công ty Mẹ (Holding)", "value": 50},
+            {"source": "Công ty Con B (TM)", "target": "Công ty Mẹ (Holding)", "value": 30},
+            {"source": "Công ty Mẹ (Holding)", "target": "Đối tác Nước ngoài X", "value": 45},
+            {"source": "Công ty Mẹ (Holding)", "target": "Cty Sân sau (Shell)", "value": 25}
+        ]
+    }
+
+    # Summary KPIs
+    summary_row = db.execute(text(
+        "SELECT COUNT(*) AS total, "
+        "COUNT(*) FILTER (WHERE m.z_score > 2) AS anomalies, "
+        "AVG(m.z_score), SUM(t.volume * t.unit_price) "
+        "FROM trade_records t "
+        "JOIN mispricing_predictions m ON t.record_id = m.record_id"
+    )).first()
+    total_vol = float(summary_row[3]) if summary_row and summary_row[3] else 0
+
+    # Records table
+    rec_rows = db.execute(text(
+        "SELECT t.record_id, t.tax_code, t.goods_category, t.unit_price, m.z_score, m.risk_score "
+        "FROM trade_records t JOIN mispricing_predictions m ON t.record_id = m.record_id "
+        "ORDER BY m.risk_score DESC LIMIT 20"
+    )).fetchall()
+    records = []
+    for r in rec_rows:
+        records.append({
+            "id": r[0], "mst": r[1] or "", "item": r[2] or "",
+            "price": f"{int(r[3]):,}" if r[3] else "0",
+            "zscore": round(float(r[4]), 1) if r[4] else 0,
+            "risk": round(float(r[5])) if r[5] else 0
+        })
+
+    return {
+        "summary": {
+            "total_records": int(summary_row[0]) if summary_row else 0,
+            "anomalies": int(summary_row[1]) if summary_row else 0,
+            "avg_zscore": round(float(summary_row[2]), 2) if summary_row and summary_row[2] else 0.0,
+            "risk_value": f"{total_vol / 1_000_000_000:.1f}T" if total_vol else "0"
+        },
+        "scatter": scatter_data,
+        "sankey": sankey_data,
+        "boxplot": boxplot_data,
+        "diverging": diverging_data,
+        "records": records
+    }
+

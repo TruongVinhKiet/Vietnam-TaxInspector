@@ -372,18 +372,63 @@ TaxInspector sử dụng kiến trúc **6-Container Microservices** để đảm
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
-### 12.2. Mô Tả Từng Container
+### 12.2. Model Inventory & Serving Matrix
+
+Nguồn chuẩn kỹ thuật của danh mục model nằm tại `Backend/ml_engine/model_inventory.py`; endpoint vận hành tương ứng là `GET /api/tax-agent/infrastructure/model-serving`. README chỉ tóm tắt các model chính để tránh thiếu model khi hệ thống mở rộng.
+
+| model_key | Nhóm | Artifact chính | Training / cập nhật | Serving / tool | Fallback |
+|---|---|---|---|---|---|
+| `fraud-hybrid-v2` | Fraud | `xgboost_model.joblib`, `isolation_forest.joblib`, `fraud_calibrator.joblib`, `fraud_model_manifest.json` | `Backend/ml_engine/train_model.py` | `/api/ai/*`, `company_risk_lookup`, `top_n_risky_companies` | `fraud-hybrid-legacy`, rules |
+| `delinquency-temporal-v1` | Delinquency | `delinquency_lgbm.joblib`, `delinquency_config.json` | `Backend/ml_engine/train_delinquency.py` | `/api/delinquency/*`, `delinquency_check` | statistical baseline |
+| `temporal-transformer-v1` | Delinquency DL | `temporal_transformer.pt`, `temporal_transformer_config.json` | `Backend/ml_engine/train_temporal_transformer.py` | `/predict/transformer`, `temporal_delinquency_deep` | tabular delinquency |
+| `vae-anomaly-v1` | Fraud DL | `vae_anomaly.pt`, `vae_anomaly_config.json`, `vae_anomaly_scaler.json` | `Backend/ml_engine/train_vae_anomaly.py` | `/predict/vae`, `vae_anomaly_scan` | rule anomaly score |
+| `gnn-gat-v1` | Graph/Fraud | `gat_model.pt`, `gat_config.json` | `Backend/app/scripts/train_gnn.py` | `/predict/gnn`, `/api/graph/*`, `gnn_analysis`, `motif_detection` | NetworkX heuristics |
+| `hetero-gnn-hgt-v1` | Graph/OSINT | `hgt_model.pt`, `hgt_config.json` | `Backend/ml_engine/train_hetero_gnn.py`, `train_osint_heterograph.py` | `/predict/hetero-gnn`, `hetero_gnn_risk`, `ownership_analysis` | OSINT tabular/rules |
+| `vat-refund-v1` | VAT | `vat_refund_model.joblib`, `vat_refund_calibrator.joblib` | `Backend/ml_engine/train_vat_refund.py` | `/api/vat-refund/*`, `vat_refund_risk` | `vat-refund-heuristic` |
+| `audit-value-v1` | Audit | `audit_value_model.joblib`, `audit_value_calibrator.joblib` | `Backend/ml_engine/train_audit_value.py` | `/api/ai/*`, audit selection signals | `audit-value-heuristic` |
+| `invoice-risk-v1` | VAT/Fraud | `invoice_risk_model.joblib`, `invoice_risk_config.json` | `Backend/ml_engine/train_invoice_risk_model.py` | `/api/invoice/*`, `invoice_risk_scan` | `invoice-risk-heuristic-v1` |
+| `transfer-pricing-v1` | Transfer Pricing | `transfer_pricing_model.joblib`, `transfer_pricing_model_meta.json` | `Backend/ml_engine/train_transfer_pricing_model.py` | `/api/transfer-pricing/*` | z-score baseline |
+| `macro-simulation-v1` | Macro | `simulation_lgbm.joblib`, `simulation_config.json` | `Backend/ml_engine/train_simulation.py` | `/api/simulation/*`, `macro_forecast`, `revenue_forecast` | elasticity/ridge baseline |
+| `revenue-forecast-v1` | Forecasting | code-native model | `Backend/ml_engine/revenue_forecast_model.py` | `revenue_forecast` | seasonal/statistical |
+| `causal-uplift-v1` | Collections | `uplift_model_treated.joblib`, `uplift_model_control.joblib`, `uplift_propensity.joblib` | `Backend/ml_engine/train_ops_uplift_models.py` | `/api/collections/*`, `causal_uplift_recommend` | policy NBA rules |
+| `audit-selection-v1` | Audit/Ops | `audit_selection_learned_model.joblib` | `Backend/ml_engine/train_ops_uplift_models.py` | `/api/audit/*`, `/api/case-triage/*` | hybrid priority formula |
+| `osint-risk-v1` | OSINT | `osint_risk_model.joblib`, `osint_config.json` | `Backend/ml_engine/train_osint.py` | `/api/osint/*`, ownership tools | graph heuristics |
+| `nlp-red-flag-v1` | NLP | code-native detector | `Backend/ml_engine/nlp_red_flag_detector.py` | `/api/ml/redflag/*`, `nlp_red_flag_scan` | keyword/rule flags |
+| `entity-resolution-v1` | Entity Resolution | code-native Bi-Encoder/rules | `generate_entity_resolution_data.py` | `/api/ml/entity/*`, `entity_resolution_check` | name/tax-code similarity |
+| `ocr-document-v1` | OCR | `table_transformer/`, OCR engines | `download_table_models.py` | `/api/ml/ocr/*`, `ocr_document_process` | PaddleOCR -> EasyOCR -> Tesseract -> regex_only |
+| `tax-agent-intent-v1` | Tax Agent | `tax_agent_intent_model.joblib`, `tax_agent_intent_vectorizer.joblib` | `Backend/ml_engine/train_tax_agent_intent.py` | `/api/tax-agent/chat/v2` | rule/regex router |
+| `tax-agent-rag-v1` | RAG | `embeddings/`, `reranker/`, pgvector KB | `ingest_tax_knowledge.py` | `knowledge_search`, GraphRAG | BM25 + hash-TF retrieval |
+| `tax-agent-llm-v1` | Local LLM | `tax_llm_lora/` | `Backend/run_llm_training.py` | local synthesis adapter | template synthesis |
+| `dpo-rlhf-v1` | Governance | preference/eval data | `Backend/ml_engine/rlhf_dpo_trainer.py` | `/api/tax-agent/feedback`, DPO eval | feedback logging |
+
+#### 12.2.1. Reproducible Experimental Evaluation
+
+Số liệu trong báo cáo nghiên cứu được đo lại bằng pipeline tái lập:
+
+```bash
+python Backend/scripts/run_experimental_evaluation.py --rows 120000 --folds 3 --seed 42
+```
+
+Output chuẩn:
+
+- `Backend/reports/experimental_evaluation_metrics.json`
+- `Backend/reports/experimental_evaluation_metrics.md`
+- `scratch/experimental_evaluation/tax_data_mock_120000_rows_seed42.csv`
+
+Lưu ý vận hành: script này không ghi đè artifact production trong `Backend/data/models`. Các model deep/OCR như GAT, HeteroGNN, VAE, Temporal Transformer và PaddleOCR cần benchmark riêng trước khi đưa số liệu cuối cùng vào tài liệu công bố.
+
+### 12.3. Mô Tả Từng Container
 
 | Container | Image | Port | Chức năng | RAM Limit |
 |---|---|---|---|---|
 | `tax-postgres` | `pgvector/pgvector:pg17` | 5432 | CSDL chính + Vector Search | - |
 | `tax-redis` | `redis:7-alpine` | 6379 | Feature cache + Model metadata + Alert queue | 256MB |
 | `tax-kafka` | `bitnami/kafka:3.9` | 9092 | Event streaming (KRaft mode, không cần Zookeeper) | - |
-| `tax-model-server` | Custom (PyTorch CPU) | 8001 | DL inference: VAE, Transformer, GNN (Singleton cache) | **2GB** |
+| `tax-model-server` | Custom (PyTorch CPU) | 8001 | DL inference: VAE, Transformer, GNN, HeteroGNN (Singleton cache) | **2GB** |
 | `tax-api-server` | Custom (FastAPI) | 8000 | Multi-Agent Orchestrator, LLM, RAG, SSE, CRUD | **4GB** |
 | `tax-frontend` | `nginx:alpine` | 3000 | Static UI + Reverse proxy + SSE passthrough | - |
 
-### 12.3. Khởi Chạy 1-Click (One-Click Deployment)
+### 12.4. Khởi Chạy 1-Click (One-Click Deployment)
 
 ```bash
 # 1. Clone repository
@@ -406,7 +451,7 @@ docker-compose ps
 #    Model API: http://localhost:8001/docs (internal)
 ```
 
-### 12.4. Các Tính Năng Hạ Tầng Nổi Bật
+### 12.5. Các Tính Năng Hạ Tầng Nổi Bật
 
 **🧠 ModelServingGateway (Singleton Model Cache):**
 Thay vì 6 lần `torch.load()` mỗi request, hệ thống chỉ load model **1 lần duy nhất** và cache trong RAM. Khi cache đầy, cơ chế LRU (Least Recently Used) tự động giải phóng model ít dùng nhất. Metadata về hiệu năng (load time, access count) được đồng bộ qua Redis.
@@ -425,4 +470,3 @@ Mỗi tab browser tạo ra một `session_id` duy nhất (`sessionStorage`). D�
 **Nhà Kiến Trúc Phần Mềm & Phát Triển Cốt Lõi:** [TruongVinhKiet](https://github.com/TruongVinhKiet)
 
 *LƯU Ý BẢO MẬT: Đây là tài liệu kiến trúc phần mềm chuyên sâu của dự án Vietnam TaxInspector. Hệ thống này được xây dựng với mục đích nghiên cứu, demo và minh họa tiềm năng ứng dụng của Giải pháp Công nghệ Số AI tiên tiến vào Quản lý Hành chính công nhà nước. Nghiêm cấm mọi hành vi sao chép hệ thống để phục vụ các mục đích phi pháp hoặc sử dụng sai trái dữ liệu nghiệp vụ.*
-

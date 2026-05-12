@@ -73,6 +73,11 @@
                 title="Không gian Pháp lý">
                 <i class="fa-solid fa-briefcase mr-1.5"></i> Pháp lý
             </button>
+            <button id="simToggleBtn"
+                class="hidden ml-2 px-3 h-9 rounded-full bg-emerald-50 border border-emerald-200 hover:bg-emerald-100 flex items-center justify-center text-emerald-700 transition-colors font-medium text-xs"
+                title="Không gian Mô phỏng">
+                <i class="fa-solid fa-sliders mr-1.5"></i> Mô phỏng
+            </button>
             <button id="themeSettingsBtn"
                 class="ml-2 w-9 h-9 rounded-full bg-slate-100 hover:bg-slate-200 flex items-center justify-center text-slate-600 transition-colors"
                 title="Trang phục AI">
@@ -94,7 +99,7 @@
                         class="w-32 h-32 rounded-full shadow-xl">
                     <h2 class="text-2xl font-bold text-slate-700">Xin chào! Tôi có thể giúp gì cho ngài?</h2>
                     <p class="text-slate-500 max-w-md">Tôi là Hệ thống Multi-Agent. Chọn chế độ phân tích, nhập MST/tên
-                        DN, hoặc upload file CSV.</p>
+                        DN, hoặc upload file CSV / Excel (.xlsx, .xls).</p>
                     <!-- Suggestion Chips -->
                     <div class="flex flex-wrap justify-center gap-2 mt-3" id="suggestionChips">
                         <button
@@ -110,7 +115,7 @@
                         <button
                             class="suggestion-chip px-4 py-2 rounded-full bg-white border border-slate-200 text-sm font-medium text-slate-600 hover:border-sky-400 hover:text-sky-600 hover:shadow-md transition-all"
                             data-msg="">
-                            <i class="fa-solid fa-file-csv text-emerald-500 mr-1"></i> Upload CSV
+                            <i class="fa-solid fa-file-excel text-green-700 mr-1"></i> Upload CSV / Excel
                         </button>
                     </div>
                 </div>
@@ -173,6 +178,96 @@
         </div>
     </div>
 
+    <!-- Simulation Workspace Panel -->
+    <div id="simulationWorkspacePanel"
+        class="hidden flex fixed right-4 top-20 bottom-32 w-[360px] flex-col bg-white/95 backdrop-blur-xl border border-emerald-200 rounded-2xl shadow-[0_20px_50px_rgba(16,185,129,0.18)] z-[100] transition-all duration-300 transform translate-x-full opacity-0">
+        <div
+            class="px-5 py-4 bg-gradient-to-r from-emerald-50 to-white border-b border-emerald-200 flex justify-between items-center rounded-t-2xl">
+            <h3 class="font-bold text-slate-700 text-sm flex items-center">
+                <i class="fa-solid fa-sliders text-emerald-600 mr-2 text-lg"></i>Không gian Mô phỏng
+            </h3>
+            <button id="closeSimulationWorkspaceBtn" class="text-slate-400 hover:text-red-500">
+                <i class="fa-solid fa-xmark"></i>
+            </button>
+        </div>
+        <div class="flex-1 min-h-0 overflow-y-auto p-4 space-y-4 text-xs font-sans">
+            <div id="sim-control-grid" class="space-y-3 rounded-xl border border-emerald-100 bg-white p-3">
+                <div class="flex items-center justify-between gap-3">
+                    <label for="sim-vat-rate" class="font-bold text-slate-600">VAT (%)</label>
+                    <input id="sim-vat-rate" data-sim-param="vat_rate" type="number" min="0" max="25" step="0.5" class="w-24 rounded-lg border border-slate-200 px-2 py-1 text-right font-semibold" value="10">
+                </div>
+                <div class="flex items-center justify-between gap-3">
+                    <label for="sim-cit-rate" class="font-bold text-slate-600">CIT (%)</label>
+                    <input id="sim-cit-rate" data-sim-param="cit_rate" type="number" min="0" max="40" step="0.5" class="w-24 rounded-lg border border-slate-200 px-2 py-1 text-right font-semibold" value="20">
+                </div>
+                <div class="flex items-center justify-between gap-3">
+                    <label for="sim-audit-coverage" class="font-bold text-slate-600">Dien thanh tra (%)</label>
+                    <input id="sim-audit-coverage" data-sim-param="audit_coverage_pct" type="number" min="0" max="100" step="1" class="w-24 rounded-lg border border-slate-200 px-2 py-1 text-right font-semibold" value="5">
+                </div>
+                <div class="flex items-center justify-between gap-3">
+                    <label for="sim-penalty" class="font-bold text-slate-600">He so phat</label>
+                    <input id="sim-penalty" data-sim-param="penalty_multiplier" type="number" min="0" max="5" step="0.1" class="w-24 rounded-lg border border-slate-200 px-2 py-1 text-right font-semibold" value="1">
+                </div>
+                <div class="flex items-center justify-between gap-3">
+                    <label for="sim-interest" class="font-bold text-slate-600">Lai suat (%)</label>
+                    <input id="sim-interest" data-sim-param="interest_rate" type="number" min="0" max="30" step="0.5" class="w-24 rounded-lg border border-slate-200 px-2 py-1 text-right font-semibold" value="6">
+                </div>
+                <div class="flex items-center justify-between gap-3">
+                    <label for="sim-gdp" class="font-bold text-slate-600">GDP (%)</label>
+                    <input id="sim-gdp" data-sim-param="economic_growth_pct" type="number" min="-10" max="20" step="0.1" class="w-24 rounded-lg border border-slate-200 px-2 py-1 text-right font-semibold" value="6.5">
+                </div>
+                <div class="flex items-center justify-between gap-3">
+                    <label for="sim-cpi" class="font-bold text-slate-600">CPI (%)</label>
+                    <input id="sim-cpi" data-sim-param="cpi_pct" type="number" min="0" max="20" step="0.1" class="w-24 rounded-lg border border-slate-200 px-2 py-1 text-right font-semibold" value="3.5">
+                </div>
+                <div class="flex items-center justify-between gap-3">
+                    <label for="sim-unemployment" class="font-bold text-slate-600">That nghiep (%)</label>
+                    <input id="sim-unemployment" data-sim-param="unemployment_pct" type="number" min="0" max="25" step="0.1" class="w-24 rounded-lg border border-slate-200 px-2 py-1 text-right font-semibold" value="2.3">
+                </div>
+                <div class="flex items-center justify-between gap-3">
+                    <label for="sim-fx" class="font-bold text-slate-600">USD FX (%)</label>
+                    <input id="sim-fx" data-sim-param="exchange_rate_delta_pct" type="number" min="-15" max="15" step="0.5" class="w-24 rounded-lg border border-slate-200 px-2 py-1 text-right font-semibold" value="0">
+                </div>
+                <div class="flex items-center justify-between gap-3">
+                    <label for="sim-years" class="font-bold text-slate-600">Ky han</label>
+                    <select id="sim-years" data-sim-param="projection_years" class="w-24 rounded-lg border border-slate-200 px-2 py-1 text-right font-semibold">
+                        <option value="1">1 nam</option>
+                        <option value="5" selected>5 nam</option>
+                        <option value="10">10 nam</option>
+                    </select>
+                </div>
+                <div class="grid grid-cols-2 gap-2 pt-1">
+                    <button id="runSimulationBtn" type="button" class="rounded-lg bg-emerald-600 px-3 py-2 font-bold text-white hover:bg-emerald-700">
+                        <i class="fa-solid fa-play mr-1"></i>Chay mo phong
+                    </button>
+                    <button id="resetSimulationBtn" type="button" class="rounded-lg border border-slate-200 px-3 py-2 font-bold text-slate-600 hover:bg-slate-50">
+                        Reset
+                    </button>
+                </div>
+            </div>
+            <div>
+                <h4 class="font-bold text-slate-600 mb-1 border-b pb-1">Tham số hiện tại</h4>
+                <pre id="sim-current-params" class="text-[11px] bg-slate-50 border border-slate-200 rounded p-2 whitespace-pre-wrap">Chưa có dữ liệu</pre>
+            </div>
+            <div>
+                <h4 class="font-bold text-slate-600 mb-1 border-b pb-1">Khuyến nghị điều chỉnh</h4>
+                <pre id="sim-recommended-params" class="text-[11px] bg-slate-50 border border-slate-200 rounded p-2 whitespace-pre-wrap">Chưa có dữ liệu</pre>
+            </div>
+            <div>
+                <h4 class="font-bold text-slate-600 mb-1 border-b pb-1">Biên độ tham số</h4>
+                <pre id="sim-param-ranges" class="text-[11px] bg-slate-50 border border-slate-200 rounded p-2 whitespace-pre-wrap">Chưa có dữ liệu</pre>
+            </div>
+            <div>
+                <h4 class="font-bold text-slate-600 mb-1 border-b pb-1">Yếu tố nhạy cảm</h4>
+                <pre id="sim-sensitivity" class="text-[11px] bg-slate-50 border border-slate-200 rounded p-2 whitespace-pre-wrap">Chưa có dữ liệu</pre>
+            </div>
+            <div>
+                <h4 class="font-bold text-slate-600 mb-1 border-b pb-1">Metadata</h4>
+                <div id="sim-scenario-meta" class="text-[11px] text-slate-500 bg-slate-50 border border-slate-200 rounded p-2">Chưa có dữ liệu</div>
+            </div>
+        </div>
+    </div>
+
     <!-- Background Audio Visualizer Overlay -->
     <div id="audioVisualizer"
         class="pointer-events-none fixed inset-0 flex items-center justify-center opacity-0 transition-opacity duration-300 z-0">
@@ -190,13 +285,13 @@
         class="fixed inset-0 bg-sky-500/10 backdrop-blur-sm z-[90] hidden flex items-center justify-center pointer-events-none">
         <div class="bg-white rounded-2xl shadow-2xl p-10 border-2 border-dashed border-sky-400 text-center">
             <i class="fa-solid fa-cloud-arrow-up text-5xl text-sky-500 mb-4"></i>
-            <p class="text-lg font-bold text-slate-700">Thả file CSV vào đây</p>
-            <p class="text-sm text-slate-500">Hệ thống sẽ phân tích rủi ro tự động</p>
+            <p class="text-lg font-bold text-slate-700">Thả CSV hoặc Excel vào đây</p>
+            <p class="text-sm text-slate-500">Hệ thống chuyển bảng tính sang CSV và phân tích như upload thường</p>
         </div>
     </div>
 
     <!-- Hidden file input -->
-    <input type="file" id="fileUploadInput" accept=".csv, .png, .jpg, .jpeg, .pdf" class="hidden">
+    <input type="file" id="fileUploadInput" accept=".csv,.xlsx,.xls,.png,.jpg,.jpeg,.pdf" class="hidden">
 
     <!-- Input Bar Fixed at Bottom -->
     <div class="fixed bottom-0 left-0 right-0 bg-gradient-to-t from-slate-50 via-slate-50 to-transparent p-6 z-20">
@@ -224,7 +319,7 @@
                     title="Chọn chế độ phân tích">
                     <div class="flex items-center gap-2">
                         <i class="fa-solid fa-bolt text-amber-500" id="modelIcon"></i>
-                        <span id="modelSelectorLabel" class="hidden sm:inline">Toàn diện</span>
+                        <span id="modelSelectorLabel" class="hidden sm:inline">Auto</span>
                     </div>
                     <i class="fa-solid fa-chevron-down text-[10px] opacity-60"></i>
                 </button>
@@ -239,10 +334,10 @@
                             <div class="w-8 h-8 rounded-lg bg-amber-100 flex items-center justify-center"><i
                                     class="fa-solid fa-bolt text-amber-600"></i></div>
                             <div class="flex-1">
-                                <p class="text-sm font-bold text-slate-700">Toàn diện</p>
-                                <p class="text-xs text-slate-400">Tất cả 11+ công cụ AI</p>
+                                <p class="text-sm font-bold text-slate-700">Auto</p>
+                                <p class="text-xs text-slate-400">Auto Orchestrator theo yêu cầu</p>
                             </div>
-                            <span class="text-xs font-bold text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded">ALL</span>
+                            <span class="text-xs font-bold text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded">AUTO</span>
                         </div>
                         <div class="model-option px-3 py-2.5 rounded-lg hover:bg-teal-50 cursor-pointer flex items-center gap-3 transition-colors"
                             data-mode="legal">
@@ -300,7 +395,7 @@
             </div>
 
             <button id="attachmentBtn" class="p-2.5 mb-1 text-slate-400 hover:text-sky-600 transition-colors"
-                title="Đính kèm file CSV">
+                title="Đính kèm CSV / Excel / PDF / ảnh">
                 <i class="fa-solid fa-paperclip text-lg"></i>
             </button>
 

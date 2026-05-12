@@ -21,6 +21,11 @@ MODEL_DIR.mkdir(parents=True, exist_ok=True)
 
 
 INTENTS = [
+    "smalltalk",
+    "top_n_query",
+    "batch_analysis",
+    "vat_network_analysis",
+    "macro_forecast",
     "vat_refund_risk",
     "invoice_risk",
     "delinquency",
@@ -47,6 +52,14 @@ def _bootstrap_dataset() -> tuple[list[str], list[str]]:
             "điều kiện hoàn thuế",
             "kiểm tra hồ sơ hoàn",
             "hoàn thuế VAT",
+        ],
+        "vat_network_analysis": [
+            "mang luoi VAT",
+            "truy vet hoa don",
+            "vong hoa don",
+            "chuoi giao dich VAT",
+            "GNN mang luoi",
+            "ring motif hoa don",
         ],
         "invoice_risk": [
             "hóa đơn trùng",
@@ -89,12 +102,54 @@ def _bootstrap_dataset() -> tuple[list[str], list[str]]:
             "audit selection",
             "chọn doanh nghiệp kiểm tra",
         ],
+        "top_n_query": [
+            "top doanh nghiep rui ro cao",
+            "danh sach cong ty rui ro nhat",
+            "liet ke doanh nghiep can thanh tra",
+            "xep hang rui ro",
+            "10 cong ty diem gian lan cao",
+        ],
+        "batch_analysis": [
+            "phan tich lo du lieu",
+            "cham diem file csv",
+            "xu ly file excel",
+            "danh sach doanh nghiep upload",
+            "batch scoring",
+        ],
+        "macro_forecast": [
+            "mo phong vi mo",
+            "chay kich ban kinh te",
+            "GDP CPI that nghiep",
+            "du bao nguon thu",
+            "dieu chinh thue VAT va CIT",
+            "do nhay tham so vi mo",
+        ],
+        "smalltalk": [
+            "xin chao",
+            "chao ban",
+            "cam on",
+            "ban lam duoc gi",
+            "agent co the giup gi",
+            "tam biet",
+        ],
         "general_tax_query": [
             "kê khai thuế",
             "nộp tờ khai",
             "thủ tục thuế",
             "quy định thuế",
             "VAT theo quý",
+            "thuế TNCN tiền lương",
+            "khấu trừ thuế TNCN sai",
+            "đăng ký người phụ thuộc",
+            "hoàn thuế TNCN nộp thừa",
+            "hộ kinh doanh doanh thu nhỏ",
+            "bán hàng Shopee TikTok có đóng thuế không",
+            "cho thuê nhà có phải nộp thuế",
+            "quên xuất hóa đơn điện tử",
+            "nộp tờ khai trễ bị phạt",
+            "thanh toán tiền mặt hóa đơn trên 20 triệu",
+            "chi phí tiếp khách được trừ thuế TNDN",
+            "freelancer kê khai thuế",
         ],
     }
 
@@ -171,15 +226,49 @@ def _fetch_agent_turns_dataset(db) -> tuple[list[str], list[str]]:
     return X, y
 
 
+def _fetch_eval_jsonl_dataset() -> tuple[list[str], list[str]]:
+    """Load curated eval cases as supervised intent examples when present."""
+    candidates = [
+        Path(__file__).resolve().parent.parent / "app" / "scripts" / "tax_agent_eval_cases.jsonl",
+        Path(__file__).resolve().parent.parent / "data" / "agent_intent_training_examples.jsonl",
+    ]
+    X: list[str] = []
+    y: list[str] = []
+    for path in candidates:
+        if not path.exists():
+            continue
+        for line in path.read_text(encoding="utf-8", errors="ignore").splitlines():
+            if not line.strip():
+                continue
+            try:
+                item = json.loads(line)
+            except Exception:
+                continue
+            text_value = str(item.get("message") or item.get("text") or "").strip()
+            intent = str(item.get("expected_intent") or item.get("intent") or "").strip()
+            if text_value and intent:
+                X.append(text_value)
+                y.append(intent)
+    return X, y
+
+
 def main() -> None:
     bootstrap_X, bootstrap_y = _bootstrap_dataset()
     labels = list(INTENTS)
     with SessionLocal() as db:
         turns_X, turns_y = _fetch_agent_turns_dataset(db)
+    eval_X, eval_y = _fetch_eval_jsonl_dataset()
 
     X = list(bootstrap_X)
     y = list(bootstrap_y)
-    train_source = {"bootstrap": len(bootstrap_X), "agent_turns": len(turns_X)}
+    train_source = {
+        "bootstrap": len(bootstrap_X),
+        "agent_turns": len(turns_X),
+        "eval_jsonl": len(eval_X),
+    }
+    if eval_X:
+        X.extend(eval_X)
+        y.extend(eval_y)
     if turns_X:
         X.extend(turns_X)
         y.extend(turns_y)
@@ -248,4 +337,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

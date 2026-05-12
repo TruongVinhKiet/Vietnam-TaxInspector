@@ -322,6 +322,40 @@ class ConversationIntelligence:
                 "Hoặc upload CSV/ảnh/PDF để hệ thống tự định tuyến model phù hợp.",
             )
 
+        greeting_tokens = {"chao", "hello", "hi", "hey", "alo"}
+        thanks_tokens = {"cam", "on", "thanks", "thank", "thankyou", "thank_you"}
+        token_list = text.split()
+        token_set = set(token_list)
+        compact = text.replace(" ", "")
+
+        has_greeting = (
+            bool(greeting_tokens & token_set)
+            or compact.startswith("xinchao")
+            or compact.startswith("xinchaoban")
+            or compact.startswith("xinchoa")
+        )
+        has_thanks = (
+            ("cam" in token_set and "on" in token_set)
+            or "camon" in compact
+            or "thankyou" in compact
+            or "thanks" in compact
+        )
+        has_domain_task_keyword = any(
+            kw in text for kw in (
+                "phan tich", "mst", "thue", "vat", "rui ro", "hoa don", "du bao", "doanh nghiep",
+                "mo phong", "vi mo", "gdp", "kich ban", "kiem tra", "danh gia", "cong ty",
+                "ho so", "tra cuu", "can cu", "quy dinh"
+            )
+        )
+
+        if has_thanks and not has_domain_task_keyword:
+            return "thanks", "Rất vui được hỗ trợ! Khi cần phân tích thêm, bạn cứ gửi yêu cầu tiếp theo nhé."
+        if has_greeting and not has_domain_task_keyword and len(token_list) <= 8:
+            return (
+                "greeting",
+                "Xin chào! Bạn có thể gửi MST, tên doanh nghiệp, câu hỏi pháp lý, hoặc tệp cần phân tích.",
+            )
+
         if len(text.split()) <= 3 and any(token in text.split() for token in {"chao", "hello", "hi", "hey"}):
             return (
                 "greeting",

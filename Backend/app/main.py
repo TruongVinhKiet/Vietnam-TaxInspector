@@ -1158,6 +1158,44 @@ async def lifespan(app: FastAPI):
                 "ON agent_route_events (answer_contract, created_at DESC);"
             ))
             conn.execute(text(
+                "CREATE TABLE IF NOT EXISTS agent_session_snapshots ("
+                "id SERIAL PRIMARY KEY, "
+                "session_id VARCHAR(120) NOT NULL REFERENCES agent_sessions(session_id) ON DELETE CASCADE, "
+                "scope VARCHAR(60) NOT NULL, "
+                "payload_json JSONB, "
+                "updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP, "
+                "expires_at TIMESTAMPTZ"
+                ");"
+            ))
+            conn.execute(text(
+                "CREATE UNIQUE INDEX IF NOT EXISTS uq_agent_session_snapshot_scope "
+                "ON agent_session_snapshots (session_id, scope);"
+            ))
+            conn.execute(text(
+                "CREATE TABLE IF NOT EXISTS agent_async_file_jobs ("
+                "id SERIAL PRIMARY KEY, "
+                "job_id VARCHAR(64) NOT NULL UNIQUE, "
+                "session_id VARCHAR(120) REFERENCES agent_sessions(session_id) ON DELETE SET NULL, "
+                "filename VARCHAR(500), "
+                "status VARCHAR(20) NOT NULL DEFAULT 'pending', "
+                "phase VARCHAR(80), "
+                "progress FLOAT NOT NULL DEFAULT 0.0, "
+                "error_message TEXT, "
+                "response_json JSONB, "
+                "created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP, "
+                "updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP"
+                ");"
+            ))
+            conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS idx_agent_async_file_jobs_status "
+                "ON agent_async_file_jobs (status, updated_at DESC);"
+            ))
+            try:
+                from .agent_schema import ensure_agent_resilience_schema
+                ensure_agent_resilience_schema(conn)
+            except Exception as exc:
+                logger.warning("Agent resilience schema bootstrap skipped: %s", exc)
+            conn.execute(text(
                 "CREATE TABLE IF NOT EXISTS agent_eval_suites ("
                 "id SERIAL PRIMARY KEY, "
                 "suite_key VARCHAR(120) NOT NULL UNIQUE, "

@@ -166,6 +166,32 @@ class TaxAgentSynthesizer:
                 t0=t0,
             )
 
+        # Batch analysis from uploaded file — generate rich summary
+        if answer_contract == "fraud_analysis" and ("_batch_results" in tool_results or "_attachment_analysis" in tool_results):
+            return self._build_fraud_analysis_response(
+                tool_results=tool_results,
+                reasoning_trace=reasoning_trace,
+                t0=t0,
+            )
+
+        if answer_contract == "vat_graph" and (
+            "_vat_graph_batch_results" in tool_results
+            or "_ocr_document_results" in tool_results
+            or "_attachment_analysis" in tool_results
+        ):
+            return self._build_vat_graph_response(
+                tool_results=tool_results,
+                reasoning_trace=reasoning_trace,
+                t0=t0,
+            )
+
+        if intent == "batch_analysis" and ("_batch_results" in tool_results or "_attachment_analysis" in tool_results):
+            return self._build_batch_analysis_response(
+                tool_results=tool_results,
+                reasoning_trace=reasoning_trace,
+                t0=t0,
+            )
+
         # 1. Extract evidence from all tool results
         evidence = self._extract_evidence(tool_results)
 
@@ -296,25 +322,7 @@ class TaxAgentSynthesizer:
                 f" Tìm thấy {len(companies)} doanh nghiệp rủi ro cao nhất."
             )
             summary = f"Danh sách top {min(requested, len(companies))} doanh nghiệp rủi ro cao nhất.{found_note}"
-            lines = [
-                "| STT | MST | Tên DN | Ngành | Điểm rủi ro | Mức | Năm |",
-                "|---:|---|---|---|---:|---|---:|",
-            ]
-            for item in companies:
-                lines.append(
-                    "| {stt} | {tax_code} | {company_name} | {industry} | {risk_score} | {risk_level} | {year} |".format(
-                        stt=item.get("stt", ""),
-                        tax_code=item.get("tax_code", ""),
-                        company_name=str(item.get("company_name", "")).replace("|", "/"),
-                        industry=str(item.get("industry", "")).replace("|", "/"),
-                        risk_score=item.get("risk_score", 0),
-                        risk_level=item.get("risk_level", ""),
-                        year=item.get("year", ""),
-                    )
-                )
-            detailed = "\n".join(lines)
-            if total and total > len(companies):
-                detailed += f"\n\nTổng số doanh nghiệp có điểm trong CSDL: {total}."
+            detailed = "*(Danh sách chi tiết đã được hiển thị trong bảng giao diện bên dưới. Bạn có thể nhấn vào từng dòng để xem báo cáo rủi ro cho riêng doanh nghiệp đó.)*"
             confidence = 0.9
 
         return SynthesisResult(
@@ -331,6 +339,328 @@ class TaxAgentSynthesizer:
             latency_ms=(time.perf_counter() - t0) * 1000.0,
             synthesis_tier="data_table",
             verification={"status": "not_required", "reason": "direct_data_table"},
+            citation_map={},
+        )
+
+    def _build_fraud_analysis_response(
+        self,
+        *,
+        tool_results: dict[str, dict[str, Any]],
+        reasoning_trace: str,
+        t0: float,
+    ) -> SynthesisResult:
+        batch = tool_results.get("_batch_results") or tool_results.get("_attachment_analysis") or {}
+        companies = list(batch.get("assessments", []) or batch.get("companies", []) or [])
+        top_risky = list(batch.get("top_5") or batch.get("top_risky") or companies[:10])
+        total = int(batch.get("total") or len(companies) or 0)
+        by_level = batch.get("by_level") or {}
+        filename = batch.get("filename") or "CSV"
+        if not total and batch.get("status") == "error":
+            return SynthesisResult(
+                summary=f"File {filename} chưa thể phân tích rủi ro.",
+                detailed_analysis=f"Schema hoặc dữ liệu đầu vào chưa phù hợp. Lỗi: {batch.get('error', 'unknown')}",
+                evidence=[],
+                recommendations=["Kiểm tra lại contract CSV risk scoring và upload lại."],
+                confidence=0.35,
+                limitations="Không đủ dữ liệu để chạy TaxFraudPipeline.",
+                escalation_needed=False,
+                intent="batch_analysis",
+                tools_used=["_batch_results"],
+                reasoning_trace=reasoning_trace,
+                latency_ms=(time.perf_counter() - t0) * 1000.0,
+                synthesis_tier="fraud_analysis_v2",
+                verification={"status": "not_required", "reason": "model_output"},
+                citation_map={},
+            )
+
+        highest = 0.0
+        for row in top_risky:
+            try:
+                highest = max(highest, float(row.get("risk_score") or 0.0))
+            except Exception:
+                pass
+        high_count = int(by_level.get("critical", 0) or by_level.get("very_high", 0) or 0) + int(by_level.get("high", 0) or 0)
+        critical_count = int(by_level.get("critical", by_level.get("very_high", 0)) or 0)
+        medium_count = int(by_level.get("medium", 0) or 0)
+        low_count = int(by_level.get("low", 0) or 0)
+        summary = (
+            f"Đã phân tích {total} doanh nghiệp từ {filename}. "
+            f"Xác định {high_count} hồ sơ thuộc nhóm ưu tiên thanh tra, điểm rủi ro cao nhất là {highest:.1f}."
+        )
+        rows = []
+        for idx, row in enumerate(top_risky[:10], 1):
+            rows.append(
+                f"| {idx} | {row.get('tax_code') or row.get('mst') or ''} | "
+                f"{row.get('company_name') or row.get('ten_dn') or ''} | "
+                f"{row.get('industry') or ''} | {row.get('risk_score') or 0} | "
+                f"{row.get('risk_level') or ''} |"
+            )
+        table = "\n".join(rows) if rows else "| - | - | - | - | - | - |"
+        detailed = (
+            "### Kết luận điều hành\n"
+            f"{summary}\n\n"
+            "### Điểm rủi ro và mức cảnh báo\n"
+            f"- Nhóm rất cao: {critical_count}\n"
+            f"- Nhóm cao: {int(by_level.get('high', 0) or 0)}\n"
+            f"- Nhóm trung bình: {medium_count}\n"
+            f"- Nhóm thấp/an toàn: {low_count}\n"
+            f"- Mức ưu tiên hiện tại: {'cao' if high_count > 0 else 'trung bình'}\n\n"
+            "### Top hồ sơ cần ưu tiên\n"
+            "| STT | MST | Tên DN | Ngành | Điểm rủi ro | Mức |\n"
+            "|---:|---|---|---|---:|---|\n"
+            f"{table}\n\n"
+            "### Yếu tố rủi ro trọng tâm (F1-F4)\n"
+            "- F1 (hồ sơ tuân thủ): biến động nghĩa vụ khai nộp theo kỳ và tần suất điều chỉnh.\n"
+            "- F2 (hành vi tài chính): độ lệch doanh thu-biên lợi nhuận so với baseline ngành.\n"
+            "- F3 (VAT-hóa đơn): dấu hiệu lệch pha đầu vào/đầu ra và bất thường chuỗi hóa đơn.\n"
+            "- F4 (liên kết mạng): mức tập trung giao dịch với đối tác rủi ro và motif vòng.\n\n"
+            "### So sánh theo ngành và theo kỳ\n"
+            "Phân tích multi-agent ưu tiên đối chiếu cùng ngành/cùng giai đoạn để giảm nhiễu do mùa vụ. "
+            "Hồ sơ có điểm cao nhưng bối cảnh ngành đặc thù sẽ được gắn cờ để xác minh thủ công trước khi kết luận.\n\n"
+            "### Kết luận nghiệp vụ và độ tin cậy\n"
+            "Kết quả được hợp nhất từ pipeline gian lận, lớp phân tích bất thường và lớp điều phối miền nghiệp vụ. "
+            "Hệ thống chỉ tập trung miền gian lận khi người dùng không yêu cầu pháp lý, nhằm giảm trả lời lệch trọng tâm. "
+            "Độ tin cậy phụ thuộc đầy đủ cột dữ liệu, tính nhất quán mã số thuế và độ bao phủ kỳ phân tích."
+        )
+        recommendations = [
+            "Thiết lập danh sách kiểm tra theo 3 tầng: rất cao, cao, trung bình để phân bổ nguồn lực thanh tra.",
+            "Đối chiếu đồng thời doanh thu, VAT, biên lợi nhuận và giao dịch liên kết theo từng kỳ khai thuế.",
+            "Kích hoạt phân tích VAT graph và OCR chứng từ cho các hồ sơ có nghi vấn vòng hóa đơn hoặc chuỗi trung gian bất thường.",
+            "Yêu cầu giải trình mục tiêu cho các hồ sơ tăng điểm đột ngột so với kỳ trước hoặc lệch chuẩn ngành.",
+        ]
+        return SynthesisResult(
+            summary=summary,
+            detailed_analysis=detailed,
+            evidence=[],
+            recommendations=recommendations,
+            confidence=0.88 if total else 0.45,
+            limitations="Kết quả phụ thuộc chất lượng CSV và dữ liệu nền hiện có.",
+            escalation_needed=highest >= 90,
+            intent="batch_analysis",
+            tools_used=["_batch_results"],
+            reasoning_trace=reasoning_trace,
+            latency_ms=(time.perf_counter() - t0) * 1000.0,
+            synthesis_tier="fraud_analysis_v2",
+            verification={"status": "not_required", "reason": "model_output"},
+            citation_map={},
+        )
+
+    def _build_vat_graph_response(
+        self,
+        *,
+        tool_results: dict[str, dict[str, Any]],
+        reasoning_trace: str,
+        t0: float,
+    ) -> SynthesisResult:
+        vat = tool_results.get("_vat_graph_batch_results") or tool_results.get("_attachment_analysis") or {}
+        ocr = tool_results.get("_ocr_document_results") or {}
+        graph = vat.get("graph") or {}
+        summary_data = vat.get("summary") or {}
+        processed = vat.get("processed_rows") or vat.get("row_count") or 0
+        top_edges = graph.get("top_invoice_risks") or []
+        rings = graph.get("rings") or graph.get("ring_findings") or graph.get("motifs") or []
+        suspect_value = summary_data.get("suspect_value") or summary_data.get("total_suspicious_amount") or 0
+        if ocr and not vat:
+            fields = ocr.get("extracted_fields") or {}
+            risk = ocr.get("invoice_risk") or {}
+            summary = f"Đã OCR chứng từ {ocr.get('filename', '')} và chấm rủi ro hóa đơn."
+            detailed = (
+                "### Kết luận hóa đơn\n"
+                f"{summary}\n\n"
+                "### Trường đã trích xuất\n"
+                f"- Số hóa đơn: {fields.get('invoice_number') or 'chưa xác định'}\n"
+                f"- Người bán: {fields.get('seller_tax_code') or 'chưa xác định'}\n"
+                f"- Người mua: {fields.get('buyer_tax_code') or 'chưa xác định'}\n"
+                f"- Tổng tiền: {fields.get('total_amount') or fields.get('amount') or 'chưa xác định'}\n\n"
+                "### Rủi ro chứng từ\n"
+                f"Điểm rủi ro: {risk.get('risk_score', risk.get('score', 'N/A'))}. "
+                "Nên liên kết chứng từ này vào VAT graph nếu có dữ liệu giao dịch đối ứng."
+            )
+            return SynthesisResult(
+                summary=summary,
+                detailed_analysis=detailed,
+                evidence=[],
+                recommendations=["Đối chiếu MST hai bên và đưa hóa đơn vào graph để kiểm tra vòng giao dịch."],
+                confidence=float(ocr.get("confidence") or 0.75),
+                limitations="OCR có thể sai nếu ảnh/PDF chất lượng thấp.",
+                escalation_needed=False,
+                intent="invoice_risk",
+                tools_used=["_ocr_document_results"],
+                reasoning_trace=reasoning_trace,
+                latency_ms=(time.perf_counter() - t0) * 1000.0,
+                synthesis_tier="vat_graph_v2",
+                verification={"status": "not_required", "reason": "model_output"},
+                citation_map={},
+            )
+
+        summary = (
+            f"Đã xử lý {processed} giao dịch VAT. "
+            f"Phát hiện {len(rings)} vòng/motif nghi vấn và {len(top_edges)} cạnh hóa đơn có mức rủi ro cao."
+        )
+        key_nodes = list((graph.get("top_nodes") or graph.get("key_nodes") or [])[:5])
+        edge_lines = []
+        for idx, edge in enumerate(top_edges[:10], 1):
+            edge_lines.append(
+                f"| {idx} | {edge.get('seller_tax_code') or edge.get('source') or ''} | "
+                f"{edge.get('buyer_tax_code') or edge.get('target') or ''} | "
+                f"{edge.get('amount') or edge.get('value') or ''} | "
+                f"{edge.get('edge_risk_score') or edge.get('risk_score') or ''} |"
+            )
+        edge_table = "\n".join(edge_lines) if edge_lines else "| - | - | - | - | - |"
+        detailed = (
+            "### Kết luận mạng VAT\n"
+            f"{summary}\n\n"
+            "### Tín hiệu trọng yếu\n"
+            f"- Tổng giá trị nghi vấn: {suspect_value}\n"
+            f"- Số vòng/motif nghi vấn: {len(rings)}\n"
+            f"- Số cạnh rủi ro cao: {len(top_edges)}\n"
+            f"- Số cảnh báo dữ liệu: {len(vat.get('warnings') or [])}\n\n"
+            "### Pháp nhân/nút trọng yếu\n"
+            f"- Số nút tham gia phân tích: {len(graph.get('nodes') or [])}\n"
+            f"- Số cạnh giao dịch: {len(graph.get('edges') or [])}\n"
+            f"- Top nút cần theo dõi: {', '.join(str(n.get('tax_code') or n.get('id') or '') for n in key_nodes) if key_nodes else 'Chưa đủ dữ liệu xếp hạng nút'}\n\n"
+            "### Hóa đơn/cạnh rủi ro cao\n"
+            "| STT | Bên bán | Bên mua | Giá trị | Điểm cạnh |\n"
+            "|---:|---|---|---:|---:|\n"
+            f"{edge_table}\n\n"
+            "### Chuỗi bằng chứng và giả thuyết điều tra\n"
+            "Multi-agent hợp nhất tín hiệu từ VAT graph, scoring cạnh hóa đơn và dữ liệu chứng từ để tạo thứ tự điều tra. "
+            "Ưu tiên xác minh theo chuỗi: tồn tại giao dịch thực, dòng tiền tương ứng, quan hệ sở hữu/liên kết, tính hợp lệ chứng từ và đối chiếu khai thuế.\n\n"
+            "### Bước tiếp theo đề xuất\n"
+            "Tập trung trước vào các cụm có vòng giao dịch ngắn, cạnh giá trị lớn và nút trung gian lặp lại nhiều kỳ. "
+            "Khi có dữ liệu OCR hoặc thông tin xuyên biên giới, cần ghép vào đường dẫn bằng chứng để nâng độ chắc chắn trước khi kiến nghị thanh tra."
+        )
+        return SynthesisResult(
+            summary=summary,
+            detailed_analysis=detailed,
+            evidence=[],
+            recommendations=[
+                "Mở rộng điều tra các nút nằm trong vòng/motif và các nút trung gian lặp lại nhiều kỳ.",
+                "Đối chiếu hóa đơn giá trị lớn với dòng tiền, chứng từ vận chuyển và năng lực giao nhận thực tế.",
+                "Chạy OCR/invoice risk cho các chứng từ thuộc cạnh rủi ro cao và hợp nhất vào evidence path.",
+                "Lập danh sách kiểm tra theo mức ưu tiên để chuyển đội thanh tra xử lý theo từng đợt.",
+            ],
+            confidence=0.86 if processed else 0.45,
+            limitations="Kết quả phụ thuộc độ đầy đủ của CSV hóa đơn và dữ liệu liên kết sở hữu.",
+            escalation_needed=bool(rings or top_edges),
+            intent="vat_network_analysis",
+            tools_used=["_vat_graph_batch_results"],
+            reasoning_trace=reasoning_trace,
+            latency_ms=(time.perf_counter() - t0) * 1000.0,
+            synthesis_tier="vat_graph_v2",
+            verification={"status": "not_required", "reason": "model_output"},
+            citation_map={},
+        )
+
+    def _build_batch_analysis_response(
+        self,
+        *,
+        tool_results: dict[str, dict[str, Any]],
+        reasoning_trace: str,
+        t0: float,
+    ) -> SynthesisResult:
+        """Build a rich summary response for batch file analysis."""
+        batch = tool_results.get("_batch_results", {}) or {}
+        attachment = tool_results.get("_attachment_analysis", {}) or {}
+
+        total = int(batch.get("total", 0) or attachment.get("total", 0) or 0)
+        companies = list(
+            batch.get("assessments", [])
+            or batch.get("companies", [])
+            or attachment.get("assessments", [])
+            or attachment.get("companies", [])
+            or []
+        )
+        by_level = batch.get("by_level", {}) or attachment.get("by_level", {}) or {}
+        top_risky = (
+            batch.get("top_5", [])
+            or batch.get("top_risky", [])
+            or attachment.get("top_5", [])
+            or attachment.get("top_risky", [])
+            or []
+        )
+        filename = batch.get("filename", "") or attachment.get("filename", "CSV")
+
+        if not total and not companies:
+            return SynthesisResult(
+                summary=f"Đã nhận file {filename} nhưng chưa thể phân tích batch.",
+                detailed_analysis="File có thể không đúng định dạng hoặc không chứa cột tax_code/MST. "
+                                  "Vui lòng kiểm tra lại file và thử upload lại.",
+                evidence=[], recommendations=["Kiểm tra lại format file CSV với cột tax_code"],
+                confidence=0.3, limitations="Không đọc được dữ liệu từ file",
+                escalation_needed=False, intent="batch_analysis",
+                tools_used=["_batch_results"], reasoning_trace=reasoning_trace,
+                latency_ms=(time.perf_counter() - t0) * 1000.0,
+                synthesis_tier="batch_analysis", verification={"status": "not_required"},
+                citation_map={},
+            )
+
+        # Build risk distribution summary
+        very_high = int(by_level.get("very_high", 0) or by_level.get("Rất cao", 0) or 0)
+        high = int(by_level.get("high", 0) or by_level.get("Cao", 0) or 0)
+        medium = int(by_level.get("medium", 0) or by_level.get("Trung bình", 0) or 0)
+        low = int(by_level.get("low", 0) or by_level.get("An toàn", 0) or by_level.get("Thấp", 0) or 0)
+
+        summary = (
+            f"**Kết quả phân tích lô: {filename}** — "
+            f"{total} doanh nghiệp đã được chấm điểm rủi ro."
+        )
+
+        risk_lines = []
+        if very_high:
+            risk_lines.append(f"🔴 **Rất cao**: {very_high} DN")
+        if high:
+            risk_lines.append(f"🟠 **Cao**: {high} DN")
+        if medium:
+            risk_lines.append(f"🟡 **Trung bình**: {medium} DN")
+        if low:
+            risk_lines.append(f"🟢 **An toàn**: {low} DN")
+
+        risk_summary = "\n".join(risk_lines) if risk_lines else f"Tổng cộng {total} DN đã phân tích."
+
+        # Top risky companies detail
+        top_detail = ""
+        display_top = top_risky[:5] if top_risky else companies[:5]
+        if display_top:
+            top_lines = []
+            for i, c in enumerate(display_top, 1):
+                tc = c.get("tax_code", c.get("mst", ""))
+                name = c.get("company_name", c.get("ten_dn", "N/A"))
+                score = c.get("risk_score", c.get("diem_rui_ro", 0))
+                level = c.get("risk_level", c.get("muc_do", ""))
+                top_lines.append(f"{i}. **MST {tc}** — {name} — Điểm: **{score}** ({level})")
+            top_detail = "\n".join(top_lines)
+
+        detailed = (
+            f"### Phân bố rủi ro\n{risk_summary}\n\n"
+            f"### Top doanh nghiệp rủi ro cao nhất\n{top_detail}\n\n"
+            f"*(Bảng chi tiết đã hiển thị bên dưới. Bạn có thể nhấn vào từng dòng để xem "
+            f"phân tích chuyên sâu cho doanh nghiệp đó.)*"
+        )
+
+        recommendations = [
+            "Tập trung kiểm tra các DN có điểm rủi ro trên 80.",
+            "Đối chiếu thêm số liệu nghiệp vụ trước khi ra quyết định.",
+        ]
+        if very_high > 0:
+            recommendations.insert(0, f"⚠️ Có {very_high} DN ở mức RỦI RO RẤT CAO — cần ưu tiên xử lý ngay.")
+
+        confidence = 0.85 if total > 0 else 0.3
+
+        return SynthesisResult(
+            summary=summary,
+            detailed_analysis=detailed,
+            evidence=[],
+            recommendations=recommendations,
+            confidence=confidence,
+            limitations="",
+            escalation_needed=(very_high > 5),
+            intent="batch_analysis",
+            tools_used=[k for k in tool_results if k.startswith("_")],
+            reasoning_trace=reasoning_trace,
+            latency_ms=(time.perf_counter() - t0) * 1000.0,
+            synthesis_tier="batch_analysis",
+            verification={"status": "not_required", "reason": "direct_batch_data"},
             citation_map={},
         )
 
@@ -365,18 +695,63 @@ class TaxAgentSynthesizer:
 
         # Company risk → analytics evidence
         cr = tool_results.get("company_risk_lookup", {})
-        if cr.get("status") == "found":
+        sur = tool_results.get("_session_upload_row", {})
+        row = sur.get("row") if isinstance(sur, dict) else None
+        if isinstance(row, dict) and sur.get("status") == "matched":
+            src = sur.get("source_filename") or "file đã upload"
+            tc = row.get("tax_code") or sur.get("tax_code")
             evidence.append(Evidence(
-                source_tool="company_risk_lookup",
+                source_tool="_session_upload_row",
                 source_type="analytics",
                 content=(
-                    f"Doanh nghiệp {cr.get('company_name', '')} (MST: {cr.get('tax_code', '')}) — "
-                    f"Điểm rủi ro: {cr.get('risk_score', 0)}/100, "
-                    f"Mức rủi ro: {cr.get('risk_level', 'N/A')}, "
-                    f"Ngành: {cr.get('industry', 'N/A')}"
+                    f"(Theo snapshot phiên làm việc từ `{src}`, không phải CSDL cố định) MST {tc}: "
+                    f"{row.get('company_name') or ''} — Điểm rủi ro: {row.get('risk_score')} "
+                    f"({row.get('risk_level', '')}); F1–F4: "
+                    f"{row.get('f1_divergence')}/{row.get('f2_ratio_limit')}/"
+                    f"{row.get('f3_vat_structure')}/{row.get('f4_peer_comparison')}"
                 ),
-                title=f"Hồ sơ rủi ro {cr.get('company_name', '')}",
-                score=float(cr.get("risk_score", 0)) / 100.0,
+                title="Chi tiết từ file vừa phân tích",
+                score=min(1.0, float(row.get("risk_score") or 0.0) / 100.0),
+            ))
+
+        if cr.get("status") == "found":
+            if isinstance(row, dict) and sur.get("status") == "matched":
+                evidence.append(Evidence(
+                    source_tool="company_risk_lookup",
+                    source_type="analytics",
+                    content=(
+                        f"(Tham chiếu CSDL) MST {cr.get('tax_code', '')}: điểm {cr.get('risk_score', 0)}. "
+                        f"Kết luận theo file vừa upload ưu tiên dòng snapshot phiên làm việc phía trên."
+                    ),
+                    title="Đối chiếu CSDL",
+                    score=float(cr.get("risk_score", 0)) / 100.0,
+                ))
+            else:
+                evidence.append(Evidence(
+                    source_tool="company_risk_lookup",
+                    source_type="analytics",
+                    content=(
+                        f"Doanh nghiệp {cr.get('company_name', '')} (MST: {cr.get('tax_code', '')}) — "
+                        f"Điểm rủi ro: {cr.get('risk_score', 0)}/100, "
+                        f"Mức rủi ro: {cr.get('risk_level', 'N/A')}, "
+                        f"Ngành: {cr.get('industry', 'N/A')}"
+                    ),
+                    title=f"Hồ sơ rủi ro {cr.get('company_name', '')}",
+                    score=float(cr.get("risk_score", 0)) / 100.0,
+                ))
+
+        vf = tool_results.get("_vat_session_focus", {})
+        if isinstance(vf, dict) and vf.get("status") == "matched" and vf.get("invoices"):
+            evidence.append(Evidence(
+                source_tool="_vat_session_focus",
+                source_type="investigation",
+                content=(
+                    f"(Theo file VAT `{vf.get('source_filename') or 'upload'}`, batch {vf.get('batch_id')}) "
+                    f"MST {vf.get('tax_code')} — {len(vf.get('invoices', []))} dòng giao dịch/hóa đơn liên quan "
+                    "trong snapshot phiên làm việc."
+                ),
+                title="VAT snapshot theo MST",
+                score=0.75,
             ))
 
         # Delinquency → analytics evidence
@@ -554,7 +929,7 @@ class TaxAgentSynthesizer:
     ) -> bool:
         if answer_contract == "legal_consultation":
             return True
-        if answer_contract in {"data_table", "smalltalk", "file_analysis", "vat_graph"}:
+        if answer_contract in {"data_table", "smalltalk", "file_analysis", "vat_graph", "fraud_analysis", "mode_mismatch"}:
             return False
         if intent in {"general_tax_query", "vat_refund_risk", "invoice_risk", "transfer_pricing"}:
             return True

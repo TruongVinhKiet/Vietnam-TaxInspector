@@ -34,6 +34,8 @@ from __future__ import annotations
 
 import json
 import logging
+import math
+import re
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -41,7 +43,68 @@ from typing import Any, Optional
 
 from sqlalchemy import text as sql_text
 
+from ml_engine.tax_agent_mode_contracts import (
+    AGENT_RESPONSE_SCHEMA_VERSION,
+    MODE_CONTRACT_VERSION,
+    AgentModeContractRegistry,
+    canonical_run_state,
+)
+from ml_engine.tax_agent_turns import AgentTurnRepository
+
 logger = logging.getLogger(__name__)
+
+
+def _json_sanitize(value: Any) -> Any:
+    """Recursively sanitize payload so it is valid JSON/JSONB."""
+    if isinstance(value, float):
+        return value if math.isfinite(value) else None
+    if isinstance(value, dict):
+        return {str(k): _json_sanitize(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_sanitize(v) for v in value]
+    return value
+
+
+def _json_dumps_safe(value: Any, *, ensure_ascii: bool = False) -> str:
+    """JSON dump that never emits NaN/Infinity tokens."""
+    return json.dumps(_json_sanitize(value), ensure_ascii=ensure_ascii, default=str, allow_nan=False)
+
+
+def _detect_csv_columns(csv_content: bytes) -> set[str]:
+    """Parse CSV header and return normalized column names."""
+    try:
+        text = csv_content.decode("utf-8-sig", errors="replace")
+        first_line = text.splitlines()[0] if text else ""
+        return {col.strip().lower().strip('"').strip("'") for col in first_line.split(",") if col.strip()}
+    except Exception:
+        return set()
+
+
+def _is_vat_invoice_schema(columns: set[str]) -> bool:
+    """Heuristic: detect VAT invoice-like CSV by marker columns."""
+    vat_markers = {"seller_tax_code", "buyer_tax_code", "invoice_date", "vat_amount", "invoice_number"}
+    return len(columns & vat_markers) >= 2
+
+
+def _normalize_mst(value: Any) -> str:
+    raw = re.sub(r"\D+", "", str(value or ""))
+    return raw[:10] if len(raw) >= 10 else raw
+
+
+_MST_IN_CHAT_RE = re.compile(
+    r"(?<![A-Za-z0-9])([A-Za-z]?\d{10})(?:-\d{3})?(?![0-9])"
+)
+
+
+def _first_mst_from_message(message: str) -> str | None:
+    """
+    MST/code mentioned in plain text. Allows one leading letter immediately before the 10-digit
+    core (e.g. seller_tax_code-style like S2900010280).
+    """
+    m = _MST_IN_CHAT_RE.search(message or "")
+    if not m:
+        return None
+    return _normalize_mst(m.group(1))
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -51,40 +114,40 @@ logger = logging.getLogger(__name__)
 MODE_TOOL_PROFILES: dict[str, dict[str, Any]] = {
     "fraud": {
         "required_tools": [
-            "knowledge_search", "company_risk_lookup", "invoice_risk_scan",
+            "company_risk_lookup", "invoice_risk_scan",
             "gnn_analysis", "hetero_gnn_risk", "vae_anomaly_scan",
             "motif_detection", "ownership_analysis",
             "nlp_red_flag_scan",
         ],
         "optional_tools": ["temporal_delinquency_deep", "ring_scoring",
                            "entity_resolution_check"],
-        "sub_agents": ["legal", "analytics", "investigation"],
+        "sub_agents": ["analytics", "investigation"],
         "label": "🔍 Phân tích Gian lận",
     },
     "vat": {
         "required_tools": [
-            "knowledge_search", "company_risk_lookup", "invoice_risk_scan",
+            "company_risk_lookup", "invoice_risk_scan",
             "vat_refund_risk", "vae_anomaly_scan",
             "nlp_red_flag_scan",
         ],
-        "optional_tools": ["gnn_analysis"],
-        "sub_agents": ["legal", "analytics"],
+        "optional_tools": ["gnn_analysis", "motif_detection", "ring_scoring", "ownership_analysis"],
+        "sub_agents": ["analytics", "investigation"],
         "label": "📄 Rủi ro VAT",
     },
     "delinquency": {
         "required_tools": [
-            "knowledge_search", "company_risk_lookup", "delinquency_check",
+            "company_risk_lookup", "delinquency_check",
             "temporal_delinquency_deep", "causal_uplift_recommend",
             "revenue_forecast",
         ],
         "optional_tools": [],
-        "sub_agents": ["legal", "analytics"],
+        "sub_agents": ["analytics"],
         "label": "📊 Dự báo Nợ động",
     },
     "macro": {
-        "required_tools": ["knowledge_search", "macro_forecast"],
+        "required_tools": ["macro_forecast"],
         "optional_tools": ["revenue_forecast"],
-        "sub_agents": ["legal"],
+        "sub_agents": ["analytics"],
         "label": "🌐 Mô phỏng Vĩ mô",
     },
     "legal": {
@@ -94,11 +157,40 @@ MODE_TOOL_PROFILES: dict[str, dict[str, Any]] = {
         "label": "⚖️ Tư vấn Pháp lý",
     },
     "full": {
-        "required_tools": None,  # Use all tools from planner
+        "required_tools": None,  # Auto-router supplies the active domain scope
         "optional_tools": [],
         "sub_agents": ["legal", "analytics", "investigation"],
         "label": "⚡ Toàn diện",
     },
+}
+
+
+def _mode_tool_profile_from_registry(mode: str) -> dict[str, Any]:
+    """Use AgentModeContractRegistry as the source of truth for tool scope."""
+    contract = AgentModeContractRegistry.get(mode)
+    sub_agents_by_panel = {
+        "legal": ["legal"],
+        "fraud": ["analytics", "investigation"],
+        "vat": ["analytics", "investigation"],
+        "delinquency": ["analytics"],
+        "simulation": ["analytics"],
+        "auto": ["legal", "analytics", "investigation"],
+    }
+    return {
+        "required_tools": None if contract.allowed_tools is None else sorted(contract.allowed_tools),
+        "optional_tools": [],
+        "sub_agents": sub_agents_by_panel.get(contract.workspace_panel, ["analytics"]),
+        "label": contract.label,
+        "selected_model_bundle": list(contract.selected_model_bundle),
+    }
+
+
+# Compatibility shim for older planner code. The registry above is the source
+# of truth; this dict is rebuilt from it so "full" means Auto Orchestrator, not
+# "run every tool".
+MODE_TOOL_PROFILES = {
+    mode: _mode_tool_profile_from_registry(mode)
+    for mode in ("fraud", "vat", "delinquency", "macro", "legal", "full")
 }
 
 
@@ -148,6 +240,24 @@ class OrchestratorResponse:
     routing_decision: dict[str, Any] = field(default_factory=dict)
     focus_score: float = 1.0
     route_violation: bool = False
+    selected_model_bundle: list[str] = field(default_factory=list)
+    mode_validation: dict[str, Any] = field(default_factory=dict)
+    mode_mismatch: bool = False
+    suggested_mode: str | None = None
+    suppressed_domains: list[str] = field(default_factory=list)
+    analysis_blocks: list[dict[str, Any]] = field(default_factory=list)
+    legal_workspace: dict[str, Any] = field(default_factory=dict)
+    simulation_workspace: dict[str, Any] = field(default_factory=dict)
+    schema_version: str = AGENT_RESPONSE_SCHEMA_VERSION
+    mode_contract_version: str = MODE_CONTRACT_VERSION
+    run_id: str = ""
+    run_state: str = "finalized"
+    mode_workspace: dict[str, Any] = field(default_factory=dict)
+    error_detail: dict[str, Any] = field(default_factory=dict)
+    intent_model_version: str = ""
+    planner_policy_version: str = ""
+    debate_session_id: str | None = None
+    graph_reasoning_path: list[dict[str, Any]] = field(default_factory=list)
 
 
 class TaxAgentOrchestrator:
@@ -189,6 +299,9 @@ class TaxAgentOrchestrator:
         self._legal_agent = None
         self._analytics_agent = None
         self._investigation_agent = None
+        # Enterprise v2: Debate + GraphRAG
+        self._debate_engine = None
+        self._graph_reasoner = None
         self._initialized = False
 
     def _ensure_initialized(self, db=None):
@@ -255,6 +368,22 @@ class TaxAgentOrchestrator:
         from ml_engine.tax_agent_investigation_agent import InvestigationAgent
         self._investigation_agent = InvestigationAgent()
 
+        # Enterprise v2: Multi-Agent Debate Engine
+        try:
+            from ml_engine.tax_agent_debate import MultiAgentDebateEngine
+            self._debate_engine = MultiAgentDebateEngine()
+            logger.info("[Orchestrator] ✓ Debate engine loaded")
+        except Exception as exc:
+            logger.warning("[Orchestrator] Debate engine not available: %s", exc)
+
+        # Enterprise v2: Legal GraphRAG Reasoner
+        try:
+            from ml_engine.tax_agent_legal_graph_reasoner import LegalGraphReasoner
+            self._graph_reasoner = LegalGraphReasoner()
+            logger.info("[Orchestrator] ✓ Legal GraphRAG reasoner loaded")
+        except Exception as exc:
+            logger.warning("[Orchestrator] GraphRAG reasoner not available: %s", exc)
+
         self._initialized = True
         logger.info(
             "[Orchestrator] ✓ Initialized all components "
@@ -274,6 +403,7 @@ class TaxAgentOrchestrator:
         model_mode: str = "full",
         csv_attachment: dict | None = None,
         attachment_analysis: dict | None = None,
+        simulation_params: dict[str, Any] | None = None,
     ) -> OrchestratorResponse:
         """
         Process a user message through the full multi-agent pipeline.
@@ -297,6 +427,7 @@ class TaxAgentOrchestrator:
             model_mode=model_mode,
             csv_attachment=csv_attachment,
             attachment_analysis=attachment_analysis,
+            simulation_params=simulation_params,
         ):
             if event.get("event") == "done":
                 done_payload = event.get("data", {})
@@ -338,6 +469,24 @@ class TaxAgentOrchestrator:
             routing_decision=done_payload.get("routing_decision", {}),
             focus_score=float(done_payload.get("focus_score", 1.0)),
             route_violation=bool(done_payload.get("route_violation", False)),
+            selected_model_bundle=done_payload.get("selected_model_bundle", []),
+            mode_validation=done_payload.get("mode_validation", {}),
+            mode_mismatch=bool(done_payload.get("mode_mismatch", False)),
+            suggested_mode=done_payload.get("suggested_mode"),
+            suppressed_domains=done_payload.get("suppressed_domains", []),
+            analysis_blocks=done_payload.get("analysis_blocks", []),
+            legal_workspace=done_payload.get("legal_workspace", {}),
+            simulation_workspace=done_payload.get("simulation_workspace", {}),
+            schema_version=done_payload.get("schema_version", AGENT_RESPONSE_SCHEMA_VERSION),
+            mode_contract_version=done_payload.get("mode_contract_version", MODE_CONTRACT_VERSION),
+            run_id=done_payload.get("run_id", ""),
+            run_state=canonical_run_state(done_payload.get("run_state", "finalized")),
+            mode_workspace=done_payload.get("mode_workspace", {}),
+            error_detail=done_payload.get("error_detail", {}),
+            intent_model_version=done_payload.get("intent_model_version", ""),
+            planner_policy_version=done_payload.get("planner_policy_version", ""),
+            debate_session_id=done_payload.get("debate_session_id"),
+            graph_reasoning_path=done_payload.get("graph_reasoning_path", []),
         )
 
     # ═══════════════════════════════════════════════════════════════════════
@@ -347,7 +496,6 @@ class TaxAgentOrchestrator:
     def process_streaming(
         self,
         db,
-        *,
         session_id: str,
         message: str,
         user_id: int | None = None,
@@ -355,6 +503,7 @@ class TaxAgentOrchestrator:
         model_mode: str = "full",
         csv_attachment: dict | None = None,
         attachment_analysis: dict | None = None,
+        simulation_params: dict[str, Any] | None = None,
     ):
         """
         Streaming version of process(). Yields SSE event dicts:
@@ -370,35 +519,27 @@ class TaxAgentOrchestrator:
         import json as _json
 
         t_total_start = time.perf_counter()
+        run_id = f"run-{uuid.uuid4().hex[:12]}"
         latency_breakdown: dict[str, float] = {}
 
         self._ensure_initialized(db)
         self._compliance_gate.db = db
         self._memory.db = db
+        yield {"event": "state", "data": {"run_id": run_id, "run_state": "queued", "model_mode": model_mode}}
 
         # ─── Step 1: Context ────────────────────────────────────────────
         yield {"event": "thinking", "data": {"step": "context", "detail": "Đang xây dựng ngữ cảnh hội thoại..."}}
         t0 = time.perf_counter()
         self._ensure_session(db, session_id=session_id, user_id=user_id)
-
-        turn_index_row = db.execute(
-            sql_text(
-                "SELECT COALESCE(MAX(turn_index), 0) FROM agent_turns "
-                "WHERE session_id = :session_id"
-            ),
-            {"session_id": session_id},
-        ).fetchone()
-        turn_index = int(turn_index_row[0] or 0) + 1
-
-        db.execute(
-            sql_text("""
-                INSERT INTO agent_turns (session_id, turn_index, role, message_text)
-                VALUES (:session_id, :turn_index, 'user', :message_text)
-            """),
-            {"session_id": session_id, "turn_index": turn_index, "message_text": message},
+        turn_repo = AgentTurnRepository(db)
+        turn_pair = turn_repo.allocate_turn_pair(
+            session_id=session_id,
+            user_message=message,
         )
+        turn_index = turn_pair.user_turn_index
+        assistant_turn_id = turn_pair.assistant_turn_id
 
-        context = self._memory.build_context(session_id, turn_index, message)
+        context = self._memory.build_context(session_id, turn_index, message, model_mode=model_mode)
         latency_breakdown["context"] = (time.perf_counter() - t0) * 1000.0
 
         # ─── Step 1.5: Conversation Intelligence ─────────────────────────
@@ -440,25 +581,14 @@ class TaxAgentOrchestrator:
                     reason=dialogue_act,
                 )
                 total_latency = (time.perf_counter() - t_total_start) * 1000.0
-                assistant_turn_id = 0
                 try:
-                    turn_row = db.execute(
-                        sql_text("""
-                            INSERT INTO agent_turns
-                            (session_id, turn_index, role, message_text, normalized_intent, confidence, citations_json)
-                            VALUES (:session_id, :turn_index, 'assistant', :message_text,
-                                    :normalized_intent, :confidence, '[]'::jsonb)
-                            RETURNING id
-                        """),
-                        {
-                            "session_id": session_id,
-                            "turn_index": turn_index + 1,
-                            "message_text": answer,
-                            "normalized_intent": direct_intent,
-                            "confidence": 0.98,
-                        },
-                    ).fetchone()
-                    assistant_turn_id = int(turn_row[0]) if turn_row else 0
+                    turn_repo.update_assistant_turn(
+                        turn_id=assistant_turn_id,
+                        message_text=answer,
+                        normalized_intent=direct_intent,
+                        confidence=0.98,
+                        citations_json="[]",
+                    )
                     db.execute(sql_text("""
                         INSERT INTO agent_decision_traces
                         (session_id, turn_id, intent, selected_track, confidence,
@@ -471,7 +601,7 @@ class TaxAgentOrchestrator:
                         "intent": direct_intent,
                         "selected_track": "direct",
                         "confidence": 0.98,
-                        "evidence_json": _json.dumps({
+                        "evidence_json": _json_dumps_safe({
                             "dialogue_act": dialogue_act,
                             "routing": routing_decision.to_dict(),
                         }),
@@ -496,6 +626,10 @@ class TaxAgentOrchestrator:
                     logger.debug("[Orchestrator:stream] Direct dialogue persist skipped: %s", exc)
 
                 payload = {
+                    "schema_version": AGENT_RESPONSE_SCHEMA_VERSION,
+                    "mode_contract_version": MODE_CONTRACT_VERSION,
+                    "run_id": run_id,
+                    "run_state": "finalized",
                     "session_id": session_id,
                     "intent": direct_intent,
                     "intent_confidence": 0.98,
@@ -529,6 +663,21 @@ class TaxAgentOrchestrator:
                     "routing_decision": routing_decision.to_dict(),
                     "focus_score": routing_decision.focus_score,
                     "route_violation": routing_decision.route_violation,
+                    "selected_model_bundle": routing_decision.selected_model_bundle,
+                    "mode_validation": routing_decision.mode_validation,
+                    "mode_mismatch": routing_decision.mode_mismatch,
+                    "suggested_mode": routing_decision.suggested_mode,
+                    "suppressed_domains": routing_decision.suppressed_domains,
+                    "analysis_blocks": [],
+                    "mode_workspace": self._build_mode_workspace(
+                        model_mode=model_mode,
+                        legal_workspace={},
+                        simulation_workspace={},
+                        tool_results={},
+                        viz_data={},
+                        analysis_blocks=[],
+                    ),
+                    "error_detail": {},
                 }
                 try:
                     from ml_engine.tax_agent_telemetry import get_telemetry
@@ -557,6 +706,11 @@ class TaxAgentOrchestrator:
                         dialogue_act=dialogue_act,
                         answer_contract=routing_decision.answer_contract.value,
                         routing_decision=routing_decision.to_dict(),
+                        selected_model_bundle=routing_decision.selected_model_bundle,
+                        mode_validation=routing_decision.mode_validation,
+                        mode_mismatch=routing_decision.mode_mismatch,
+                        suggested_mode=routing_decision.suggested_mode,
+                        suppressed_domains=routing_decision.suppressed_domains,
                     ))
                 except Exception as exc:
                     logger.debug("[Orchestrator:stream] Direct telemetry skipped: %s", exc)
@@ -565,10 +719,52 @@ class TaxAgentOrchestrator:
                 return
             if conv_intel_result.is_ambiguous and conv_intel_result.clarification_prompt:
                 # Return clarification instead of running full pipeline
+                try:
+                    turn_repo.update_assistant_turn(
+                        turn_id=assistant_turn_id,
+                        message_text=conv_intel_result.clarification_prompt,
+                        normalized_intent="clarification",
+                        confidence=0.8,
+                        citations_json="[]",
+                    )
+                    db.execute(
+                        sql_text(
+                            """
+                            INSERT INTO agent_decision_traces
+                            (session_id, turn_id, intent, selected_track, confidence,
+                             abstained, escalation_required, evidence_json, answer_text)
+                            VALUES (:session_id, :turn_id, 'clarification', 'clarification', :confidence,
+                             FALSE, FALSE, CAST(:evidence_json AS jsonb), :answer_text)
+                            """
+                        ),
+                        {
+                            "session_id": session_id,
+                            "turn_id": assistant_turn_id,
+                            "confidence": 0.8,
+                            "evidence_json": _json_dumps_safe({"is_ambiguous": True}),
+                            "answer_text": conv_intel_result.clarification_prompt,
+                        },
+                    )
+                    db.commit()
+                except Exception as exc:
+                    logger.debug("[Orchestrator:stream] Clarification persistence skipped: %s", exc)
                 yield {"event": "text_chunk", "data": {"chunk": conv_intel_result.clarification_prompt}}
                 yield {"event": "done", "data": {
+                    "schema_version": AGENT_RESPONSE_SCHEMA_VERSION,
+                    "mode_contract_version": MODE_CONTRACT_VERSION,
+                    "run_id": run_id,
+                    "run_state": "finalized",
                     "session_id": session_id, "answer": conv_intel_result.clarification_prompt,
                     "intent": "clarification", "is_ambiguous": True,
+                    "mode_workspace": self._build_mode_workspace(
+                        model_mode=model_mode,
+                        legal_workspace={},
+                        simulation_workspace={},
+                        tool_results={},
+                        viz_data={},
+                        analysis_blocks=[],
+                    ),
+                    "error_detail": {},
                 }}
                 return
         except Exception as exc:
@@ -611,6 +807,25 @@ class TaxAgentOrchestrator:
         intent_conf = min(0.95, max(0.15, float(intent_conf)))
         latency_breakdown["intent"] = (time.perf_counter() - t0) * 1000.0
 
+        # ─── Intent Override: "phân tích chi tiết MST X" from row-click ───
+        _detail_keywords = ("phân tích chi tiết", "phân tích rủi ro", "chi tiết doanh nghiệp", "kiểm tra mst", "phân tích mst", "phân tích chi tiết mst")
+        _msg_lower = message.lower()
+        _has_detail_keyword = any(kw in _msg_lower for kw in _detail_keywords)
+        _has_explicit_mst = bool(re.search(r"\b\d{10}(?:-\d{3})?\b", message))
+        _explicit_mst_match = re.search(r"\b(\d{10}(?:-\d{3})?)\b", message)
+        if _explicit_mst_match:
+            context.active_tax_code = _explicit_mst_match.group(1)
+        # Override when intent leaked from previous turn (batch/top_n) but user is asking about a specific company
+        if intent in ("top_n_query", "batch_analysis") and _has_explicit_mst and _has_detail_keyword:
+            intent = "general_tax_query"
+            intent_conf = 0.88
+            logger.info("[Orchestrator] Intent override: %s -> general_tax_query (specific MST detail request)", intent)
+        _stripped_message = message.strip()
+        if intent == "batch_analysis" and re.fullmatch(r"\d{10}(?:-\d{3})?", _stripped_message):
+            intent = "general_tax_query"
+            intent_conf = 0.85
+            logger.info("[Orchestrator] Intent override: batch_analysis -> general_tax_query (raw MST message)")
+
         yield {"event": "thinking", "data": {
             "step": "intent_done",
             "detail": f"Intent: {intent} ({intent_conf:.0%})",
@@ -621,20 +836,45 @@ class TaxAgentOrchestrator:
         # ─── Step 2.5: NL Query Fast Paths ──────────────────────────────
         t0 = time.perf_counter()
         nl_results = {}
+        if getattr(context, "prior_answer_facts", None):
+            nl_results["_prior_answer_facts"] = {
+                "status": "available",
+                "facts": context.prior_answer_facts[:12],
+                "source": "session_memory",
+            }
         try:
             from ml_engine.tax_agent_nl_query import NLQueryExecutor
             nl_executor = NLQueryExecutor()
 
             if intent == "top_n_query":
-                yield {"event": "thinking", "data": {"step": "nl_query", "detail": "Đang truy vấn top DN rủi ro..."}}
                 quantity = 10
                 if multi_intent_result and multi_intent_result.extracted_entities:
                     for ent in multi_intent_result.extracted_entities:
                         if ent.get("type") == "quantity":
                             quantity = min(50, max(1, int(ent["value"])))
-                nl_results["top_n_risky_companies"] = nl_executor.execute_top_n(
-                    db, n=quantity, sort_by="risk_score", mode=model_mode,
-                )
+
+                # Session memory: if batch data exists from a recent upload, use that
+                if context.last_batch_data and context.last_batch_data.get("companies"):
+                    batch_companies = context.last_batch_data["companies"]
+                    sorted_companies = sorted(batch_companies, key=lambda c: float(c.get("risk_score", 0)), reverse=True)
+                    top_slice = sorted_companies[:quantity]
+                    src_filename = context.last_batch_data.get("filename", "file đã upload")
+                    yield {"event": "thinking", "data": {"step": "nl_query", "detail": f"Truy vấn top {quantity} DN rủi ro từ {src_filename}..."}}
+                    nl_results["top_n_risky_companies"] = {
+                        "companies": [
+                            {"stt": i + 1, **c} for i, c in enumerate(top_slice)
+                        ],
+                        "total": len(batch_companies),
+                        "query_n": quantity,
+                        "source": f"session_memory:{src_filename}",
+                        "status": "success",
+                    }
+                    logger.info("[Orchestrator] top_n served from session memory (%d companies from %s)", len(top_slice), src_filename)
+                else:
+                    yield {"event": "thinking", "data": {"step": "nl_query", "detail": "Đang truy vấn top DN rủi ro..."}}
+                    nl_results["top_n_risky_companies"] = nl_executor.execute_top_n(
+                        db, n=quantity, sort_by="risk_score", mode=model_mode,
+                    )
 
             elif intent == "company_name_lookup":
                 company_name = ""
@@ -653,7 +893,9 @@ class TaxAgentOrchestrator:
                 analysis_type = str(attachment_analysis.get("analysis_type") or attachment_analysis.get("detected_schema", "attachment"))
                 yield {"event": "thinking", "data": {"step": "attachment", "detail": f"Đã phân tích tệp đính kèm: {analysis_type}"}}
                 nl_results["_attachment_analysis"] = attachment_analysis
-                if analysis_type == "risk_csv":
+                if attachment_analysis.get("status") == "mode_mismatch":
+                    intent = "mode_mismatch"
+                elif analysis_type == "risk_csv":
                     intent = "batch_analysis"
                     nl_results["_batch_results"] = attachment_analysis
                 elif analysis_type == "vat_graph_csv":
@@ -664,24 +906,195 @@ class TaxAgentOrchestrator:
                     nl_results["_ocr_document_results"] = attachment_analysis
 
             if csv_attachment:
-                intent = "batch_analysis"
-                yield {"event": "thinking", "data": {"step": "batch", "detail": f"Đang phân tích file {csv_attachment.get('filename', 'CSV')}..."}}
-                batch_result = nl_executor.execute_batch_inline(
-                    db, csv_content=csv_attachment["content"], filename=csv_attachment["filename"],
-                )
-                nl_results["_batch_results"] = batch_result
+                filename = csv_attachment.get("filename", "CSV")
+                csv_columns = _detect_csv_columns(csv_attachment.get("content", b""))
+                if _is_vat_invoice_schema(csv_columns):
+                    intent = "vat_network_analysis"
+                    yield {"event": "thinking", "data": {"step": "batch", "detail": f"Phát hiện file hóa đơn VAT: {filename}..."}}
+                    vat_result = nl_executor.execute_vat_graph_inline(
+                        db, csv_content=csv_attachment["content"], filename=filename,
+                    )
+                    nl_results["_vat_graph_batch_results"] = vat_result
+                else:
+                    intent = "batch_analysis"
+                    yield {"event": "thinking", "data": {"step": "batch", "detail": f"Đang phân tích file {filename}..."}}
+                    batch_result = nl_executor.execute_batch_inline(
+                        db, csv_content=csv_attachment["content"], filename=filename,
+                    )
+                    nl_results["_batch_results"] = batch_result
+
+                    # Session memory: save batch data for follow-up queries
+                    if batch_result and batch_result.get("status") in ("success", "partial", "analyzed"):
+                        # NLQueryExecutor returns "assessments"/"top_5", normalize to session memory keys
+                        _batch_companies = batch_result.get("assessments", batch_result.get("companies", []))
+                        _batch_top = batch_result.get("top_5", batch_result.get("top_risky", []))
+                        context.last_batch_data = {
+                            "filename": filename,
+                            "total": batch_result.get("total", 0),
+                            "companies": _batch_companies,
+                            "company_index": {
+                                _normalize_mst(c.get("tax_code") or c.get("mst")): c
+                                for c in _batch_companies
+                                if isinstance(c, dict) and _normalize_mst(c.get("tax_code") or c.get("mst"))
+                            },
+                            "by_level": batch_result.get("by_level", {}),
+                            "top_risky": _batch_top,
+                            "timestamp": time.time(),
+                        }
+                        context.last_attachment_summary = (
+                            f"File {filename}: "
+                            f"{batch_result.get('total', 0)} doanh nghiệp đã phân tích."
+                        )
+                        logger.info("[Orchestrator] Session memory updated with batch data from %s (%d companies)",
+                                    filename, len(_batch_companies))
+                        # Persist to memory store for cross-turn access
+                        self._memory.save_batch_data(session_id, context.last_batch_data)
+                        self._memory.save_attachment_summary(session_id, context.last_attachment_summary)
+
         except Exception as exc:
             logger.warning("[Orchestrator:stream] NL query error: %s", exc)
         latency_breakdown["nl_query"] = (time.perf_counter() - t0) * 1000.0
+
+        try:
+            self._persist_upload_session_memory(
+                session_id=session_id,
+                context=context,
+                csv_attachment=csv_attachment,
+                nl_results=nl_results,
+            )
+            self._inject_session_followup_rows(
+                session_id=session_id,
+                message=message,
+                context=context,
+                nl_results=nl_results,
+            )
+        except Exception as exc:
+            logger.warning("[Orchestrator:stream] Session memory drill-down skipped: %s", exc)
+
+        # ─── Batch analysis: clear active_tax_code to prevent GNN/motif on random MST ───
+        if intent == "batch_analysis":
+            context.active_tax_code = None
 
         routing_decision = self._task_router.route(
             query=message,
             intent=intent,
             model_mode=model_mode,
             has_attachment=bool(attachment_analysis or csv_attachment),
+            attachment_analysis=attachment_analysis,
         )
         if not routing_decision.allow_legal and intent == "top_n_query":
             context.active_tax_code = None
+
+        if routing_decision.mode_mismatch:
+            answer = self._build_mode_mismatch_answer(
+                model_mode=model_mode,
+                routing_decision=routing_decision,
+                attachment_analysis=attachment_analysis,
+            )
+            total_latency = (time.perf_counter() - t_total_start) * 1000.0
+            payload = {
+                "schema_version": AGENT_RESPONSE_SCHEMA_VERSION,
+                "mode_contract_version": MODE_CONTRACT_VERSION,
+                "run_id": run_id,
+                "run_state": "finalized",
+                "session_id": session_id,
+                "intent": intent,
+                "intent_confidence": round(routing_decision.route_confidence, 4),
+                "complexity": "direct",
+                "reasoning_trace": "Mode guard stopped incompatible request before tool execution.",
+                "tools_used": [],
+                "answer": answer,
+                "summary": "Che do phan tich khong phu hop voi yeu cau hoac tep dinh kem.",
+                "citations": [],
+                "recommendations": ["Chuyen sang che do duoc goi y hoac dung Toan dien de he thong tu chon model."],
+                "confidence": routing_decision.route_confidence,
+                "abstained": False,
+                "escalation_required": False,
+                "escalation_domain": "none",
+                "compliance_warnings": [],
+                "active_tax_code": context.active_tax_code,
+                "active_tax_period": context.active_tax_period,
+                "latency_ms": round(total_latency, 1),
+                "latency_breakdown": {k: round(v, 1) for k, v in latency_breakdown.items()},
+                "synthesis_tier": "mode_guard",
+                "verification": {"status": "not_required", "reason": "mode_mismatch"},
+                "clarification_needed": False,
+                "clarification_questions": [],
+                "tool_results": nl_results,
+                "policy_traces": [],
+                "visualization_data": {},
+                "model_mode": model_mode,
+                "plan_steps": [],
+                "dialogue_act": getattr(conv_intel_result, "dialogue_act", "task") if conv_intel_result else "task",
+                "answer_contract": routing_decision.answer_contract.value,
+                "routing_decision": routing_decision.to_dict(),
+                "focus_score": routing_decision.focus_score,
+                "route_violation": routing_decision.route_violation,
+                "selected_model_bundle": routing_decision.selected_model_bundle,
+                "mode_validation": routing_decision.mode_validation,
+                "mode_mismatch": True,
+                "suggested_mode": routing_decision.suggested_mode,
+                "suppressed_domains": routing_decision.suppressed_domains,
+                "analysis_blocks": [
+                    {"type": "mode_mismatch", "title": "Che do khong phu hop", "data": routing_decision.to_dict()}
+                ],
+                "mode_workspace": self._build_mode_workspace(
+                    model_mode=model_mode,
+                    legal_workspace={},
+                    simulation_workspace={},
+                    tool_results=nl_results,
+                    viz_data={},
+                    analysis_blocks=[
+                        {"type": "mode_mismatch", "title": "Che do khong phu hop", "data": routing_decision.to_dict()}
+                    ],
+                ),
+                "error_detail": {},
+            }
+            try:
+                turn_repo.update_assistant_turn(
+                    turn_id=assistant_turn_id,
+                    message_text=answer,
+                    normalized_intent=intent,
+                    confidence=routing_decision.route_confidence,
+                    citations_json="[]",
+                )
+                db.execute(sql_text("""
+                    INSERT INTO agent_decision_traces
+                    (session_id, turn_id, intent, selected_track, confidence,
+                     abstained, escalation_required, evidence_json, answer_text)
+                    VALUES (:session_id, :turn_id, :intent, 'mode_guard', :confidence,
+                     FALSE, FALSE, CAST(:evidence_json AS jsonb), :answer_text)
+                """), {
+                    "session_id": session_id,
+                    "turn_id": assistant_turn_id,
+                    "intent": intent,
+                    "confidence": routing_decision.route_confidence,
+                    "evidence_json": _json_dumps_safe({
+                        "routing": routing_decision.to_dict(),
+                        "attachment_analysis": attachment_analysis or {},
+                    }),
+                    "answer_text": answer,
+                })
+                self._persist_route_event(
+                    db,
+                    session_id=session_id,
+                    turn_id=assistant_turn_id,
+                    dialogue_act=payload["dialogue_act"],
+                    intent=intent,
+                    model_mode=model_mode,
+                    selected_tools=[],
+                    routing_decision=routing_decision,
+                )
+                db.commit()
+            except Exception as exc:
+                try:
+                    db.rollback()
+                except Exception:
+                    pass
+                logger.debug("[Orchestrator:stream] Mode mismatch persist skipped: %s", exc)
+            yield {"event": "text_chunk", "data": {"chunk": answer}}
+            yield {"event": "done", "data": payload}
+            return
 
         # ─── Step 3: Planning ───────────────────────────────────────────
         yield {"event": "thinking", "data": {"step": "planning", "detail": "Đang lập kế hoạch phân tích..."}}
@@ -701,13 +1114,17 @@ class TaxAgentOrchestrator:
             allowed_optional = allowed_optional.intersection(route_tools)
         if not routing_decision.allow_legal:
             allowed_sub_agents.discard("legal")
+        plan_intent = "macro_forecast" if routing_decision.requested_domain == "macro" else intent
         plan = self._planner.plan(
             query=message,
-            intent=intent,
+            intent=plan_intent,
             intent_confidence=intent_conf,
             tax_code=context.active_tax_code,
             tax_period=context.active_tax_period,
             context_intents=context.active_intent_history,
+            model_mode=model_mode,
+            routing_decision=routing_decision,
+            allowed_tools=routing_decision.allowed_tools,
         )
         if routing_decision.allowed_tools is not None:
             plan.steps = [s for s in plan.steps if s.tool_name in routing_decision.allowed_tools]
@@ -746,6 +1163,10 @@ class TaxAgentOrchestrator:
                     continue
                 tool_inputs = dict(step.tool_inputs)
                 request_id = f"req-{uuid.uuid4().hex[:8]}"
+                if step.tool_name == "macro_forecast":
+                    macro_scenario = self._normalize_simulation_params(simulation_params)
+                    tool_inputs["scenario"] = macro_scenario
+                    tool_inputs["action"] = self._infer_macro_action(message, macro_scenario)
                 if step.tool_name == "knowledge_search":
                     tool_inputs.update({
                         "session_id": session_id,
@@ -844,6 +1265,16 @@ class TaxAgentOrchestrator:
                     session_id=session_id,
                     top_k=top_k,
                 )
+                if routing_decision.allowed_tools is not None:
+                    react_requests = [
+                        req for req in react_requests
+                        if req.tool_name in routing_decision.allowed_tools
+                    ]
+                elif not routing_decision.allow_legal:
+                    react_requests = [
+                        req for req in react_requests
+                        if req.tool_name != "knowledge_search"
+                    ]
                 if not react_requests:
                     break
 
@@ -883,7 +1314,10 @@ class TaxAgentOrchestrator:
             ks_result = all_tool_results.get("knowledge_search", {})
             ks_hits = ks_result.get("hits", [])
             ks_graph_context = ks_result.get("graph_context")  # GraphRAG subgraph
-            if ks_hits and "legal" in allowed_sub_agents:
+
+            bypass_sub_agents = intent in ("batch_analysis", "top_n_query", "analytical_query")
+
+            if ks_hits and "legal" in allowed_sub_agents and not bypass_sub_agents:
                 graphrag_tag = " (GraphRAG)" if ks_graph_context else ""
                 yield {"event": "sub_agent", "data": {"agent": "legal", "status": "running", "detail": f"Phân tích pháp lý{graphrag_tag}..."}}
                 legal_opinion = self._legal_agent.research(
@@ -900,7 +1334,7 @@ class TaxAgentOrchestrator:
                 }
                 yield {"event": "sub_agent", "data": {"agent": "legal", "status": "done"}}
 
-            if context.active_tax_code and plan.complexity.value in ("moderate", "complex", "investigation") and "analytics" in allowed_sub_agents:
+            if context.active_tax_code and plan.complexity.value in ("moderate", "complex", "investigation") and "analytics" in allowed_sub_agents and not bypass_sub_agents:
                 yield {"event": "sub_agent", "data": {"agent": "analytics", "status": "running", "detail": "Phân tích rủi ro tổng hợp..."}}
                 analytics_report = self._analytics_agent.analyze(
                     tax_code=context.active_tax_code, tool_results=all_tool_results, intent=intent,
@@ -919,15 +1353,15 @@ class TaxAgentOrchestrator:
             _investigation_intents = {
                 "osint_ownership", "invoice_risk", "vat_refund_risk",
                 "general_tax_query", "transfer_pricing", "vat_network_analysis",
-                "batch_analysis",
             }
             _should_investigate = (
-                context.active_tax_code
+                not bypass_sub_agents
+                and context.active_tax_code
                 and plan.complexity.value in ("moderate", "complex", "investigation")
                 and "investigation" in allowed_sub_agents
                 and (
                     intent in _investigation_intents
-                    or model_mode in ("fraud", "full")
+                    or getattr(routing_decision, "requested_domain", "") in ("fraud", "vat")
                     or react_escalate
                 )
             )
@@ -999,15 +1433,6 @@ class TaxAgentOrchestrator:
         # ─── Step 5.5: ReAct Self-Reflection ─────────────────────────────
         # ─── Step 6: Compliance ─────────────────────────────────────────
         t0 = time.perf_counter()
-        turn_row = db.execute(
-            sql_text("""
-                INSERT INTO agent_turns (session_id, turn_index, role, message_text)
-                VALUES (:session_id, :turn_index, 'assistant', '') RETURNING id
-            """),
-            {"session_id": session_id, "turn_index": turn_index + 1},
-        ).fetchone()
-        assistant_turn_id = int(turn_row[0]) if turn_row else 0
-
         retrieval_hits = len(all_tool_results.get("knowledge_search", {}).get("hits", []))
         compliance = self._compliance_gate.evaluate(
             query=message, intent=intent, intent_confidence=intent_conf,
@@ -1075,7 +1500,7 @@ class TaxAgentOrchestrator:
         """), {
             "turn_id": assistant_turn_id, "message_text": answer,
             "normalized_intent": intent, "confidence": intent_conf,
-            "citations_json": _json.dumps(citations),
+            "citations_json": _json_dumps_safe(citations),
         })
 
         db.execute(sql_text("""
@@ -1088,7 +1513,7 @@ class TaxAgentOrchestrator:
             "session_id": session_id, "turn_id": assistant_turn_id, "intent": intent,
             "selected_track": plan.complexity.value, "confidence": synthesis_result.confidence,
             "abstained": compliance.abstain, "escalation_required": final_escalate,
-            "evidence_json": _json.dumps({
+            "evidence_json": _json_dumps_safe({
                 "plan": {
                     "complexity": plan.complexity.value,
                     "tools": [s.tool_name for s in plan.steps],
@@ -1116,8 +1541,8 @@ class TaxAgentOrchestrator:
                 VALUES (:session_id, :turn_id, :tool_name, CAST(:tool_input AS jsonb), CAST(:tool_output AS jsonb), :status, :latency_ms)
             """), {
                 "session_id": session_id, "turn_id": assistant_turn_id, "tool_name": tool_name,
-                "tool_input": _json.dumps(next((s.tool_inputs for s in plan.steps if s.tool_name == tool_name), {})),
-                "tool_output": _json.dumps({k: v for k, v in result.items() if not k.startswith("_")}, default=str),
+                "tool_input": _json_dumps_safe(next((s.tool_inputs for s in plan.steps if s.tool_name == tool_name), {})),
+                "tool_output": _json_dumps_safe({k: v for k, v in result.items() if not k.startswith("_")}),
                 "status": result.get("status", "unknown"), "latency_ms": result.get("_latency_ms"),
             })
 
@@ -1181,6 +1606,36 @@ class TaxAgentOrchestrator:
 
         # Visualization data
         viz_data = self._build_visualization_data(all_tool_results, sub_agent_analysis, plan, latency_breakdown)
+        analysis_blocks = self._build_analysis_blocks(
+            tool_results=all_tool_results,
+            routing_decision=routing_decision,
+            synthesis_result=synthesis_result,
+        )
+        prior_facts = self._extract_prior_answer_facts(
+            mode=model_mode,
+            intent=intent,
+            answer=answer,
+            summary=synthesis_result.summary,
+            recommendations=synthesis_result.recommendations,
+            analysis_blocks=analysis_blocks,
+            tool_results=all_tool_results,
+        )
+        try:
+            self._memory.save_prior_answer_facts(
+                session_id,
+                turn_id=assistant_turn_id,
+                mode=model_mode,
+                intent=intent,
+                facts=prior_facts,
+            )
+        except Exception as exc:
+            logger.debug("[Orchestrator:stream] Prior fact persist skipped: %s", exc)
+        try:
+            from ml_engine.visualization_normalizer_v3 import normalize_visualization_v3
+            if isinstance(viz_data, dict):
+                viz_data["v3"] = normalize_visualization_v3(viz_data)
+        except Exception:
+            pass
         if debate_result_dict:
             viz_data["agent_debate"] = debate_result_dict
         if legal_review.get("disagreements"):
@@ -1226,6 +1681,12 @@ class TaxAgentOrchestrator:
                 routing_decision=routing_decision.to_dict(),
                 focus_score=routing_decision.focus_score,
                 route_violation=routing_decision.route_violation,
+                selected_model_bundle=routing_decision.selected_model_bundle,
+                mode_validation=routing_decision.mode_validation,
+                mode_mismatch=routing_decision.mode_mismatch,
+                suggested_mode=routing_decision.suggested_mode,
+                suppressed_domains=routing_decision.suppressed_domains,
+                analysis_blocks=analysis_blocks,
             )
             get_telemetry().record_from_orchestrator(telemetry_resp)
         except Exception as e:
@@ -1287,8 +1748,28 @@ class TaxAgentOrchestrator:
             "escalations": escalations,
             "debate_conclusions": debate_conclusions,
         }
+        simulation_workspace = self._build_simulation_workspace(
+            context=context,
+            model_mode=model_mode,
+            message=message,
+            tool_results=all_tool_results,
+            viz_data=viz_data,
+            simulation_params=simulation_params,
+        )
+        mode_workspace = self._build_mode_workspace(
+            model_mode=model_mode,
+            legal_workspace=legal_workspace,
+            simulation_workspace=simulation_workspace,
+            tool_results=all_tool_results,
+            viz_data=viz_data,
+            analysis_blocks=analysis_blocks,
+        )
 
         yield {"event": "done", "data": {
+            "schema_version": AGENT_RESPONSE_SCHEMA_VERSION,
+            "mode_contract_version": MODE_CONTRACT_VERSION,
+            "run_id": run_id,
+            "run_state": "finalized",
             "session_id": session_id,
             "intent": intent,
             "intent_confidence": round(intent_conf, 4),
@@ -1330,6 +1811,12 @@ class TaxAgentOrchestrator:
             "routing_decision": routing_decision.to_dict(),
             "focus_score": routing_decision.focus_score,
             "route_violation": routing_decision.route_violation,
+            "selected_model_bundle": routing_decision.selected_model_bundle,
+            "mode_validation": routing_decision.mode_validation,
+            "mode_mismatch": routing_decision.mode_mismatch,
+            "suggested_mode": routing_decision.suggested_mode,
+            "suppressed_domains": routing_decision.suppressed_domains,
+            "analysis_blocks": analysis_blocks,
             "plan_budget_ms": budget_ms,
             "retry_policy": getattr(plan, "retry_policy", {}),
             "evidence_contract": getattr(plan, "evidence_contract", {}),
@@ -1337,6 +1824,13 @@ class TaxAgentOrchestrator:
             "debate": debate_result_dict,
             "legal_review": legal_review,
             "legal_workspace": legal_workspace,
+            "simulation_workspace": simulation_workspace,
+            "mode_workspace": mode_workspace,
+            "error_detail": {},
+            "intent_model_version": getattr(self._enhanced_intent, "tier", "") if self._enhanced_intent else "",
+            "planner_policy_version": getattr(self._planner, "PLANNER_POLICY_VERSION", "") if self._planner else "",
+            "debate_session_id": debate_result_dict.get("session_id") if debate_result_dict else None,
+            "graph_reasoning_path": [],
             "plan_steps": [
                 {
                     "tool": s.tool_name,
@@ -1348,6 +1842,424 @@ class TaxAgentOrchestrator:
                 for s in plan.steps
             ],
         }}
+
+    def _extract_prior_answer_facts(
+        self,
+        *,
+        mode: str,
+        intent: str,
+        answer: str,
+        summary: str,
+        recommendations: list[str],
+        analysis_blocks: list[dict[str, Any]],
+        tool_results: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        """Extract compact structured facts for follow-up grounding."""
+        facts: list[dict[str, Any]] = []
+        if summary:
+            facts.append({
+                "fact_type": "summary",
+                "claim_text": summary[:700],
+                "source_tool": "synthesis",
+                "confidence": 0.82,
+                "value_json": {"mode": mode, "intent": intent},
+            })
+        for rec in (recommendations or [])[:6]:
+            text = str(rec or "").strip()
+            if text:
+                facts.append({
+                    "fact_type": "recommendation",
+                    "claim_text": text[:700],
+                    "source_tool": "synthesis",
+                    "confidence": 0.78,
+                    "value_json": {"mode": mode, "intent": intent},
+                })
+        for block in (analysis_blocks or [])[:6]:
+            if not isinstance(block, dict):
+                continue
+            metrics = block.get("metrics") if isinstance(block.get("metrics"), dict) else {}
+            title = str(block.get("title") or block.get("type") or "analysis").strip()
+            claim = str(block.get("summary") or title).strip()
+            if claim:
+                facts.append({
+                    "fact_type": str(block.get("type") or "analysis_block"),
+                    "claim_text": claim[:700],
+                    "source_tool": "analysis_blocks",
+                    "confidence": 0.8,
+                    "value_json": {"title": title, "metrics": metrics},
+                })
+            for item in (metrics.get("top_records") or metrics.get("top_invoice_risks") or [])[:8]:
+                if not isinstance(item, dict):
+                    continue
+                subject = item.get("tax_code") or item.get("mst") or item.get("seller_tax_code") or item.get("buyer_tax_code")
+                score = item.get("risk_score") or item.get("edge_risk_score") or item.get("score")
+                facts.append({
+                    "fact_type": "ranked_subject",
+                    "subject_key": str(subject) if subject else None,
+                    "claim_text": f"{title}: {subject or 'subject'} co diem/chi so {score if score is not None else 'N/A'}",
+                    "source_tool": "analysis_blocks",
+                    "confidence": 0.76,
+                    "value_json": item,
+                })
+        for key in ("_session_upload_row", "_vat_session_focus", "_prior_answer_facts"):
+            value = tool_results.get(key) if isinstance(tool_results, dict) else None
+            if isinstance(value, dict):
+                facts.append({
+                    "fact_type": key.strip("_"),
+                    "subject_key": value.get("tax_code") or value.get("source_filename"),
+                    "claim_text": f"Session memory available: {key}",
+                    "source_tool": key,
+                    "confidence": 0.74,
+                    "value_json": value,
+                })
+        return facts[:80]
+
+    def _build_mode_workspace(
+        self,
+        *,
+        model_mode: str,
+        legal_workspace: dict[str, Any],
+        simulation_workspace: dict[str, Any],
+        tool_results: dict[str, Any],
+        viz_data: dict[str, Any],
+        analysis_blocks: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        """Build a unified workspace payload across modes."""
+        contract = AgentModeContractRegistry.get(model_mode)
+        workspace: dict[str, Any] = {
+            "schema_version": AGENT_RESPONSE_SCHEMA_VERSION,
+            "mode_contract_version": MODE_CONTRACT_VERSION,
+            "mode": contract.mode,
+            "panel": contract.workspace_panel,
+            "required_visualization_keys": list(contract.required_visualization_keys),
+            "analysis_blocks": analysis_blocks[:8],
+            "artifacts": [],
+        }
+        if contract.workspace_panel == "legal":
+            workspace["legal"] = legal_workspace or {}
+        elif contract.workspace_panel == "simulation":
+            workspace["simulation"] = simulation_workspace or {}
+        elif contract.workspace_panel == "fraud":
+            fraud = (viz_data or {}).get("fraud") or {}
+            batch = tool_results.get("_batch_results") or tool_results.get("_attachment_analysis") or {}
+            workspace["fraud"] = {
+                "summary": fraud.get("summary") or {},
+                "top_companies": fraud.get("top_companies") or batch.get("top_5") or batch.get("assessments", [])[:10],
+                "risk_distribution": fraud.get("risk_distribution") or batch.get("by_level") or {},
+                "source": batch.get("filename") or fraud.get("summary", {}).get("source"),
+            }
+        elif contract.workspace_panel == "vat":
+            vat = (viz_data or {}).get("vat") or {}
+            workspace["vat"] = {
+                "summary": vat.get("summary") or {},
+                "top_invoice_risks": vat.get("top_invoice_risks") or [],
+                "graph_counts": {
+                    "nodes": len(((vat.get("graph") or {}).get("nodes") or [])),
+                    "edges": len(((vat.get("graph") or {}).get("edges") or [])),
+                },
+            }
+        elif contract.workspace_panel == "delinquency":
+            dq = tool_results.get("delinquency_check") or {}
+            deep = tool_results.get("temporal_delinquency_deep") or {}
+            uplift = tool_results.get("causal_uplift_recommend") or {}
+            workspace["delinquency"] = {
+                "probabilities": {
+                    "prob_30d": dq.get("prob_30d") or deep.get("prob_30d"),
+                    "prob_60d": dq.get("prob_60d") or deep.get("prob_60d"),
+                    "prob_90d": dq.get("prob_90d") or deep.get("prob_90d"),
+                },
+                "top_reasons": dq.get("top_reasons") or deep.get("top_reasons") or [],
+                "recommended_action": uplift.get("recommended_action"),
+            }
+        return workspace
+
+    def _normalize_simulation_params(self, params: dict[str, Any] | None) -> dict[str, Any]:
+        """Normalize macro workspace controls into app.routers.simulation.ScenarioInput shape."""
+        defaults: dict[str, Any] = {
+            "vat_rate": 10.0,
+            "cit_rate": 20.0,
+            "audit_coverage_pct": 5.0,
+            "penalty_multiplier": 1.0,
+            "interest_rate": 6.0,
+            "economic_growth_pct": 6.5,
+            "cpi_pct": 3.5,
+            "unemployment_pct": 2.3,
+            "exchange_rate_delta_pct": 0.0,
+            "projection_years": 5,
+        }
+        if isinstance(params, str):
+            try:
+                params = json.loads(params)
+            except Exception:
+                params = {}
+        if not isinstance(params, dict):
+            return dict(defaults)
+        aliases = {
+            "vat": "vat_rate",
+            "cit": "cit_rate",
+            "audit": "audit_coverage_pct",
+            "penalty": "penalty_multiplier",
+            "gdp": "economic_growth_pct",
+            "cpi": "cpi_pct",
+            "unemployment": "unemployment_pct",
+            "usd_fx": "exchange_rate_delta_pct",
+            "fx": "exchange_rate_delta_pct",
+            "years": "projection_years",
+            "horizon_years": "projection_years",
+        }
+        normalized = dict(defaults)
+        for raw_key, raw_value in params.items():
+            key = aliases.get(str(raw_key), str(raw_key))
+            if key not in defaults:
+                if key in {"industry_filter", "province_filter"} and raw_value:
+                    normalized[key] = str(raw_value)
+                continue
+            try:
+                if key == "projection_years":
+                    normalized[key] = int(max(1, min(10, int(float(raw_value)))))
+                else:
+                    normalized[key] = float(raw_value)
+            except Exception:
+                continue
+        return normalized
+
+    def _infer_macro_action(self, message: str, scenario: dict[str, Any]) -> str:
+        """Infer simulation action while keeping the UI control payload safe."""
+        text = (message or "").lower()
+        if "monte" in text and scenario.get("n_iterations"):
+            return "monte-carlo"
+        if ("nhay" in text or "sensitivity" in text) and scenario.get("request"):
+            return "sensitivity"
+        if ("so sanh" in text or "compare" in text) and scenario.get("scenarios"):
+            return "compare"
+        return "run"
+
+    def _plain_payload(self, value: Any) -> Any:
+        """Convert pydantic/models/nested containers to JSON-friendly dicts."""
+        if hasattr(value, "model_dump"):
+            try:
+                return value.model_dump()
+            except Exception:
+                pass
+        if isinstance(value, dict):
+            return {str(k): self._plain_payload(v) for k, v in value.items()}
+        if isinstance(value, (list, tuple)):
+            return [self._plain_payload(v) for v in value]
+        return value
+
+    def _build_simulation_workspace(
+        self,
+        *,
+        context,
+        model_mode: str,
+        message: str,
+        tool_results: dict[str, Any],
+        viz_data: dict[str, Any],
+        simulation_params: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Compact simulation workspace payload for macro-mode sidebar."""
+        has_macro_result = isinstance(tool_results, dict) and "macro_forecast" in tool_results
+        if model_mode != "macro" and not has_macro_result:
+            return {}
+        sim: dict[str, Any] = {}
+        macro_tool: dict[str, Any] = {}
+        for key in ("macro_forecast", "macro_scenario_simulation", "simulation", "macro_impact"):
+            value = tool_results.get(key) if isinstance(tool_results, dict) else None
+            if isinstance(value, dict):
+                macro_tool = value
+                candidate = value.get("result") or value.get("baseline") or value
+                sim = self._plain_payload(candidate)
+                if not isinstance(sim, dict):
+                    sim = value
+                break
+        requested_params = self._normalize_simulation_params(simulation_params)
+        params = sim.get("parameters") if isinstance(sim.get("parameters"), dict) else requested_params
+        suggested = sim.get("recommended_parameters") if isinstance(sim.get("recommended_parameters"), dict) else {}
+        ranges = sim.get("parameter_ranges") if isinstance(sim.get("parameter_ranges"), dict) else {}
+        sensitivity = sim.get("sensitivity_top_factors") if isinstance(sim.get("sensitivity_top_factors"), list) else []
+        quarterly = sim.get("quarterly_projection") if isinstance(sim.get("quarterly_projection"), list) else []
+        industry_impacts = sim.get("industry_impacts") if isinstance(sim.get("industry_impacts"), list) else []
+        return {
+            "current_params": params,
+            "recommended_params": suggested,
+            "ranges": ranges,
+            "sensitivity_top_factors": sensitivity[:12],
+            "scenario_label": sim.get("scenario_label") or sim.get("scenario_name") or "Macro simulation",
+            "projection_years": sim.get("projection_years") or sim.get("horizon_years") or 3,
+            "updated_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "source_message": message[:120],
+            "session_id": getattr(context, "session_id", None),
+            "kpis": viz_data.get("macro_kpis") if isinstance(viz_data, dict) else {},
+            "tool_action": macro_tool.get("action") or "run",
+            "result": sim,
+            "quarterly_projection": quarterly[:60],
+            "industry_impacts": industry_impacts[:30],
+        }
+
+
+    def _persist_upload_session_memory(
+        self,
+        *,
+        session_id: str,
+        context,
+        csv_attachment: dict | None,
+        nl_results: dict[str, Any],
+    ) -> None:
+        """Save risk batch + VAT snapshot for follow-up turns (same browser session_id)."""
+        if csv_attachment:
+            # Session already updated inline after execute_batch_inline
+            # Re-sync context from memory cache in case downstream reads context.last_batch_data
+            cached = self._memory.get_batch_data(session_id)
+            if cached:
+                context.last_batch_data = cached
+            return
+
+        br = nl_results.get("_batch_results") if isinstance(nl_results, dict) else None
+        if isinstance(br, dict) and br.get("analysis_type") == "risk_csv":
+            if br.get("status") not in {"success", "done", "partial"}:
+                return
+            comps = list(br.get("assessments") or br.get("companies") or [])
+            if not comps:
+                return
+            company_index = {
+                _normalize_mst(c.get("tax_code") or c.get("mst")): c
+                for c in comps
+                if isinstance(c, dict) and _normalize_mst(c.get("tax_code") or c.get("mst"))
+            }
+            payload = {
+                "filename": br.get("filename") or "upload",
+                "total": int(br.get("total") or len(comps)),
+                "companies": comps,
+                "company_index": company_index,
+                "by_level": br.get("by_level") or {},
+                "top_risky": list(br.get("top_5") or br.get("top_risky") or comps[:5]),
+                "batch_source": "canonical_ai_batch" if br.get("canonical_batch_id") else "attachment_analysis",
+                "canonical_batch_id": br.get("canonical_batch_id"),
+                "timestamp": time.time(),
+            }
+            context.last_batch_data = payload
+            self._memory.save_batch_data(session_id, payload)
+            self._memory.save_attachment_summary(
+                session_id,
+                f"File {payload['filename']}: {payload['total']} DN đã phân tích (phiên làm việc).",
+            )
+
+        vat = nl_results.get("_vat_graph_batch_results") if isinstance(nl_results, dict) else None
+        if (
+            isinstance(vat, dict)
+            and vat.get("analysis_type") == "vat_graph_csv"
+            and vat.get("status") != "error"
+        ):
+            graph = vat.get("graph") or {}
+            snap = {
+                "filename": vat.get("filename"),
+                "batch_id": vat.get("batch_id"),
+                "upload_id": vat.get("upload_id"),
+                "summary": vat.get("summary") or {},
+                "top_invoice_risks": list(graph.get("top_invoice_risks") or [])[:100],
+                "nodes": list(graph.get("nodes") or [])[:150],
+                "edges": list(graph.get("edges") or [])[:250],
+                "timestamp": time.time(),
+            }
+            context.last_vat_snapshot = snap
+            self._memory.save_vat_snapshot(session_id, snap)
+
+    def _inject_session_followup_rows(
+        self,
+        *,
+        session_id: str,
+        message: str,
+        context,
+        nl_results: dict[str, Any],
+    ) -> None:
+        """Prefer rows from uploaded risk/VAT snapshots when user mentions MST in chat."""
+        tc = _first_mst_from_message(message)
+        if not tc:
+            return
+
+        bd = getattr(context, "last_batch_data", None) or self._memory.get_batch_data(session_id) or {}
+        index = bd.get("company_index") if isinstance(bd, dict) else None
+        matched_from_index = False
+        if isinstance(index, dict):
+            matched = index.get(tc)
+            if isinstance(matched, dict):
+                nl_results["_session_upload_row"] = {
+                    "status": "matched",
+                    "tax_code": tc,
+                    "row": matched,
+                    "source_filename": bd.get("filename"),
+                    "canonical_batch_id": bd.get("canonical_batch_id"),
+                }
+                matched_from_index = True
+        rows = [] if matched_from_index else (bd.get("companies") if isinstance(bd, dict) else None)
+        if isinstance(rows, list) and rows:
+            matched = None
+            for row in rows:
+                if not isinstance(row, dict):
+                    continue
+                if _normalize_mst(row.get("tax_code") or row.get("mst")) == tc:
+                    matched = row
+                    break
+            if matched is not None:
+                nl_results["_session_upload_row"] = {
+                    "status": "matched",
+                    "tax_code": tc,
+                    "row": matched,
+                    "source_filename": bd.get("filename"),
+                }
+
+        vs = (
+            getattr(context, "last_vat_snapshot", None)
+            or self._memory.get_vat_snapshot(session_id)
+        )
+        if isinstance(vs, dict):
+            inv = vs.get("top_invoice_risks") if isinstance(vs.get("top_invoice_risks"), list) else []
+            matched_inv = [
+                r for r in inv
+                if isinstance(r, dict)
+                and (
+                    _normalize_mst(r.get("seller_tax_code") or r.get("source")) == tc
+                    or _normalize_mst(r.get("buyer_tax_code") or r.get("target")) == tc
+                )
+            ]
+            if matched_inv:
+                nl_results["_vat_session_focus"] = {
+                    "status": "matched",
+                    "tax_code": tc,
+                    "source_filename": vs.get("filename"),
+                    "invoices": matched_inv[:40],
+                    "batch_id": vs.get("batch_id"),
+                }
+
+    def _build_mode_mismatch_answer(
+        self,
+        *,
+        model_mode: str,
+        routing_decision,
+        attachment_analysis: dict[str, Any] | None = None,
+    ) -> str:
+        labels = {
+            "full": "Toàn diện",
+            "legal": "Pháp lý",
+            "fraud": "Gian lận",
+            "vat": "VAT & Hóa đơn",
+            "delinquency": "Dự báo nợ",
+            "macro": "Vĩ mô",
+        }
+        selected = labels.get(model_mode, model_mode)
+        suggested = routing_decision.suggested_mode or routing_decision.requested_domain
+        suggested_label = labels.get(suggested, suggested or "Toàn diện")
+        domain_label = labels.get(routing_decision.requested_domain, routing_decision.requested_domain)
+        filename = ""
+        if attachment_analysis:
+            filename = str(attachment_analysis.get("filename") or "").strip()
+        file_note = f" Tệp `{filename}` được nhận diện thuộc miền {domain_label}." if filename else ""
+        return (
+            f"Chế độ {selected} không phù hợp với yêu cầu hiện tại.{file_note}\n\n"
+            f"Hệ thống đã dừng trước khi chạy model để tránh phân tích sai miền. "
+            f"Nên chuyển sang chế độ {suggested_label}, hoặc chọn Toàn diện để Auto Orchestrator tự chọn model phù hợp.\n\n"
+            f"Bundle được đề xuất: {', '.join(routing_decision.selected_model_bundle or [])}."
+        )
 
 
     def _legal_contradiction_review(self, tool_results: dict[str, Any]) -> dict[str, Any]:
@@ -1547,11 +2459,16 @@ class TaxAgentOrchestrator:
             db.execute(sql_text("""
                 INSERT INTO agent_route_events
                 (session_id, turn_id, dialogue_act, intent, answer_contract, model_mode,
-                 selected_tools_json, suppressed_tools_json, route_confidence,
+                 selected_tools_json, suppressed_tools_json, requested_domain,
+                 selected_model_bundle_json, mode_validation_json, mode_mismatch,
+                 suggested_mode, suppressed_domains_json, route_confidence,
                  focus_score, route_violation)
                 VALUES
                 (:session_id, :turn_id, :dialogue_act, :intent, :answer_contract, :model_mode,
                  CAST(:selected_tools_json AS jsonb), CAST(:suppressed_tools_json AS jsonb),
+                 :requested_domain, CAST(:selected_model_bundle_json AS jsonb),
+                 CAST(:mode_validation_json AS jsonb), :mode_mismatch,
+                 :suggested_mode, CAST(:suppressed_domains_json AS jsonb),
                  :route_confidence, :focus_score, :route_violation)
             """), {
                 "session_id": session_id,
@@ -1560,8 +2477,14 @@ class TaxAgentOrchestrator:
                 "intent": intent,
                 "answer_contract": getattr(routing_decision.answer_contract, "value", str(routing_decision.answer_contract)),
                 "model_mode": model_mode,
-                "selected_tools_json": json.dumps(selected, default=str),
-                "suppressed_tools_json": json.dumps(suppressed, default=str),
+                "selected_tools_json": _json_dumps_safe(selected),
+                "suppressed_tools_json": _json_dumps_safe(suppressed),
+                "requested_domain": getattr(routing_decision, "requested_domain", None),
+                "selected_model_bundle_json": _json_dumps_safe(getattr(routing_decision, "selected_model_bundle", []) or []),
+                "mode_validation_json": _json_dumps_safe(getattr(routing_decision, "mode_validation", {}) or {}),
+                "mode_mismatch": bool(getattr(routing_decision, "mode_mismatch", False)),
+                "suggested_mode": getattr(routing_decision, "suggested_mode", None),
+                "suppressed_domains_json": _json_dumps_safe(getattr(routing_decision, "suppressed_domains", []) or []),
                 "route_confidence": float(getattr(routing_decision, "route_confidence", 0.0) or 0.0),
                 "focus_score": float(getattr(routing_decision, "focus_score", 1.0) or 1.0),
                 "route_violation": bool(getattr(routing_decision, "route_violation", False)),
@@ -1619,9 +2542,9 @@ class TaxAgentOrchestrator:
                 "reasoning_trace": plan.reasoning,
                 "budget_ms": getattr(plan, "budget_ms", None),
                 "max_react_iterations": getattr(plan, "max_react_iterations", None),
-                "retry_policy_json": json.dumps(getattr(plan, "retry_policy", {}) or {}, default=str),
-                "evidence_contract_json": json.dumps(getattr(plan, "evidence_contract", {}) or {}, default=str),
-                "steps_json": json.dumps([
+                "retry_policy_json": _json_dumps_safe(getattr(plan, "retry_policy", {}) or {}),
+                "evidence_contract_json": _json_dumps_safe(getattr(plan, "evidence_contract", {}) or {}),
+                "steps_json": _json_dumps_safe([
                     {
                         "step_id": s.step_id,
                         "tool_name": s.tool_name,
@@ -1635,8 +2558,8 @@ class TaxAgentOrchestrator:
                     }
                     for s in plan.steps
                 ], default=str),
-                "tool_results_json": json.dumps(tool_results, default=str),
-                "synthesis_json": json.dumps({
+                "tool_results_json": _json_dumps_safe(tool_results),
+                "synthesis_json": _json_dumps_safe({
                     "summary": synthesis_result.summary,
                     "confidence": synthesis_result.confidence,
                     "tier": synthesis_result.synthesis_tier,
@@ -1644,13 +2567,13 @@ class TaxAgentOrchestrator:
                     "verification": getattr(synthesis_result, "verification", {}),
                     "clarification_needed": getattr(synthesis_result, "clarification_needed", False),
                 }, default=str),
-                "compliance_json": json.dumps({
+                "compliance_json": _json_dumps_safe({
                     "decision": compliance.overall_decision.value,
                     "abstain": compliance.abstain,
                     "escalate": final_escalate,
                 }, default=str),
                 "latency_ms": sum(float(v or 0) for v in latency_breakdown.values()),
-                "latency_breakdown": json.dumps(latency_breakdown, default=str),
+                "latency_breakdown": _json_dumps_safe(latency_breakdown),
             })
             if nested is not None:
                 nested.commit()
@@ -1699,7 +2622,7 @@ class TaxAgentOrchestrator:
                 "final_label": debate_result.get("consensus_label"),
                 "status": status,
                 "dispute_reason": dispute_reason or None,
-                "resolution_notes": json.dumps({
+                "resolution_notes": _json_dumps_safe({
                     "session_id": session_id,
                     "turn_id": turn_id,
                     "consensus_score": debate_result.get("consensus_score"),
@@ -1784,11 +2707,11 @@ class TaxAgentOrchestrator:
             """), {
                 "session_id": session_id,
                 "turn_id": turn_id,
-                "facts_json": json.dumps(facts, ensure_ascii=False, default=str),
-                "assumptions_json": json.dumps(assumptions, ensure_ascii=False, default=str),
-                "open_questions_json": json.dumps(open_questions, ensure_ascii=False, default=str),
-                "citations_json": json.dumps(citations, ensure_ascii=False, default=str),
-                "claim_verification_json": json.dumps({
+                "facts_json": _json_dumps_safe(facts, ensure_ascii=False),
+                "assumptions_json": _json_dumps_safe(assumptions, ensure_ascii=False),
+                "open_questions_json": _json_dumps_safe(open_questions, ensure_ascii=False),
+                "citations_json": _json_dumps_safe(citations, ensure_ascii=False),
+                "claim_verification_json": _json_dumps_safe({
                     "verification": verification,
                     "react": react_reflections,
                     "debate": debate_result,
@@ -1845,7 +2768,7 @@ class TaxAgentOrchestrator:
                         else str(item.get("evidence_index"))
                     ),
                     "status": status,
-                    "metadata_json": json.dumps({
+                    "metadata_json": _json_dumps_safe({
                         "verifier": "legal-faithfulness-v1",
                         "synthesis_tier": getattr(synthesis_result, "synthesis_tier", ""),
                     }, ensure_ascii=False, default=str),
@@ -1950,6 +2873,12 @@ class TaxAgentOrchestrator:
             "miễn thuế", "đầu tư mở rộng", "dự án đầu tư",
             "khu công nghiệp", "luật thuế", "quy định", "chính sách thuế",
             "quản lý thuế", "công văn",
+            "thuế tncn", "tncn", "lương gross", "khấu trừ thuế",
+            "người phụ thuộc", "hoàn thuế", "đóng thừa",
+            "hộ kinh doanh", "bán hàng online", "shopee", "tiktok",
+            "thương mại điện tử", "cho thuê nhà", "thuế môn bài",
+            "nộp tờ khai", "kê khai", "chi phí được trừ", "tiếp khách",
+            "thanh toán tiền mặt", "freelancer", "cá nhân kinh doanh",
         ],
     }
 
@@ -1981,6 +2910,200 @@ class TaxAgentOrchestrator:
             conf = 0.22
         return best[0], conf
 
+    def _build_analysis_blocks(
+        self,
+        *,
+        tool_results: dict[str, dict[str, Any]],
+        routing_decision,
+        synthesis_result,
+    ) -> list[dict[str, Any]]:
+        blocks: list[dict[str, Any]] = []
+        contract = getattr(getattr(routing_decision, "answer_contract", None), "value", "")
+        if contract == "fraud_analysis" or tool_results.get("_batch_results"):
+            batch = tool_results.get("_batch_results") or tool_results.get("_attachment_analysis") or {}
+            blocks.append({
+                "type": "fraud_analysis",
+                "title": "Fraud Risk Analysis",
+                "summary": getattr(synthesis_result, "summary", ""),
+                "metrics": {
+                    "total_records": batch.get("total") or len(batch.get("assessments", []) or []),
+                    "risk_distribution": batch.get("by_level", {}),
+                    "top_records": (batch.get("top_5") or batch.get("top_risky") or batch.get("assessments") or [])[:10],
+                },
+                "next_steps": getattr(synthesis_result, "recommendations", []) or [],
+            })
+        if contract == "vat_graph" or tool_results.get("_vat_graph_batch_results") or tool_results.get("_ocr_document_results"):
+            vat = tool_results.get("_vat_graph_batch_results") or tool_results.get("_attachment_analysis") or {}
+            graph = vat.get("graph") or {}
+            blocks.append({
+                "type": "vat_graph",
+                "title": "VAT Network Analysis",
+                "summary": getattr(synthesis_result, "summary", ""),
+                "metrics": {
+                    "processed_rows": vat.get("processed_rows") or vat.get("row_count"),
+                    "suspect_value": (vat.get("summary") or {}).get("suspect_value"),
+                    "rings": graph.get("rings") or graph.get("ring_findings") or [],
+                    "top_invoice_risks": graph.get("top_invoice_risks") or [],
+                },
+                "next_steps": getattr(synthesis_result, "recommendations", []) or [],
+            })
+        # Multi-agent-only: cross-domain dossier summary (works even if frontend doesn't special-case it)
+        try:
+            selected_bundle = list(getattr(routing_decision, "selected_model_bundle", []) or [])
+        except Exception:
+            selected_bundle = []
+        if len(selected_bundle) >= 2 or (tool_results.get("_batch_results") and tool_results.get("_vat_graph_batch_results")):
+            blocks.append({
+                "type": "investigation_dossier",
+                "title": "Dossier điều tra (Multi-Agent)",
+                "summary": "Hợp nhất đa miền để ưu tiên hành động và chuỗi bằng chứng theo cùng một phiên phân tích.",
+                "metrics": {
+                    "domains": selected_bundle,
+                    "tools": list(tool_results.keys())[:12],
+                    "evidence_sources": int(bool(tool_results.get("_batch_results"))) + int(bool(tool_results.get("_vat_graph_batch_results"))) + int(bool(tool_results.get("knowledge_search"))),
+                },
+                "next_steps": [
+                    "Ưu tiên điều tra theo nhóm rủi ro cao và đường đi bằng chứng (graph paths / red flags).",
+                    "Nếu kết luận còn mơ hồ: bật vòng lặp tự-bổ-sung bằng chứng (mở rộng subgraph / truy vấn MST / what-if).",
+                    "Xuất dossier để handover: giả định, giới hạn dữ liệu, và khuyến nghị thanh tra/thu nợ theo thứ tự.",
+                ],
+            })
+        return blocks
+
+    def _build_fraud_visualization_payload(
+        self,
+        tool_results: dict[str, dict[str, Any]],
+        sub_agent_analysis: dict[str, Any],
+    ) -> dict[str, Any]:
+        batch = tool_results.get("_batch_results") or {}
+        attachment = tool_results.get("_attachment_analysis") or {}
+        if not batch and attachment.get("analysis_type") == "risk_csv":
+            batch = attachment
+        top_n = tool_results.get("top_n_risky_companies") or {}
+        companies = list(batch.get("assessments", []) or batch.get("companies", []) or top_n.get("companies", []) or [])
+        if not companies and not sub_agent_analysis.get("analytics"):
+            return {}
+
+        scores: list[float] = []
+        for row in companies:
+            try:
+                scores.append(float(row.get("risk_score") or row.get("score") or 0.0))
+            except Exception:
+                scores.append(0.0)
+        avg_score = round(sum(scores) / len(scores), 2) if scores else 0.0
+        max_score = round(max(scores), 2) if scores else 0.0
+        analytics = sub_agent_analysis.get("analytics", {})
+        if analytics and not max_score:
+            max_score = round(float(analytics.get("composite_risk_score", 0.0)) * 100, 2)
+            avg_score = max_score
+
+        by_level = dict(batch.get("by_level") or {})
+        if not by_level and companies:
+            by_level = {"critical": 0, "high": 0, "medium": 0, "low": 0}
+            for row in companies:
+                level = str(row.get("risk_level") or "low").lower()
+                by_level[level] = by_level.get(level, 0) + 1
+
+        years: dict[str, list[float]] = {}
+        scatter = []
+        for row in companies[:200]:
+            year = str(row.get("year") or row.get("tax_year") or "")
+            if year:
+                try:
+                    years.setdefault(year, []).append(float(row.get("risk_score") or 0.0))
+                except Exception:
+                    pass
+            try:
+                scatter.append({
+                    "x": float(row.get("revenue") or row.get("total_revenue") or 0.0),
+                    "y": float(row.get("risk_score") or 0.0),
+                    "label": row.get("company_name") or row.get("tax_code") or "",
+                    "industry": row.get("industry") or "",
+                })
+            except Exception:
+                continue
+        yearly = [
+            {"year": year, "avg_risk": round(sum(vals) / len(vals), 2), "count": len(vals)}
+            for year, vals in sorted(years.items())
+        ]
+        sorted_scores = sorted(scores, reverse=True)
+        total_risk = sum(sorted_scores) or 1.0
+        cumulative = []
+        running = 0.0
+        for idx, score in enumerate(sorted_scores[:50], 1):
+            running += score
+            cumulative.append({"rank": idx, "cumulative_pct": round(running / total_risk * 100, 2)})
+
+        return {
+            "summary": {
+                "total": int(batch.get("total") or top_n.get("total") or len(companies)),
+                "avg_risk": avg_score,
+                "max_risk": max_score,
+                "source": batch.get("filename") or top_n.get("source") or "agent",
+            },
+            "risk_gauge": {
+                "score": max_score,
+                "level": "critical" if max_score >= 90 else "high" if max_score >= 70 else "medium" if max_score >= 40 else "low",
+                "color": "#DC2626" if max_score >= 90 else "#F97316" if max_score >= 70 else "#EAB308" if max_score >= 40 else "#16A34A",
+                "confidence": 85,
+            },
+            "radar": {
+                "labels": ["Compliance", "Financial", "VAT", "Network"],
+                "values": [
+                    round(min(100.0, avg_score * 0.95 + 5), 2),
+                    round(min(100.0, avg_score * 1.05), 2),
+                    round(min(100.0, max_score * 0.9), 2),
+                    round(min(100.0, max_score), 2),
+                ],
+            },
+            "yearly_trend": yearly,
+            "revenue_risk_scatter": scatter[:120],
+            "risk_distribution": by_level,
+            "cumulative_risk": cumulative,
+            "top_companies": companies[:10],
+            "case_narrative": analytics.get("summary") or "",
+            "cross_model_consensus": {
+                "analytics": sub_agent_analysis.get("analytics", {}),
+                "investigation": sub_agent_analysis.get("investigation", {}),
+            },
+        }
+
+    def _build_vat_visualization_payload(self, tool_results: dict[str, dict[str, Any]]) -> dict[str, Any]:
+        vat = tool_results.get("_vat_graph_batch_results") or {}
+        attachment = tool_results.get("_attachment_analysis") or {}
+        if not vat and attachment.get("analysis_type") == "vat_graph_csv":
+            vat = attachment
+        ocr = tool_results.get("_ocr_document_results") or {}
+        if not vat and not ocr:
+            return {}
+        graph = vat.get("graph") or {}
+        summary = vat.get("summary") or {}
+        nodes = graph.get("nodes") or graph.get("graph_nodes") or []
+        edges = graph.get("edges") or graph.get("graph_edges") or []
+        top_invoice_risks = graph.get("top_invoice_risks") or []
+        rings = graph.get("rings") or graph.get("ring_findings") or graph.get("motifs") or []
+        logs = graph.get("forensic_logs") or graph.get("audit_log") or graph.get("findings") or []
+        return {
+            "summary": {
+                "batch_id": vat.get("batch_id"),
+                "row_count": vat.get("row_count"),
+                "processed_rows": vat.get("processed_rows"),
+                "suspect_value": summary.get("suspect_value") or summary.get("total_suspicious_amount"),
+                "warnings": vat.get("warnings") or [],
+            },
+            "graph": {"nodes": nodes[:300], "edges": edges[:500]},
+            "timeline": graph.get("timeline") or graph.get("monthly_edges") or [],
+            "risk_bars": graph.get("risk_bars") or top_invoice_risks[:20],
+            "model_intelligence": graph.get("gnn_scores") or graph.get("model_intelligence") or {},
+            "ring_scoring": {"rings": rings[:20], "count": len(rings)},
+            "ownership_summary": graph.get("ownership_summary") or graph.get("ownership") or {},
+            "forensic_logs": logs[:30] if isinstance(logs, list) else logs,
+            "evidence_paths": graph.get("evidence_paths") or graph.get("paths") or [],
+            "cross_border_signals": graph.get("cross_border_signals") or graph.get("offshore_signals") or {},
+            "top_invoice_risks": top_invoice_risks[:20],
+            "ocr_invoice": ocr if ocr else {},
+        }
+
     def _build_visualization_data(
         self,
         tool_results: dict[str, dict[str, Any]],
@@ -1990,6 +3113,12 @@ class TaxAgentOrchestrator:
     ) -> dict[str, Any]:
         """Build chart-ready visualization data for the frontend."""
         viz: dict[str, Any] = {}
+        fraud_payload = self._build_fraud_visualization_payload(tool_results, sub_agent_analysis)
+        if fraud_payload:
+            viz["fraud"] = fraud_payload
+        vat_payload = self._build_vat_visualization_payload(tool_results)
+        if vat_payload:
+            viz["vat"] = vat_payload
 
         # 1. Risk Gauge — from analytics sub-agent
         analytics = sub_agent_analysis.get("analytics", {})
@@ -2082,6 +3211,39 @@ class TaxAgentOrchestrator:
                 })
         if models_used:
             viz["model_comparison"] = models_used
+
+        macro = tool_results.get("macro_forecast", {})
+        if isinstance(macro, dict) and macro.get("status") in {"analyzed", "success"}:
+            macro_result = self._plain_payload(macro.get("result") or macro.get("baseline") or {})
+            if isinstance(macro_result, dict):
+                quarterly = macro_result.get("quarterly_projection") or []
+                industries = macro_result.get("industry_impacts") or []
+                viz["macro"] = {
+                    "action": macro.get("action") or "run",
+                    "scenario_name": macro_result.get("scenario_name") or "Macro simulation",
+                    "parameters": macro_result.get("parameters") or {},
+                    "kpis": {
+                        "baseline_total_companies": macro_result.get("baseline_total_companies"),
+                        "baseline_high_risk_count": macro_result.get("baseline_high_risk_count"),
+                        "simulated_high_risk_count": macro_result.get("simulated_high_risk_count"),
+                        "delta_high_risk": macro_result.get("delta_high_risk"),
+                        "baseline_delinquency_rate": macro_result.get("baseline_delinquency_rate"),
+                        "simulated_delinquency_rate": macro_result.get("simulated_delinquency_rate"),
+                        "baseline_estimated_loss": macro_result.get("baseline_estimated_loss"),
+                        "simulated_estimated_loss": macro_result.get("simulated_estimated_loss"),
+                        "delta_estimated_loss": macro_result.get("delta_estimated_loss"),
+                        "baseline_total_revenue": macro_result.get("baseline_total_revenue"),
+                        "simulated_total_revenue": macro_result.get("simulated_total_revenue"),
+                        "delta_revenue": macro_result.get("delta_revenue"),
+                        "delta_revenue_pct": macro_result.get("delta_revenue_pct"),
+                        "scenario_health_score": macro_result.get("scenario_health_score"),
+                    },
+                    "quarterly_projection": quarterly[:60] if isinstance(quarterly, list) else [],
+                    "industry_impacts": industries[:30] if isinstance(industries, list) else [],
+                    "risk_distribution": macro_result.get("risk_distribution") or {},
+                    "generated_at": macro_result.get("generated_at"),
+                }
+                viz["macro_kpis"] = viz["macro"]["kpis"]
 
         # 6.5 OCR Document Extraction
         ocr_result = tool_results.get("_ocr_document_results")
@@ -2219,7 +3381,7 @@ class TaxAgentOrchestrator:
             {
                 "session_id": session_id,
                 "user_id": user_id,
-                "metadata_json": json.dumps({"source": "multi_agent_orchestrator_v2"}),
+                "metadata_json": _json_dumps_safe({"source": "multi_agent_orchestrator_v2"}),
             },
         )
 

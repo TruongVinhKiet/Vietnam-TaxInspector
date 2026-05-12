@@ -39,7 +39,7 @@ document.addEventListener("DOMContentLoaded", () => {
     // Fetch Data from DB
     async function loadDocuments(docType) {
         try {
-            let url = `${API_BASE}/legal/documents`;
+            let url = `${API_BASE}/api/legal/documents`;
             if (docType) url += '?doc_type=' + encodeURIComponent(docType);
             const response = await fetch(url);
             const data = await response.json();

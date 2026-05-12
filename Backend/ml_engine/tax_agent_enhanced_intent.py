@@ -58,6 +58,35 @@ class MultiIntentResult:
 # ─── Intent Definitions (Vietnamese tax domain) ──────────────────────────────
 
 INTENT_DEFINITIONS: dict[str, dict[str, Any]] = {
+    "smalltalk": {
+        "description": "Loi chao, cam on, tro giup chung, hoi kha nang cua agent",
+        "exemplars": [
+            "xin chao",
+            "chao ban",
+            "cam on",
+            "ban lam duoc gi",
+            "agent co the giup gi",
+            "tam biet",
+        ],
+        "keywords": [
+            "xin chao", "chao ban", "hello", "hi", "cam on", "thanks",
+            "tam biet", "bye", "ban lam duoc gi", "co the lam gi", "tro giup",
+        ],
+    },
+    "vat_network_analysis": {
+        "description": "Truy vet mang luoi VAT, vong hoa don, GNN, ring/motif, chuoi giao dich",
+        "exemplars": [
+            "truy vet mang luoi vat cua mst nay",
+            "ve so do giao dich vat",
+            "phat hien vong hoa don trong chuoi giao dich",
+            "phan tich gnn mang luoi hoa don",
+            "kiem tra motif mua ban hoa don",
+        ],
+        "keywords": [
+            "mang luoi vat", "truy vet", "vong hoa don", "chuoi giao dich",
+            "so do giao dich", "graph", "gnn", "ring", "motif", "duong di hoa don",
+        ],
+    },
     "vat_refund_risk": {
         "description": "Hoàn thuế GTGT, rủi ro hoàn thuế VAT, xin hoàn thuế",
         "exemplars": [
@@ -70,9 +99,10 @@ INTENT_DEFINITIONS: dict[str, dict[str, Any]] = {
         "keywords": [
             "hoàn thuế", "vat", "hồ sơ hoàn", "refund", "đề nghị hoàn", "gtgt", "xuất khẩu",
             "hoan thue", "thuế gtgt", "thuế giá trị gia tăng", "giảm thuế",
-            "thuế suất 8", "thuế suất 10", "khấu trừ", "đầu vào", "đầu ra",
+            "thuế suất 8", "thuế suất 10", "khấu trừ",
             "nghị định 72", "nd 72", "72/2024", "thuế suất", "phương pháp khấu trừ",
-            "tỷ lệ % trên doanh thu"
+            "tỷ lệ % trên doanh thu", "xin hoàn", "hoàn thuế gtgt",
+            "điều kiện hoàn", "hồ sơ hoàn thuế"
         ],
     },
     "invoice_risk": {
@@ -88,7 +118,10 @@ INTENT_DEFINITIONS: dict[str, dict[str, Any]] = {
             "hóa đơn", "invoice", "xuất hóa đơn", "mua vào", "bán ra", "HĐĐT",
             "hoa don", "hóa đơn điện tử", "máy tính tiền",
             "hóa đơn không hợp pháp", "hóa đơn bất hợp pháp", "hóa đơn giả",
-            "thông tư 78", "nghị định 123"
+            "thông tư 78", "nghị định 123",
+            "đầu vào", "đầu ra", "hóa đơn đầu vào", "hóa đơn đầu ra",
+            "bất thường", "rủi ro hóa đơn", "hóa đơn bất thường",
+            "kiểm tra hóa đơn", "rà soát hóa đơn", "xác minh hóa đơn"
         ],
     },
     "delinquency": {
@@ -221,6 +254,23 @@ INTENT_DEFINITIONS: dict[str, dict[str, Any]] = {
             "thuế môn bài", "lệ phí môn bài",
         ],
     },
+    "macro_forecast": {
+        "description": "Mô phỏng vĩ mô, dự báo nguồn thu, kịch bản kinh tế, ảnh hưởng GDP/CPI",
+        "exemplars": [
+            "chạy mô phỏng vĩ mô cho kịch bản năm tới",
+            "dự báo nguồn thu nếu GDP giảm 2%",
+            "mô phỏng tác động khi tăng thuế suất VAT lên 12%",
+            "phân tích độ nhạy của biến số vĩ mô đối với thuế CIT",
+            "đánh giá ảnh hưởng của thất nghiệp đến nợ đọng",
+            "điều chỉnh tham số hệ số phạt và lãi suất",
+            "chạy kịch bản kinh tế",
+        ],
+        "keywords": [
+            "mô phỏng", "vĩ mô", "dự báo", "kịch bản", "simulation", "macro", "gdp", "cpi",
+            "thất nghiệp", "lãi suất", "tác động", "nguồn thu", "ảnh hưởng", "biến số", "kịch bản kinh tế",
+            "mo phong", "vi mo", "du bao", "kich ban"
+        ],
+    },
 }
 
 
@@ -255,13 +305,12 @@ class EnhancedIntentClassifier:
 
     def load(self) -> str:
         """Load the best available classification model."""
-        # Try semantic tier first
-        tier = self._try_load_semantic()
+        # Enterprise v2 order: supervised model first, semantic as fallback.
+        tier = self._try_load_trained()
         if tier:
             return tier
 
-        # Try trained model
-        tier = self._try_load_trained()
+        tier = self._try_load_semantic()
         if tier:
             return tier
 
@@ -348,6 +397,18 @@ class EnhancedIntentClassifier:
             self.load()
 
         t0 = time.perf_counter()
+        dialogue_act = self._detect_dialogue_act(query)
+        if dialogue_act:
+            return MultiIntentResult(
+                primary_intent="smalltalk",
+                primary_confidence=0.98,
+                secondary_intents=[],
+                is_multi_intent=False,
+                extracted_entities=[],
+                classification_source=f"dialogue_act:{dialogue_act}",
+                all_scores={"smalltalk": 0.98},
+                latency_ms=(time.perf_counter() - t0) * 1000.0,
+            )
         
         # Always run keyword extraction first as a strong prior
         kw_result = self._classify_keyword(query)
@@ -377,6 +438,40 @@ class EnhancedIntentClassifier:
         result.extracted_entities = self._extract_entities(query)
 
         return result
+
+    def _detect_dialogue_act(self, query: str) -> str | None:
+        """Fast smalltalk/help/thanks guard before semantic or supervised intent."""
+        normalized = self._normalize_ascii(query)
+        if not normalized:
+            return None
+        exact = {
+            "xin chao", "chao", "chao ban", "hello", "hi", "cam on",
+            "thanks", "thank you", "tam biet", "bye",
+        }
+        if normalized in exact:
+            return "smalltalk"
+        patterns = [
+            r"\b(xin chao|chao ban|hello|hi)\b",
+            r"\b(cam on|thanks|thank you)\b",
+            r"\b(tam biet|bye)\b",
+            r"\b(ban|agent|he thong).{0,20}(lam duoc gi|co the giup gi|giup duoc gi)\b",
+        ]
+        if any(re.search(pattern, normalized) for pattern in patterns):
+            return "smalltalk"
+        return None
+
+    @staticmethod
+    def _normalize_ascii(value: str) -> str:
+        try:
+            import unicodedata
+
+            text = unicodedata.normalize("NFD", value or "")
+            text = "".join(ch for ch in text if unicodedata.category(ch) != "Mn")
+            text = text.replace("đ", "d").replace("Đ", "D")
+        except Exception:
+            text = value or ""
+        text = re.sub(r"[^\w\s]", " ", text.lower())
+        return re.sub(r"\s+", " ", text).strip()
 
     def _classify_semantic(
         self,
@@ -448,11 +543,16 @@ class EnhancedIntentClassifier:
     def _classify_keyword(self, query: str) -> MultiIntentResult:
         """Classify using keyword matching."""
         query_lower = query.lower()
+        query_norm = self._normalize_ascii(query)
         scores: dict[str, float] = {}
 
         for intent_key, intent_def in INTENT_DEFINITIONS.items():
             keywords = intent_def.get("keywords", [])
-            hit_count = sum(1 for kw in keywords if kw.lower() in query_lower)
+            hit_count = sum(
+                1
+                for kw in keywords
+                if kw.lower() in query_lower or self._normalize_ascii(kw) in query_norm
+            )
             # Use hit_count directly rather than coverage, 
             # since one strong keyword is often a solid indicator.
             score = min(1.0, hit_count * 0.4)

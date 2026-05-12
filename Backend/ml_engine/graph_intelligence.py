@@ -18,6 +18,14 @@ import networkx as nx
 from datetime import date, timedelta
 from typing import Optional
 from collections import defaultdict
+import logging
+
+try:
+    from .temporal_graph_engine import TemporalGraphEngine
+except ImportError:
+    TemporalGraphEngine = None  # graceful degradation
+
+logger = logging.getLogger(__name__)
 
 
 class MotifDetector:
@@ -40,12 +48,16 @@ class MotifDetector:
         fan_out = self._detect_fan_out(G)
         fan_in = self._detect_fan_in(G)
 
+        # Temporal analysis (if engine available)
+        temporal_result = self.detect_temporal_patterns(invoices, companies)
+
         # Aggregate into company-level motif scores
         company_motif_scores = self._aggregate_scores(
-            G, companies, triangles, stars, chains, fan_out, fan_in
+            G, companies, triangles, stars, chains, fan_out, fan_in,
+            temporal_scores=temporal_result.get("risk_scores", {}),
         )
 
-        return {
+        result = {
             "motifs": {
                 "triangles": triangles,
                 "stars": stars,
@@ -62,6 +74,37 @@ class MotifDetector:
             },
             "company_motif_scores": company_motif_scores,
         }
+
+        # Attach temporal analysis if available
+        if temporal_result.get("summary", {}).get("status") == "completed":
+            result["temporal_analysis"] = temporal_result
+
+        return result
+
+    def detect_temporal_patterns(
+        self,
+        invoices: list[dict],
+        companies: list[dict] | None = None,
+    ) -> dict:
+        """
+        Run temporal pattern detection across invoice history.
+        Delegates to TemporalGraphEngine for sliding-window analysis.
+
+        Returns dict with keys: snapshots, patterns, risk_scores, summary
+        """
+        if TemporalGraphEngine is None:
+            logger.warning("[MotifDetector] TemporalGraphEngine not available")
+            return {"summary": {"status": "unavailable"}, "risk_scores": {}}
+
+        try:
+            engine = TemporalGraphEngine()
+            target_codes = None
+            if companies:
+                target_codes = {c.get("tax_code", "") for c in companies if c.get("tax_code")}
+            return engine.analyze(invoices, target_tax_codes=target_codes)
+        except Exception as exc:
+            logger.error("[MotifDetector] Temporal analysis failed: %s", exc)
+            return {"summary": {"status": "error", "message": str(exc)}, "risk_scores": {}}
 
     def _build_directed_graph(self, invoices: list[dict]) -> nx.DiGraph:
         G = nx.DiGraph()
@@ -231,34 +274,55 @@ class MotifDetector:
 
         return sorted(results, key=lambda x: x["source_count"], reverse=True)[:15]
 
-    def _aggregate_scores(self, G, companies, triangles, stars, chains, fan_out, fan_in):
-        """Compute per-company motif risk score aggregation."""
+    def _aggregate_scores(
+        self, G, companies, triangles, stars, chains, fan_out, fan_in,
+        *, temporal_scores: dict | None = None,
+    ):
+        """Compute per-company motif risk score aggregation.
+
+        Incorporates temporal risk when available (weight=0.20),
+        proportionally reducing structural motif weights.
+        """
         scores = {}
+        has_temporal = bool(temporal_scores)
+        # Weight redistribution: if temporal available, allocate 20% to it
+        w_struct = 0.80 if has_temporal else 1.0
+        w_temporal = 0.20 if has_temporal else 0.0
+
         for c in companies:
             tc = c.get("tax_code", "")
-            score = 0.0
+            structural_score = 0.0
 
             # Triangle participation
             tri_count = sum(1 for t in triangles if tc in t.get("nodes", []))
-            score += min(tri_count * 0.2, 0.6)
+            structural_score += min(tri_count * 0.2, 0.6)
 
             # Star hub
             star_count = sum(1 for s in stars if s.get("hub") == tc)
-            score += min(star_count * 0.15, 0.4)
+            structural_score += min(star_count * 0.15, 0.4)
 
             # Chain participation
             chain_count = sum(1 for ch in chains if tc in ch.get("nodes", []))
-            score += min(chain_count * 0.1, 0.3)
+            structural_score += min(chain_count * 0.1, 0.3)
 
             # Fan patterns
             fo_match = [f for f in fan_out if f.get("source") == tc]
             fi_match = [f for f in fan_in if f.get("target") == tc]
             if fo_match:
-                score += 0.15
+                structural_score += 0.15
             if fi_match:
-                score += 0.15
+                structural_score += 0.15
 
-            scores[tc] = round(min(1.0, score), 4)
+            structural_score = min(1.0, structural_score)
+
+            # Temporal component
+            temporal_score = 0.0
+            if has_temporal and tc in temporal_scores:
+                ts_data = temporal_scores[tc]
+                temporal_score = ts_data.get("temporal_risk_score", 0.0) if isinstance(ts_data, dict) else 0.0
+
+            combined = w_struct * structural_score + w_temporal * temporal_score
+            scores[tc] = round(min(1.0, combined), 4)
 
         return scores
 

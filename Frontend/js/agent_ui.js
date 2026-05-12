@@ -36,6 +36,61 @@ document.addEventListener('DOMContentLoaded', () => {
     // ─── Model Mode State ────────────────────────────────────────────
     let currentModelMode = 'full';
     let pendingFile = null;
+    let lastAgentRequest = null;
+    let activeAsyncJobId = null;
+    let activeStreamAbortController = null;
+
+    /** Filenames accepted for agent upload (sync with #fileUploadInput accept). */
+    function isAgentAttachmentFilename(name) {
+        return /\.(csv|pdf|png|jpe?g|xlsx|xls)$/i.test(name || '');
+    }
+
+    /** Large tabular uploads use async job (CSV / Excel). */
+    function shouldUseAsyncFileUpload(file) {
+        if (!file || !file.name) return false;
+        const n = file.name.toLowerCase();
+        const tabular = n.endsWith('.csv') || n.endsWith('.xlsx') || n.endsWith('.xls');
+        return tabular && (file.size || 0) >= 1.5 * 1024 * 1024;
+    }
+
+    const SIMULATION_DEFAULTS = {
+        vat_rate: 10,
+        cit_rate: 20,
+        audit_coverage_pct: 5,
+        penalty_multiplier: 1,
+        interest_rate: 6,
+        economic_growth_pct: 6.5,
+        cpi_pct: 3.5,
+        unemployment_pct: 2.3,
+        exchange_rate_delta_pct: 0,
+        projection_years: 5,
+    };
+
+    function collectSimulationParams() {
+        const params = { ...SIMULATION_DEFAULTS };
+        document.querySelectorAll('[data-sim-param]').forEach((el) => {
+            const key = el.dataset.simParam;
+            if (!key) return;
+            const raw = el.value;
+            if (key === 'projection_years') {
+                params[key] = Math.max(1, Math.min(10, parseInt(raw || SIMULATION_DEFAULTS[key], 10) || SIMULATION_DEFAULTS[key]));
+            } else {
+                const parsed = parseFloat(raw);
+                params[key] = Number.isFinite(parsed) ? parsed : SIMULATION_DEFAULTS[key];
+            }
+        });
+        return params;
+    }
+
+    function applySimulationParams(params) {
+        const source = { ...SIMULATION_DEFAULTS, ...(params || {}) };
+        document.querySelectorAll('[data-sim-param]').forEach((el) => {
+            const key = el.dataset.simParam;
+            if (!key || source[key] === undefined || source[key] === null) return;
+            el.value = source[key];
+        });
+    }
+
     const modelSelectorBtn = document.getElementById('modelSelectorBtn');
     const modelDropdown = document.getElementById('modelDropdown');
     const modelSelectorLabel = document.getElementById('modelSelectorLabel');
@@ -48,13 +103,41 @@ document.addEventListener('DOMContentLoaded', () => {
     const attachmentBtn = document.getElementById('attachmentBtn');
 
     const MODE_CONFIG = {
-        full:        { label: 'Toàn diện',   icon: 'fa-bolt',                     color: 'text-amber-500' },
+        full:        { label: 'Auto', icon: 'fa-bolt',                            color: 'text-amber-500' },
         legal:       { label: 'Tư vấn Pháp lý', icon: 'fa-scale-balanced',        color: 'text-teal-500' },
         fraud:       { label: 'Gian lận',    icon: 'fa-user-secret',              color: 'text-red-500' },
         vat:         { label: 'VAT & HĐ',    icon: 'fa-file-invoice-dollar',      color: 'text-blue-500' },
         delinquency: { label: 'Dự báo Nợ',   icon: 'fa-chart-line',               color: 'text-violet-500' },
         macro:       { label: 'Vĩ mô',       icon: 'fa-globe',                    color: 'text-emerald-500' },
     };
+
+    function setModelMode(mode) {
+        if (!MODE_CONFIG[mode]) return;
+        currentModelMode = mode;
+        const cfg = MODE_CONFIG[currentModelMode];
+        if (modelSelectorLabel) modelSelectorLabel.textContent = cfg.label;
+        if (modelIcon) modelIcon.className = `fa-solid ${cfg.icon} ${cfg.color}`;
+        document.querySelectorAll('.model-option').forEach(o => {
+            o.classList.remove('bg-sky-50', 'ring-1', 'ring-sky-300');
+            if (o.dataset.mode === currentModelMode) {
+                o.classList.add('bg-sky-50', 'ring-1', 'ring-sky-300');
+            }
+        });
+        const lwToggleBtn = document.getElementById('lwToggleBtn');
+        const simToggleBtn = document.getElementById('simToggleBtn');
+        const lwPanel = document.getElementById('legalWorkspacePanel');
+        const simPanel = document.getElementById('simulationWorkspacePanel');
+        if (lwToggleBtn) lwToggleBtn.classList.toggle('hidden', currentModelMode !== 'legal');
+        if (simToggleBtn) simToggleBtn.classList.toggle('hidden', currentModelMode !== 'macro');
+        if (currentModelMode !== 'legal' && lwPanel && !lwPanel.classList.contains('hidden')) {
+            lwPanel.classList.add('translate-x-full', 'opacity-0');
+            setTimeout(() => lwPanel.classList.add('hidden'), 300);
+        }
+        if (currentModelMode !== 'macro' && simPanel && !simPanel.classList.contains('hidden')) {
+            simPanel.classList.add('translate-x-full', 'opacity-0');
+            setTimeout(() => simPanel.classList.add('hidden'), 300);
+        }
+    }
 
     // Model selector dropdown toggle
     if (modelSelectorBtn) {
@@ -69,33 +152,60 @@ document.addEventListener('DOMContentLoaded', () => {
     // Model option click
     document.querySelectorAll('.model-option').forEach(opt => {
         opt.addEventListener('click', () => {
-            currentModelMode = opt.dataset.mode;
-            const cfg = MODE_CONFIG[currentModelMode];
-            if (modelSelectorLabel) modelSelectorLabel.textContent = cfg.label;
-            if (modelIcon) {
-                modelIcon.className = `fa-solid ${cfg.icon} ${cfg.color}`;
-            }
-            // Highlight active option
-            document.querySelectorAll('.model-option').forEach(o => o.classList.remove('bg-sky-50', 'ring-1', 'ring-sky-300'));
-            opt.classList.add('bg-sky-50', 'ring-1', 'ring-sky-300');
+            setModelMode(opt.dataset.mode);
             modelDropdown.classList.add('hidden');
-
-            // Instead of auto-opening, just show the toggle button if in legal mode
-            const lwToggleBtn = document.getElementById('lwToggleBtn');
-            if (lwToggleBtn) {
-                if (currentModelMode === 'legal') {
-                    lwToggleBtn.classList.remove('hidden');
-                } else {
-                    lwToggleBtn.classList.add('hidden');
-                    // Hide panel if it's open
-                    const lwPanel = document.getElementById('legalWorkspacePanel');
-                    if (lwPanel && !lwPanel.classList.contains('hidden')) {
-                        lwPanel.classList.add('translate-x-full', 'opacity-0');
-                        setTimeout(() => lwPanel.classList.add('hidden'), 300);
-                    }
-                }
-            }
         });
+    });
+
+    document.addEventListener('click', (event) => {
+        const btn = event.target.closest?.('.mode-switch-suggest');
+        if (!btn) return;
+        event.preventDefault();
+        setModelMode(btn.dataset.mode || 'full');
+        chatInput?.focus();
+    });
+
+    document.addEventListener('click', (event) => {
+        const retryBtn = event.target.closest?.('.agent-retry-btn, .agent-regenerate-btn');
+        if (!retryBtn || !lastAgentRequest) return;
+        event.preventDefault();
+        setModelMode(lastAgentRequest.mode || currentModelMode);
+        if (lastAgentRequest.file) {
+            setPendingFile(lastAgentRequest.file);
+        }
+        chatInput.value = lastAgentRequest.text || '';
+        chatInput.dispatchEvent(new Event('input'));
+        sendMessage();
+    });
+
+    document.addEventListener('click', (event) => {
+        const dismissBtn = event.target.closest?.('.agent-dismiss-error-btn');
+        if (!dismissBtn) return;
+        event.preventDefault();
+        dismissBtn.closest('.agent-stream-recovery')?.remove();
+    });
+
+    document.addEventListener('click', async (event) => {
+        const cancelBtn = event.target.closest?.('.async-cancel-btn');
+        if (!cancelBtn || !activeAsyncJobId) return;
+        event.preventDefault();
+        cancelBtn.disabled = true;
+        cancelBtn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> Dang huy';
+        try {
+            await cancelAsyncFileJob(activeAsyncJobId);
+        } catch (err) {
+            cancelBtn.disabled = false;
+            cancelBtn.innerHTML = '<i class="fa-solid fa-ban"></i> Huy';
+        }
+    });
+
+    document.addEventListener('click', (event) => {
+        const cancelBtn = event.target.closest?.('.stream-cancel-btn');
+        if (!cancelBtn) return;
+        event.preventDefault();
+        if (activeStreamAbortController) {
+            activeStreamAbortController.abort();
+        }
     });
 
     const closeLwBtn = document.getElementById('closeLegalWorkspaceBtn');
@@ -124,6 +234,47 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         });
     }
+    const closeSimBtn = document.getElementById('closeSimulationWorkspaceBtn');
+    if (closeSimBtn) {
+        closeSimBtn.addEventListener('click', () => {
+            const simPanel = document.getElementById('simulationWorkspacePanel');
+            if (simPanel) {
+                simPanel.classList.add('translate-x-full', 'opacity-0');
+                setTimeout(() => simPanel.classList.add('hidden'), 300);
+            }
+        });
+    }
+    const simToggleBtn = document.getElementById('simToggleBtn');
+    if (simToggleBtn) {
+        simToggleBtn.addEventListener('click', () => {
+            const simPanel = document.getElementById('simulationWorkspacePanel');
+            if (simPanel) {
+                if (simPanel.classList.contains('hidden')) {
+                    simPanel.classList.remove('hidden');
+                    setTimeout(() => simPanel.classList.remove('translate-x-full', 'opacity-0'), 10);
+                } else {
+                    simPanel.classList.add('translate-x-full', 'opacity-0');
+                    setTimeout(() => simPanel.classList.add('hidden'), 300);
+                }
+            }
+        });
+    }
+    document.getElementById('runSimulationBtn')?.addEventListener('click', () => {
+        if (currentModelMode !== 'macro') setModelMode('macro');
+        if (chatInput && !chatInput.value.trim()) {
+            chatInput.value = 'Chạy mô phỏng vĩ mô với các tham số hiện tại';
+        }
+        sendMessage();
+    });
+    document.getElementById('resetSimulationBtn')?.addEventListener('click', () => {
+        applySimulationParams(SIMULATION_DEFAULTS);
+    });
+    try {
+        const cachedSimWs = sessionStorage.getItem('tax_agent_sim_workspace');
+        if (cachedSimWs) {
+            renderSimulationWorkspace(JSON.parse(cachedSimWs));
+        }
+    } catch (_) { /* ignore invalid cache */ }
 
     // File Upload Logic
     if (attachmentBtn) {
@@ -132,7 +283,8 @@ document.addEventListener('DOMContentLoaded', () => {
     if (fileUploadInput) {
         fileUploadInput.addEventListener('change', (e) => {
             const file = e.target.files[0];
-            if (file) setPendingFile(file);
+            if (file && isAgentAttachmentFilename(file.name)) setPendingFile(file);
+            else if (fileUploadInput) fileUploadInput.value = '';
         });
     }
     if (fileChipRemove) {
@@ -162,7 +314,7 @@ document.addEventListener('DOMContentLoaded', () => {
         e.preventDefault();
         hideFileDropOverlay();
         const file = e.dataTransfer?.files[0];
-        if (file && file.name.toLowerCase().endsWith('.csv')) {
+        if (file && isAgentAttachmentFilename(file.name)) {
             setPendingFile(file);
         }
     });
@@ -186,6 +338,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
         if (ext === 'csv') {
             if (iconEl) iconEl.className = 'fa-solid fa-file-csv text-emerald-600 relative z-10';
+        } else if (ext === 'xlsx' || ext === 'xls') {
+            if (iconEl) iconEl.className = 'fa-solid fa-file-excel text-green-700 relative z-10';
         } else if (ext === 'pdf') {
             if (iconEl) iconEl.className = 'fa-solid fa-file-pdf text-red-500 relative z-10';
         } else if (['png', 'jpg', 'jpeg'].includes(ext)) {
@@ -428,6 +582,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
         if (emptyState) emptyState.style.display = 'none';
         const currentFile = pendingFile;
+        lastAgentRequest = {
+            text,
+            mode: currentModelMode,
+            file: currentFile || null,
+        };
         addMessageToFeed('user', text, null, currentFile);
         chatInput.value = '';
         chatInput.style.height = 'auto';
@@ -444,7 +603,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 
                 // Smart Context-Aware Prompts
                 const defaultPrompts = {
-                    'full': 'Hãy phân tích toàn diện tài liệu đính kèm, nhận diện đây là loại tài liệu gì và trích xuất các thông tin quan trọng nhất.',
+                    'full': 'Hãy tự nhận diện loại tài liệu đính kèm, chọn đúng model phù hợp và chỉ trả lời trong phạm vi yêu cầu.',
                     'fraud': 'Hãy kiểm tra tài liệu này và phát hiện các dấu hiệu gian lận, rủi ro giả mạo hoặc bất thường.',
                     'vat': 'Hãy trích xuất thông tin hóa đơn và kiểm tra rủi ro hoàn thuế VAT của tài liệu đính kèm.',
                     'delinquency': 'Hãy phân tích tài liệu đính kèm để đánh giá rủi ro nợ đọng hoặc khả năng thanh toán.',
@@ -457,19 +616,55 @@ document.addEventListener('DOMContentLoaded', () => {
                 formData.append('file', currentFile);
                 formData.append('session_id', AGENT_SESSION_ID);
                 formData.append('model_mode', currentModelMode);
+                if (currentModelMode === 'macro') {
+                    formData.append('simulation_params', JSON.stringify(collectSimulationParams()));
+                }
                 clearPendingFile();
-                const response = await fetch(`${API_BASE}/tax-agent/chat/v2/with-file`, {
-                    method: 'POST', body: formData,
-                });
-                const data = await response.json();
+                const shouldUseAsyncUpload = shouldUseAsyncFileUpload(currentFile);
+                let data = {};
+                if (shouldUseAsyncUpload) {
+                    const submitResp = await fetch(`${API_BASE}/tax-agent/chat/v2/with-file/async`, {
+                        method: 'POST',
+                        body: formData,
+                    });
+                    const submitBody = await submitResp.text();
+                    let submitData = {};
+                    try {
+                        submitData = submitBody ? JSON.parse(submitBody) : {};
+                    } catch (parseErr) {
+                        throw new Error(`Không đọc được phản hồi submit async (${parseErr.message}).`);
+                    }
+                    if (!submitResp.ok) throw new Error(submitData.detail || 'Không thể khởi tạo tác vụ xử lý file nền.');
+                    if (!submitData.job_id) throw new Error('Server không trả về mã tác vụ async.');
+                    data = await pollAsyncFileJob(submitData.job_id, loadingId, submitData.poll_interval_ms || 1200);
+                } else {
+                    const response = await fetch(`${API_BASE}/tax-agent/chat/v2/with-file`, {
+                        method: 'POST', body: formData,
+                    });
+                    const rawBody = await response.text();
+                    try {
+                        data = rawBody ? JSON.parse(rawBody) : {};
+                    } catch (parseErr) {
+                        throw new Error(`Không đọc được phản hồi JSON từ server (${parseErr.message}).`);
+                    }
+                    if (!response.ok) throw new Error(data.detail || 'Lỗi hệ thống khi phân tích file.');
+                }
                 document.getElementById(loadingId)?.remove();
-                
-                if (!response.ok) throw new Error(data.detail || 'Lỗi hệ thống khi phân tích file.');
 
                 const answerHtml = formatMarkdown(data.answer || data.content || data.response || '');
-                const vizHtml = buildVisualizationCards(data.visualization_data || {}, data);
-                const metaHtml = buildMetaCards(data);
-                addMessageToFeed('agent', answerHtml + vizHtml + metaHtml, data);
+                let auxHtml = '';
+                let vizHtml = '';
+                let metaHtml = '';
+                try {
+                    auxHtml = buildModeMismatchCard(data) + buildAnalysisBlocks(data);
+                    vizHtml = buildVisualizationCards(data.visualization_data || {}, data);
+                    metaHtml = buildMetaCards(data);
+                } catch (renderErr) {
+                    console.error('Render error (file response):', renderErr);
+                    auxHtml = '<div class="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mt-2">Đã nhận kết quả nhưng một phần biểu đồ không thể hiển thị. Vui lòng thử lại với dữ liệu nhỏ hơn hoặc đổi chế độ phân tích.</div>';
+                }
+                renderModeWorkspace(data.mode_workspace, data);
+                addMessageToFeed('agent', answerHtml + auxHtml + vizHtml + metaHtml, data);
                 requestAnimationFrame(() => renderPendingCharts());
             } else {
                 // SSE Streaming mode
@@ -478,17 +673,168 @@ document.addEventListener('DOMContentLoaded', () => {
 
         } catch (error) {
             console.error('API Error:', error);
-            addMessageToFeed('agent', 'Xin lỗi, đã xảy ra lỗi khi kết nối tới Hệ thống Multi-Agent.');
+            const message = (error && error.message) ? String(error.message) : 'Không rõ nguyên nhân';
+            addMessageToFeed('agent', `Xin lỗi, đã xảy ra lỗi khi xử lý yêu cầu: ${escapeHtml(message)}.`);
         } finally {
+            activeAsyncJobId = null;
             resetAgentIndicators();
             sendBtn.classList.remove('opacity-50', 'cursor-not-allowed');
             sendBtn.removeAttribute('disabled');
         }
     }
 
+    function updateTypingIndicatorProgress(indicatorId, state = {}) {
+        const wrapper = document.getElementById(indicatorId);
+        if (!wrapper) return;
+        const statusEl = wrapper.querySelector('.scan-status');
+        const phaseEl = wrapper.querySelector('.scan-phase');
+        const progressEl = wrapper.querySelector('.scan-progress-fill');
+        const percentEl = wrapper.querySelector('.scan-percent');
+        const etaEl = wrapper.querySelector('.scan-eta');
+        const progress = Math.max(0, Math.min(100, Number(state.progress || 0)));
+        if (statusEl) {
+            statusEl.textContent = state.statusText || 'Đang xử lý dữ liệu...';
+        }
+        if (phaseEl) {
+            phaseEl.textContent = state.phaseText || 'PROCESSING';
+        }
+        if (progressEl) {
+            progressEl.style.width = `${progress}%`;
+        }
+        if (percentEl) {
+            percentEl.textContent = `${progress.toFixed(1)}%`;
+        }
+        if (etaEl) {
+            etaEl.textContent = state.etaText || 'Đang ước tính...';
+        }
+    }
+
+    async function cancelAsyncFileJob(jobId) {
+        if (!jobId) return;
+        const res = await fetch(`${API_BASE}/tax-agent/chat/v2/with-file/async/${encodeURIComponent(jobId)}/cancel`, {
+            method: 'POST',
+            cache: 'no-store',
+        });
+        if (!res.ok) {
+            let detail = 'Không thể hủy tác vụ xử lý ngầm.';
+            try {
+                const payload = await res.json();
+                detail = payload.detail || detail;
+            } catch (_) { /* ignore */ }
+            throw new Error(detail);
+        }
+    }
+
+    async function pollAsyncFileJob(jobId, indicatorId, pollMs = 1200) {
+        activeAsyncJobId = jobId;
+        const startedAt = Date.now();
+        const timeoutMs = 15 * 60 * 1000;
+        let prevProgress = 0;
+        let prevAt = startedAt;
+        let parseFailureCount = 0;
+        while (Date.now() - startedAt < timeoutMs) {
+            const res = await fetch(`${API_BASE}/tax-agent/chat/v2/with-file/async/${encodeURIComponent(jobId)}?t=${Date.now()}`, { cache: 'no-store' });
+            const raw = await res.text();
+            let payload = {};
+            try {
+                payload = raw ? JSON.parse(raw) : {};
+            } catch (parseErr) {
+                parseFailureCount += 1;
+                if (parseFailureCount >= 2) {
+                    throw new Error('Payload phản hồi quá lớn hoặc không hợp lệ. Vui lòng thử lại với tệp nhỏ hơn hoặc chia theo lô.');
+                }
+                await new Promise(resolve => setTimeout(resolve, 500));
+                continue;
+            }
+            if (!res.ok) {
+                throw new Error(payload.detail || 'Không đọc được trạng thái tác vụ async.');
+            }
+
+            const phaseText = String(payload.phase || 'processing').replace(/_/g, ' ').toUpperCase();
+            const statusText = payload.status === 'processing' && String(payload.phase || '').toLowerCase() === 'synthesis'
+                ? 'Đang tổng hợp kết quả phân tích...'
+                : payload.status === 'processing'
+                    ? 'Đang xử lý tệp lớn...'
+                    : payload.status === 'pending'
+                        ? 'Đang nhận diện schema...'
+                        : 'Đang chờ xử lý...';
+            const now = Date.now();
+            const currentProgress = Math.max(0, Math.min(100, Number(payload.progress || 0)));
+            const displayProgress = currentProgress;
+            let etaText = 'Đang ước tính...';
+            if (displayProgress >= 100) {
+                etaText = 'Hoàn tất';
+            } else if (displayProgress > prevProgress) {
+                const deltaProgress = displayProgress - prevProgress;
+                const deltaTimeSec = Math.max(0.2, (now - prevAt) / 1000);
+                const speed = deltaProgress / deltaTimeSec; // % per second
+                if (speed > 0) {
+                    const etaSec = Math.ceil((100 - displayProgress) / speed);
+                    etaText = etaSec > 90
+                        ? `~${Math.ceil(etaSec / 60)} phút`
+                        : `~${etaSec} giây`;
+                }
+            } else if (displayProgress > 0) {
+                const elapsedSec = Math.max(1, Math.floor((now - startedAt) / 1000));
+                etaText = `Đã chạy ${elapsedSec}s`;
+            }
+            updateTypingIndicatorProgress(indicatorId, {
+                progress: displayProgress,
+                phaseText,
+                statusText,
+                etaText,
+            });
+            prevProgress = displayProgress;
+            prevAt = now;
+
+            if (payload.status === 'done') {
+                if (activeAsyncJobId === jobId) activeAsyncJobId = null;
+                return payload.response || {};
+            }
+            if (payload.status === 'cancelled') {
+                if (activeAsyncJobId === jobId) activeAsyncJobId = null;
+                throw new Error('Tác vụ xử lý ngầm đã được hủy.');
+            }
+            if (payload.status === 'error') {
+                if (activeAsyncJobId === jobId) activeAsyncJobId = null;
+                throw new Error(payload.error || 'Tác vụ async xử lý file thất bại.');
+            }
+            await new Promise(resolve => setTimeout(resolve, Math.max(600, Number(pollMs) || 1200)));
+        }
+        if (activeAsyncJobId === jobId) activeAsyncJobId = null;
+        throw new Error('Tác vụ xử lý file vượt quá thời gian chờ (timeout).');
+    }
+
     // ═══════════════════════════════════════════════════════════
     //  SSE STREAMING ENGINE
     // ═══════════════════════════════════════════════════════════
+
+    /**
+     * Chuẩn hóa hiển thị trạng thái luồng (queued → streaming → finalized / lỗi).
+     */
+    function normalizeStreamUiState(raw) {
+        const s = String(raw || '').toLowerCase().replace(/-/g, '_');
+        if (['thinking', 'tool_running', 'tool', 'planning', 'synthesis', 'react', 'running'].includes(s)) return 'streaming';
+        if (['done', 'complete', 'success'].includes(s)) return 'finalized';
+        return s || 'queued';
+    }
+
+    function updateStreamStateBadge(badgeEl, runState) {
+        if (!badgeEl) return;
+        const key = normalizeStreamUiState(runState);
+        const map = {
+            queued: { vi: 'Đang chờ', cls: 'bg-slate-100 text-slate-700 border-slate-200' },
+            connecting: { vi: 'Đang kết nối', cls: 'bg-sky-50 text-sky-800 border-sky-200' },
+            streaming: { vi: 'Đang trả lời', cls: 'bg-emerald-50 text-emerald-800 border-emerald-200' },
+            finalized: { vi: 'Hoàn tất', cls: 'bg-emerald-50 text-emerald-900 border-emerald-300' },
+            partial_error: { vi: 'Một phần / lỗi', cls: 'bg-amber-50 text-amber-900 border-amber-200' },
+            error: { vi: 'Lỗi', cls: 'bg-rose-50 text-rose-800 border-rose-200' },
+            cancelled: { vi: 'Đã hủy', cls: 'bg-slate-100 text-slate-600 border-slate-200' },
+        };
+        const entry = map[key] || { vi: key.replace(/_/g, ' '), cls: 'bg-slate-100 text-slate-600 border-slate-200' };
+        badgeEl.textContent = entry.vi;
+        badgeEl.className = `agent-stream-state-badge inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide border ${entry.cls}`;
+    }
 
     async function sendMessageStreaming(text) {
         // Create thinking bubble
@@ -505,7 +851,12 @@ document.addEventListener('DOMContentLoaded', () => {
                     <img src="../assets/img/${currentTheme}" alt="AI" class="w-full h-full object-cover agent-message-avatar">
                 </div>
                 <div class="flex flex-col gap-2 max-w-[90%] w-full">
-                    <div class="text-xs font-semibold text-slate-500 ml-1">TaxInspector AI <span class="streaming-latency"></span></div>
+                    <div class="text-xs font-semibold text-slate-500 ml-1 flex flex-wrap items-center gap-2">
+                        <span>TaxInspector AI</span>
+                        <span class="agent-active-mode-chip inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold border bg-indigo-50 text-indigo-800 border-indigo-200">${escapeHtml(MODE_CONFIG[currentModelMode]?.label || currentModelMode)}</span>
+                        <span class="agent-stream-state-badge inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide border bg-slate-100 text-slate-600 border-slate-200">Đang chờ</span>
+                        <span class="streaming-latency"></span>
+                    </div>
                     <div class="agent-message text-[15px]">
                         <div class="stream-text-content"></div>
                         <div class="stream-viz-content"></div>
@@ -520,18 +871,37 @@ document.addEventListener('DOMContentLoaded', () => {
         const latencyEl = responseWrapper.querySelector('.streaming-latency');
         let fullData = null;
         let answerAccumulator = '';
+        const streamState = {
+            runState: 'queued',
+            doneSeen: false,
+            terminalError: null,
+            maxSequence: -1,
+        };
         window.currentCitations = null; // reset per message
 
         try {
+            activeStreamAbortController = new AbortController();
             const response = await fetch(`${API_BASE}/tax-agent/chat/v2/stream`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
+                signal: activeStreamAbortController.signal,
                 body: JSON.stringify({
                     session_id: AGENT_SESSION_ID,
                     message: text,
                     model_mode: currentModelMode,
+                    simulation_params: currentModelMode === 'macro' ? collectSimulationParams() : {},
                 }),
             });
+            if (!response.ok) {
+                const errText = await response.text().catch(() => '');
+                throw new Error(errText || `HTTP ${response.status}`);
+            }
+            if (!response.body) {
+                throw new Error('Stream body khong kha dung tren trinh duyet nay.');
+            }
+
+            streamState.runState = 'connecting';
+            updateStreamStateBadge(responseWrapper.querySelector('.agent-stream-state-badge'), 'connecting');
 
             const reader = response.body.getReader();
             const decoder = new TextDecoder();
@@ -553,8 +923,14 @@ document.addEventListener('DOMContentLoaded', () => {
                         const dataStr = line.slice(6);
                         try {
                             const data = JSON.parse(dataStr);
+                            if (typeof data.sequence === 'number') {
+                                streamState.maxSequence = Math.max(streamState.maxSequence, data.sequence);
+                            }
+                            if (currentEventType === 'state') {
+                                streamState.runState = data.run_state || data.state || streamState.runState;
+                            }
                             handleSSEEvent(currentEventType, data, {
-                                thinkingEl, responseWrapper, streamTextEl, streamVizEl, latencyEl,
+                                thinkingEl, responseWrapper, streamTextEl, streamVizEl, latencyEl, streamState,
                             });
 
                             // Accumulate answer
@@ -564,21 +940,31 @@ document.addEventListener('DOMContentLoaded', () => {
 
                             // Store final data
                             if (currentEventType === 'done') {
+                                streamState.doneSeen = true;
+                                streamState.runState = 'finalized';
                                 fullData = data;
+                            }
+                            if (currentEventType === 'error') {
+                                streamState.runState = data.run_state || 'error';
+                                streamState.terminalError = data.error || 'Stream error';
                             }
                             // Capture citations whenever they appear (not else-if!)
                             if (data.citations && data.citations.length) {
                                 window.currentCitations = data.citations;
                             }
-                            if (data.legal_workspace) {
-                                renderLegalWorkspace(data.legal_workspace);
-                            }
+                            renderModeWorkspace(data.mode_workspace, data);
                         } catch (e) { /* skip malformed */ }
                     }
                 }
             }
         } catch (err) {
             console.error('SSE Error:', err);
+            streamState.runState = err && err.name === 'AbortError' ? 'cancelled' : 'error';
+            streamState.terminalError = err && err.name === 'AbortError'
+                ? 'Stream da duoc huy.'
+                : ((err && err.message) ? String(err.message) : 'Stream bi gian doan.');
+        } finally {
+            activeStreamAbortController = null;
         }
 
         // Remove thinking bubble
@@ -593,6 +979,11 @@ document.addEventListener('DOMContentLoaded', () => {
             chatFeed.appendChild(responseWrapper);
         }
 
+        if (!streamState.doneSeen && !streamState.terminalError) {
+            streamState.runState = answerAccumulator ? 'partial_error' : 'error';
+            streamState.terminalError = 'Stream ket thuc truoc khi nhan tin hieu done.';
+        }
+
         // Ensure citations from fullData are captured before final re-render
         if (fullData && fullData.citations && fullData.citations.length) {
             window.currentCitations = fullData.citations;
@@ -604,11 +995,18 @@ document.addEventListener('DOMContentLoaded', () => {
             streamTextEl.classList.add('stream-done');
         }
 
+        if (streamState.terminalError && !fullData) {
+            streamVizEl.innerHTML = buildStreamRecoveryCard(streamState.terminalError, streamState.runState);
+        }
+
         // Final: add viz + meta if available from done event
         if (fullData) {
+            const auxHtml = buildModeMismatchCard(fullData) + buildAnalysisBlocks(fullData);
             const vizHtml = buildVisualizationCards(fullData.visualization_data || {}, fullData);
             const metaHtml = buildMetaCards(fullData);
-            streamVizEl.innerHTML = vizHtml + metaHtml;
+            const recoveryHtml = streamState.terminalError ? buildStreamRecoveryCard(streamState.terminalError, 'partial_error') : '';
+            streamVizEl.innerHTML = auxHtml + vizHtml + metaHtml + recoveryHtml;
+            updateStreamStateBadge(responseWrapper.querySelector('.agent-stream-state-badge'), streamState.terminalError ? 'partial_error' : 'finalized');
             if (latencyEl && fullData.latency_ms) {
                 latencyEl.innerHTML = `<i class="fa-solid fa-bolt"></i> ${fullData.latency_ms.toFixed(0)}ms`;
                 latencyEl.className = 'text-[10px] text-slate-400 ml-2 streaming-latency';
@@ -625,11 +1023,40 @@ document.addEventListener('DOMContentLoaded', () => {
                 });
             });
             appendFeedbackButtons(responseWrapper, fullData);
+            
+            // --- Report Export Suggestion ---
+            let hasSignificantAnalysis = false;
+            if (fullData.tool_results && Object.keys(fullData.tool_results).length > 0) hasSignificantAnalysis = true;
+            if (fullData.citations && fullData.citations.length > 0) hasSignificantAnalysis = true;
+            if (fullData.visualization_data && Object.keys(fullData.visualization_data).length > 0) hasSignificantAnalysis = true;
+
+            if (hasSignificantAnalysis && !document.querySelector('.report-export-suggestion')) {
+                const suggestionHtml = `
+                <div class="report-export-suggestion mt-4 p-3 bg-gradient-to-r from-emerald-50 to-teal-50 border border-emerald-100 rounded-lg animate-fadeIn flex items-center justify-between">
+                    <div class="flex items-center gap-2">
+                        <i class="fa-solid fa-file-contract text-emerald-600 text-xl"></i>
+                        <div class="text-sm">
+                            <div class="text-emerald-800 font-semibold">Đã đủ dữ liệu phân tích</div>
+                            <div class="text-emerald-600 text-xs">Bạn có muốn xuất toàn bộ báo cáo này không?</div>
+                        </div>
+                    }
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <button onclick="window.exportReport('${AGENT_SESSION_ID}', 'docx')" class="px-3 py-1.5 bg-white border border-emerald-200 text-emerald-700 rounded shadow-sm text-xs font-semibold hover:bg-emerald-50 transition-colors"><i class="fa-solid fa-file-word mr-1"></i> DOCX</button>
+                        <button onclick="window.exportReport('${AGENT_SESSION_ID}', 'pdf')" class="px-3 py-1.5 bg-white border border-rose-200 text-rose-700 rounded shadow-sm text-xs font-semibold hover:bg-rose-50 transition-colors"><i class="fa-solid fa-file-pdf mr-1"></i> PDF</button>
+                    </div>
+                </div>`;
+                streamVizEl.insertAdjacentHTML('beforeend', suggestionHtml);
+            }
+
             requestAnimationFrame(() => renderPendingCharts());
         }
 
         // Remove typewriter cursor
         streamTextEl.classList.add('stream-done');
+
+        const terminalDoneState = streamState.terminalError && fullData ? 'partial_error' : streamState.runState;
+        updateStreamStateBadge(responseWrapper.querySelector('.agent-stream-state-badge'), terminalDoneState);
 
         scrollToBottom();
     }
@@ -709,6 +1136,18 @@ document.addEventListener('DOMContentLoaded', () => {
                 break;
             }
 
+            case 'state': {
+                const rawState = data.run_state || data.state || 'streaming';
+                if (els.streamState) els.streamState.runState = rawState;
+                updateStreamStateBadge(responseWrapper.querySelector('.agent-stream-state-badge'), rawState);
+                if (latencyEl) {
+                    latencyEl.innerHTML = `<i class="fa-solid fa-signal"></i>`;
+                    latencyEl.className = 'text-[10px] text-slate-400 ml-2 streaming-latency';
+                    latencyEl.title = String(rawState);
+                }
+                break;
+            }
+
             case 'tool_start': {
                 const stepEl = document.createElement('div');
                 stepEl.className = 'thinking-step w-full animate-fadeIn mt-1.5 mb-1.5';
@@ -778,6 +1217,8 @@ document.addEventListener('DOMContentLoaded', () => {
                     responseWrapper.style.display = '';
                     chatFeed.appendChild(responseWrapper);
                 }
+                if (els.streamState) els.streamState.runState = 'streaming';
+                updateStreamStateBadge(responseWrapper.querySelector('.agent-stream-state-badge'), 'streaming');
                 // Append chunk with typewriter effect
                 streamTextEl.innerHTML = formatMarkdown(
                     (streamTextEl._rawText || '') + (data.chunk || ''),
@@ -813,7 +1254,17 @@ document.addEventListener('DOMContentLoaded', () => {
             }
 
             case 'error': {
-                streamTextEl.innerHTML = `<p class="text-red-500">⚠️ Lỗi: ${data.error || 'Unknown error'}</p>`;
+                if (responseWrapper.style.display === 'none') {
+                    responseWrapper.style.display = '';
+                    chatFeed.appendChild(responseWrapper);
+                }
+                const message = data.error || data.detail || 'Unknown error';
+                if (els.streamState) {
+                    els.streamState.terminalError = message;
+                    els.streamState.runState = data.run_state || 'error';
+                }
+                streamTextEl.innerHTML = `<p class="text-red-500">Loi: ${escapeHtml(String(message))}</p>`;
+                streamVizEl.innerHTML = buildStreamRecoveryCard(message, data.run_state || 'error');
                 break;
             }
         }
@@ -832,6 +1283,9 @@ document.addEventListener('DOMContentLoaded', () => {
                         <div class="flex items-center gap-2 mb-2">
                             <div class="thinking-pulse"></div>
                             <span class="text-xs font-bold text-slate-500 uppercase tracking-wide">Đang suy nghĩ...</span>
+                            <button type="button" class="stream-cancel-btn ml-auto text-[10px] font-semibold text-slate-400 hover:text-red-500">
+                                <i class="fa-solid fa-ban"></i> Cancel
+                            </button>
                         </div>
                         <div class="thinking-steps flex flex-col gap-1.5"></div>
                     </div>
@@ -848,9 +1302,261 @@ document.addEventListener('DOMContentLoaded', () => {
     let chartCounter = 0;
     const pendingCharts = [];
 
+    function buildStreamRecoveryCard(message, state = 'error') {
+        const label = state === 'partial_error' ? 'Kết quả một phần' : (state === 'cancelled' ? 'Đã hủy luồng' : 'Lỗi stream');
+        return `
+        <div class="agent-stream-recovery mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-3 text-sm text-amber-900">
+            <div class="flex items-start gap-2">
+                <i class="fa-solid fa-triangle-exclamation mt-0.5 text-amber-600"></i>
+                <div class="flex-1">
+                    <div class="font-semibold">${escapeHtml(label)}</div>
+                    <div class="mt-1 text-xs text-amber-800">${escapeHtml(String(message || 'Kết nối bị gián đoạn.'))}</div>
+                    <div class="mt-3 flex flex-wrap gap-2">
+                        <button type="button" class="agent-retry-btn inline-flex items-center gap-1 rounded-md bg-slate-900 px-3 py-1.5 text-xs font-semibold text-white hover:bg-slate-700">
+                            <i class="fa-solid fa-rotate-right"></i> Retry
+                        </button>
+                        <button type="button" class="agent-regenerate-btn inline-flex items-center gap-1 rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:border-sky-300 hover:text-sky-700">
+                            <i class="fa-solid fa-wand-magic-sparkles"></i> Regenerate
+                        </button>
+                        <button type="button" class="agent-dismiss-error-btn inline-flex items-center gap-1 rounded-md border border-amber-200 bg-white px-3 py-1.5 text-xs font-semibold text-amber-700 hover:bg-amber-100">
+                            <i class="fa-solid fa-xmark"></i> Cancel
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>`;
+    }
+
+    function buildModeWorkspaceCard(data) {
+        const ws = data && data.mode_workspace ? data.mode_workspace : null;
+        if (!ws || !Object.keys(ws).length) return '';
+        const panel = ws.panel || ws.mode || 'workspace';
+        const modeLabel = MODE_CONFIG[ws.mode]?.label || ws.mode || 'Auto';
+        const required = Array.isArray(ws.required_visualization_keys) ? ws.required_visualization_keys : [];
+        const artifacts = Array.isArray(ws.artifacts) ? ws.artifacts.length : 0;
+        return `
+        <div class="viz-card viz-card-wide bg-white border border-slate-200 mt-4 shadow-none">
+            <div class="viz-card-header text-slate-600 border-b border-slate-200">
+                <i class="fa-solid fa-layer-group text-sky-500"></i> Mode Workspace
+            </div>
+            <div class="viz-card-body p-4 text-sm text-slate-600">
+                <div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                    <div class="viz-stat"><span class="viz-stat-label">Mode</span><span class="text-sm font-semibold">${escapeHtml(modeLabel)}</span></div>
+                    <div class="viz-stat"><span class="viz-stat-label">Panel</span><span class="text-sm font-semibold">${escapeHtml(panel)}</span></div>
+                    <div class="viz-stat"><span class="viz-stat-label">Schema</span><span class="text-xs font-mono">${escapeHtml(ws.schema_version || data.schema_version || 'v2')}</span></div>
+                    <div class="viz-stat"><span class="viz-stat-label">Artifacts</span><span class="text-sm font-semibold">${artifacts}</span></div>
+                </div>
+                ${required.length ? `<div class="mt-3 text-xs text-slate-500">Required viz: ${required.map(x => escapeHtml(String(x))).join(', ')}</div>` : ''}
+            </div>
+        </div>`;
+    }
+
+    function buildModeMismatchCard(data) {
+        if (!data || !data.mode_mismatch) return '';
+        const routing = data.routing_decision || {};
+        const labels = { full: 'Auto', legal: 'Pháp lý', fraud: 'Gian lận', vat: 'VAT & Hóa đơn', delinquency: 'Dự báo Nợ', macro: 'Vĩ mô' };
+        const current = labels[data.model_mode] || data.model_mode || 'Không xác định';
+        const suggested = labels[data.suggested_mode] || labels[routing.suggested_mode] || data.suggested_mode || routing.suggested_mode || 'Auto';
+        const bundle = (data.selected_model_bundle || routing.selected_model_bundle || []).join(', ');
+        return `
+        <div class="viz-cards-container">
+            <div class="viz-card viz-card-wide border-l-4 border-l-amber-500">
+                <div class="viz-card-header"><i class="fa-solid fa-triangle-exclamation text-amber-600"></i> Chế độ không phù hợp</div>
+                <div class="viz-card-body text-sm text-slate-700 leading-relaxed">
+                    <p>Yêu cầu hoặc tệp đính kèm không thuộc phạm vi của chế độ <strong>${escapeHtml(current)}</strong>. Hệ thống đã dừng trước khi chạy model để tránh trả lời sai miền.</p>
+                    <div class="mt-3 grid grid-cols-1 sm:grid-cols-3 gap-2">
+                        <div class="viz-stat"><span class="viz-stat-label">Miền nhận diện</span><span class="viz-stat-num text-base">${escapeHtml(routing.requested_domain || 'unknown')}</span></div>
+                        <div class="viz-stat"><span class="viz-stat-label">Chế độ gợi ý</span><span class="viz-stat-num text-base">${escapeHtml(suggested)}</span></div>
+                        <div class="viz-stat"><span class="viz-stat-label">Bundle</span><span class="text-xs text-slate-600">${escapeHtml(bundle || 'auto')}</span></div>
+                    </div>
+                    <button type="button" class="mode-switch-suggest mt-4 inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-slate-900 text-white text-xs font-semibold hover:bg-slate-700 transition-colors" data-mode="${escapeHtml(data.suggested_mode || routing.suggested_mode || 'full')}">
+                        <i class="fa-solid fa-right-left"></i> Chuyển sang ${escapeHtml(suggested)}
+                    </button>
+                </div>
+            </div>
+        </div>`;
+    }
+
+    function buildAnalysisBlocks(data) {
+        const blocks = data && Array.isArray(data.analysis_blocks) ? data.analysis_blocks : [];
+        if (!blocks.length || data.mode_mismatch) return '';
+        const html = blocks.map(block => {
+            const metrics = block.metrics || {};
+            const nextSteps = block.next_steps || [];
+            return `
+            <div class="viz-card viz-card-wide">
+                <div class="viz-card-header"><i class="fa-solid fa-clipboard-check"></i> ${escapeHtml(block.title || 'Analysis Block')}</div>
+                <div class="viz-card-body text-sm text-slate-700">
+                    ${block.summary ? `<p class="mb-3">${escapeHtml(block.summary)}</p>` : ''}
+                    <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-3">
+                        ${Object.entries(metrics).slice(0, 4).map(([k, v]) => `
+                            <div class="viz-stat">
+                                <span class="viz-stat-label">${escapeHtml(k)}</span>
+                                <span class="text-sm font-semibold text-slate-800">${escapeHtml(formatMetricValue(v))}</span>
+                            </div>`).join('')}
+                    </div>
+                    ${nextSteps.length ? `<div class="text-xs text-slate-500">${nextSteps.slice(0, 3).map(s => escapeHtml(String(s))).join(' · ')}</div>` : ''}
+                </div>
+            </div>`;
+        }).join('');
+        return `<div class="viz-cards-container">${html}</div>`;
+    }
+
+    function formatMetricValue(value) {
+        if (Array.isArray(value)) return `${value.length} mục`;
+        if (value && typeof value === 'object') return `${Object.keys(value).length} nhóm`;
+        if (typeof value === 'number') return value.toLocaleString('vi-VN');
+        return String(value ?? 'N/A');
+    }
+
     function buildVisualizationCards(viz, fullData) {
         if (!viz || Object.keys(viz).length === 0) return '';
         let html = '<div class="viz-cards-container">';
+
+        if (viz.fraud) {
+            const f = viz.fraud;
+            const gaugeId = `fraud-gauge-${++chartCounter}`;
+            const radarId = `fraud-radar-${++chartCounter}`;
+            pendingCharts.push({ type: 'gauge', id: gaugeId, data: f.risk_gauge || { score: 0, color: '#64748B', level: 'unknown', confidence: 0 } });
+            pendingCharts.push({ type: 'radar', id: radarId, data: f.radar || { labels: [], values: [] } });
+            html += `
+            <div class="viz-card viz-card-wide">
+                <div class="viz-card-header"><i class="fa-solid fa-shield-halved"></i> Fraud Agent V2 - Tổng quan rủi ro</div>
+                <div class="viz-card-body grid grid-cols-1 lg:grid-cols-3 gap-4">
+                    <div class="flex items-center gap-4">
+                        <div style="width:130px;height:130px;position:relative;">
+                            <canvas id="${gaugeId}" width="130" height="130"></canvas>
+                            <div class="gauge-center-text" style="color:${(f.risk_gauge || {}).color || '#64748B'}">${Number((f.risk_gauge || {}).score || 0).toFixed(0)}</div>
+                        </div>
+                        <div class="text-sm text-slate-600">
+                            <div class="font-semibold text-slate-800">${escapeHtml((f.risk_gauge || {}).level || 'unknown')}</div>
+                            <div>Tổng hồ sơ: ${Number((f.summary || {}).total || 0).toLocaleString('vi-VN')}</div>
+                            <div>Rủi ro TB: ${Number((f.summary || {}).avg_risk || 0).toFixed(1)}</div>
+                        </div>
+                    </div>
+                    <div class="lg:col-span-2 min-h-[180px]"><canvas id="${radarId}" height="170"></canvas></div>
+                </div>
+            </div>`;
+
+            if (f.yearly_trend && f.yearly_trend.length) {
+                const trendId = `fraud-trend-${++chartCounter}`;
+                pendingCharts.push({ type: 'generic_line', id: trendId, data: { labels: f.yearly_trend.map(x => x.year), values: f.yearly_trend.map(x => x.avg_risk), label: 'Điểm rủi ro TB' } });
+                html += `<div class="viz-card"><div class="viz-card-header"><i class="fa-solid fa-chart-line"></i> Xu hướng rủi ro theo năm</div><div class="viz-card-body"><canvas id="${trendId}" height="150"></canvas></div></div>`;
+            }
+            if (f.risk_distribution && Object.keys(f.risk_distribution).length) {
+                const distId = `fraud-dist-${++chartCounter}`;
+                pendingCharts.push({ type: 'generic_bar', id: distId, data: { labels: Object.keys(f.risk_distribution), values: Object.values(f.risk_distribution), label: 'Số DN' } });
+                html += `<div class="viz-card"><div class="viz-card-header"><i class="fa-solid fa-chart-column"></i> Phân bố mức rủi ro</div><div class="viz-card-body"><canvas id="${distId}" height="150"></canvas></div></div>`;
+            }
+            if (f.revenue_risk_scatter && f.revenue_risk_scatter.length) {
+                const scatterId = `fraud-scatter-${++chartCounter}`;
+                pendingCharts.push({ type: 'generic_scatter', id: scatterId, data: { points: f.revenue_risk_scatter, label: 'Doanh thu - rủi ro' } });
+                html += `<div class="viz-card viz-card-wide"><div class="viz-card-header"><i class="fa-solid fa-chart-scatter"></i> Doanh thu so với rủi ro</div><div class="viz-card-body"><canvas id="${scatterId}" height="180"></canvas></div></div>`;
+            }
+        }
+
+        if (viz.vat) {
+            const v = viz.vat;
+            if (v.graph && ((v.graph.nodes || []).length || (v.graph.edges || []).length)) {
+                const vatGraphId = `vat-graph-${++chartCounter}`;
+                pendingCharts.push({ type: 'network', id: vatGraphId, data: v.graph });
+                html += `
+                <div class="viz-card viz-card-wide">
+                    <div class="viz-card-header"><i class="fa-solid fa-circle-nodes"></i> VAT Agent V2 - Mạng hóa đơn</div>
+                    <div class="viz-card-body"><svg id="${vatGraphId}" width="100%" height="220" viewBox="0 0 520 220"></svg></div>
+                </div>`;
+            }
+            const riskRows = v.top_invoice_risks || [];
+            html += `
+            <div class="viz-card viz-card-wide">
+                <div class="viz-card-header"><i class="fa-solid fa-file-invoice-dollar"></i> Tổng hợp VAT graph</div>
+                <div class="viz-card-body">
+                    <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-4">
+                        <div class="viz-stat"><span class="viz-stat-label">Dòng xử lý</span><span class="viz-stat-num text-base">${Number((v.summary || {}).processed_rows || 0).toLocaleString('vi-VN')}</span></div>
+                        <div class="viz-stat"><span class="viz-stat-label">Ring/motif</span><span class="viz-stat-num text-base">${Number((v.ring_scoring || {}).count || 0).toLocaleString('vi-VN')}</span></div>
+                        <div class="viz-stat"><span class="viz-stat-label">Cạnh rủi ro</span><span class="viz-stat-num text-base">${riskRows.length}</span></div>
+                        <div class="viz-stat"><span class="viz-stat-label">Cảnh báo</span><span class="viz-stat-num text-base">${((v.summary || {}).warnings || []).length}</span></div>
+                    </div>
+                    ${riskRows.length ? `<table class="viz-data-table w-full text-xs"><thead><tr><th class="text-left px-2 py-1">Bên bán</th><th class="text-left px-2 py-1">Bên mua</th><th class="text-right px-2 py-1">Giá trị</th><th class="text-right px-2 py-1">Risk</th></tr></thead><tbody>${riskRows.slice(0, 8).map(r => `<tr class="border-t"><td class="px-2 py-1">${escapeHtml(r.seller_tax_code || r.source || '')}</td><td class="px-2 py-1">${escapeHtml(r.buyer_tax_code || r.target || '')}</td><td class="px-2 py-1 text-right">${escapeHtml(String(r.amount || r.value || ''))}</td><td class="px-2 py-1 text-right font-semibold">${escapeHtml(String(r.edge_risk_score || r.risk_score || ''))}</td></tr>`).join('')}</tbody></table>` : '<div class="text-sm text-slate-500">Chưa có cạnh hóa đơn rủi ro cao trong payload.</div>'}
+                </div>
+            </div>`;
+
+            if (v.temporal_analysis && v.temporal_analysis.patterns) {
+                const temp = v.temporal_analysis.patterns;
+                const snapshots = v.temporal_analysis.snapshots || [];
+                html += `
+                <div class="viz-card viz-card-wide">
+                    <div class="viz-card-header"><i class="fa-solid fa-clock-rotate-left text-orange-500"></i> Temporal Graph Engine (Phân tích mạng lưới theo thời gian)</div>
+                    <div class="viz-card-body">
+                        <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-4">
+                            <div class="viz-stat"><span class="viz-stat-label">Snapshots</span><span class="viz-stat-num text-base">${snapshots.length} kỳ</span></div>
+                            <div class="viz-stat"><span class="viz-stat-label">Migration</span><span class="viz-stat-num text-base text-orange-600">${temp.network_migration ? temp.network_migration.length : 0}</span></div>
+                            <div class="viz-stat"><span class="viz-stat-label">Burst</span><span class="viz-stat-num text-base text-red-600">${temp.temporal_burst ? temp.temporal_burst.length : 0}</span></div>
+                            <div class="viz-stat"><span class="viz-stat-label">Dormancy</span><span class="viz-stat-num text-base text-purple-600">${temp.dormancy_reactivation ? temp.dormancy_reactivation.length : 0}</span></div>
+                        </div>
+                        ${(temp.network_migration && temp.network_migration.length) ? `
+                        <div class="text-xs space-y-1 mt-2">
+                            <div class="font-bold text-slate-500 mb-1">Cảnh báo Di cư mạng lưới (Network Migration):</div>
+                            ${temp.network_migration.map(m => `<div class="bg-orange-50 p-1.5 rounded border border-orange-100 flex justify-between"><span class="font-semibold text-orange-700">${m.company}</span><span>Kỳ ${m.snapshot_index} <i class="fa-solid fa-arrow-right text-[8px] mx-1"></i> Cụm mới (${m.new_partners} đối tác)</span><span class="font-bold">Risk: ${m.risk_score.toFixed(1)}</span></div>`).join('')}
+                        </div>` : ''}
+                        ${(temp.temporal_burst && temp.temporal_burst.length) ? `
+                        <div class="text-xs space-y-1 mt-2">
+                            <div class="font-bold text-slate-500 mb-1">Cảnh báo Giao dịch đột biến (Temporal Burst):</div>
+                            ${temp.temporal_burst.map(m => `<div class="bg-red-50 p-1.5 rounded border border-red-100 flex justify-between"><span class="font-semibold text-red-700">${m.company}</span><span>${m.burst_multiplier.toFixed(1)}x khối lượng TB</span><span class="font-bold">Risk: ${m.risk_score.toFixed(1)}</span></div>`).join('')}
+                        </div>` : ''}
+                    </div>
+                </div>`;
+            }
+        }
+
+        if (viz.macro) {
+            const m = viz.macro;
+            const k = m.kpis || {};
+            const proj = Array.isArray(m.quarterly_projection) ? m.quarterly_projection : [];
+            const industries = Array.isArray(m.industry_impacts) ? m.industry_impacts : [];
+            html += `
+            <div class="viz-card viz-card-wide">
+                <div class="viz-card-header"><i class="fa-solid fa-globe"></i> Macro Simulation - Scenario Output</div>
+                <div class="viz-card-body">
+                    <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-4">
+                        <div class="viz-stat"><span class="viz-stat-label">High risk DN</span><span class="viz-stat-num text-base">${Number(k.simulated_high_risk_count || 0).toLocaleString('vi-VN')}</span></div>
+                        <div class="viz-stat"><span class="viz-stat-label">Delta high risk</span><span class="viz-stat-num text-base">${Number(k.delta_high_risk || 0).toLocaleString('vi-VN')}</span></div>
+                        <div class="viz-stat"><span class="viz-stat-label">No dong (%)</span><span class="viz-stat-num text-base">${Number(k.simulated_delinquency_rate || 0).toFixed(2)}</span></div>
+                        <div class="viz-stat"><span class="viz-stat-label">Health score</span><span class="viz-stat-num text-base">${Number(k.scenario_health_score || 0).toFixed(1)}</span></div>
+                    </div>
+                    <div class="grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs">
+                        <div class="rounded-lg border border-slate-200 p-2"><div class="font-bold text-slate-500">Doanh thu mo phong</div><div class="text-slate-900 font-semibold">${Number(k.simulated_total_revenue || 0).toLocaleString('vi-VN')}</div></div>
+                        <div class="rounded-lg border border-slate-200 p-2"><div class="font-bold text-slate-500">Ton that uoc tinh</div><div class="text-slate-900 font-semibold">${Number(k.simulated_estimated_loss || 0).toLocaleString('vi-VN')}</div></div>
+                        <div class="rounded-lg border border-slate-200 p-2"><div class="font-bold text-slate-500">Delta revenue (%)</div><div class="text-slate-900 font-semibold">${Number(k.delta_revenue_pct || 0).toFixed(2)}</div></div>
+                    </div>
+                </div>
+            </div>`;
+            if (proj.length) {
+                const macroLineId = `macro-proj-${++chartCounter}`;
+                pendingCharts.push({
+                    type: 'generic_line',
+                    id: macroLineId,
+                    data: {
+                        labels: proj.map(x => x.quarter || x.label || ''),
+                        values: proj.map(x => Number(x.simulated_value ?? x.value ?? 0)),
+                        label: 'Simulated revenue',
+                    },
+                });
+                html += `<div class="viz-card viz-card-wide"><div class="viz-card-header"><i class="fa-solid fa-chart-line"></i> Macro projection timeline</div><div class="viz-card-body"><canvas id="${macroLineId}" height="180"></canvas></div></div>`;
+            }
+            if (industries.length) {
+                html += `
+                <div class="viz-card viz-card-wide">
+                    <div class="viz-card-header"><i class="fa-solid fa-table"></i> Industry impact matrix</div>
+                    <div class="viz-card-body">
+                        <table class="viz-data-table w-full text-xs">
+                            <thead><tr><th class="text-left px-2 py-1">Industry</th><th class="text-right px-2 py-1">Base delinquency</th><th class="text-right px-2 py-1">Sim delinquency</th><th class="text-right px-2 py-1">Delta</th></tr></thead>
+                            <tbody>${industries.slice(0, 10).map(r => `<tr class="border-t"><td class="px-2 py-1">${escapeHtml(r.industry || '')}</td><td class="px-2 py-1 text-right">${Number(r.baseline_delinquency_rate || 0).toFixed(2)}</td><td class="px-2 py-1 text-right">${Number(r.simulated_delinquency_rate || 0).toFixed(2)}</td><td class="px-2 py-1 text-right font-semibold">${Number(r.delta_pct || 0).toFixed(2)}</td></tr>`).join('')}</tbody>
+                        </table>
+                    </div>
+                </div>`;
+            }
+        }
 
         // 1. Risk Gauge
         if (viz.risk_gauge) {
@@ -1294,6 +2000,7 @@ document.addEventListener('DOMContentLoaded', () => {
                             <div class="text-xs text-slate-500 space-y-1">
                                 ${s.findings.slice(0, 3).map(f => `<div>${formatMarkdown(f)}</div>`).join('')}
                             </div>
+                            ${s.evidence_chain && s.evidence_chain.length ? `<div class="mt-2 pt-2 border-t border-dashed border-slate-200 text-[10px] text-slate-500"><div class="font-bold text-slate-400 mb-1"><i class="fa-solid fa-link text-sky-400"></i> Bằng chứng (Evidence Chain):</div>${s.evidence_chain.slice(0, 2).map(e => `<div class="truncate bg-slate-50 px-1 py-0.5 rounded mb-0.5 border border-slate-100" title="${escapeHtml(e)}">${escapeHtml(e)}</div>`).join('')}</div>` : ''}
                             <div class="mt-2 text-xs text-slate-400">Độ tin cậy: ${(s.confidence * 100).toFixed(0)}%</div>
                         </div>`;
                     }).join('')}
@@ -1316,6 +2023,29 @@ document.addEventListener('DOMContentLoaded', () => {
                                 ).join('')}
                             </div>
                             ${d.resolution ? `<div class="text-xs text-slate-500 italic">💡 ${formatMarkdown(d.resolution)}</div>` : ''}
+                        </div>`).join('')}
+                    </div>
+                </div>` : ''}
+
+                <!-- Cross-Examination Log -->
+                ${debate.cross_examination_log && debate.cross_examination_log.length ? `
+                <div class="mb-4">
+                    <div class="text-xs font-bold text-slate-500 mb-2"><i class="fa-solid fa-comments text-indigo-500"></i> Cross-Examination (Tranh biện chéo bằng chứng)</div>
+                    <div class="space-y-3">
+                        ${debate.cross_examination_log.map(round => `
+                        <div class="debate-disagreement bg-indigo-50/30 border border-indigo-100 rounded-lg p-2">
+                            <div class="flex items-center gap-2 mb-2">
+                                <span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-indigo-100 text-indigo-700">VÒNG ${round.round}</span>
+                                <span class="text-xs font-semibold text-slate-600">${formatMarkdown(round.topic)}</span>
+                            </div>
+                            <div class="space-y-2 text-xs">
+                                ${round.challenges.map(c => `
+                                <div class="bg-white p-2 rounded border border-slate-200">
+                                    <div class="font-semibold text-slate-700 mb-1"><span class="text-rose-500">${c.from}</span> <i class="fa-solid fa-arrow-right text-[10px] text-slate-300 mx-1"></i> <span class="text-sky-500">${c.to}</span></div>
+                                    <div class="pl-2 border-l-2 border-rose-200 mb-2 italic text-slate-600">Q: ${formatMarkdown(c.question)}</div>
+                                    <div class="pl-2 border-l-2 border-sky-200 text-slate-700">A: ${formatMarkdown(c.response)}</div>
+                                </div>`).join('')}
+                            </div>
                         </div>`).join('')}
                     </div>
                 </div>` : ''}
@@ -1362,7 +2092,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function buildMetaCards(data) {
         if (!data) return '';
-        let html = '';
+        let html = buildModeWorkspaceCard(data);
 
         // Recommendation Pills
         if (data.recommendations && data.recommendations.length > 0) {
@@ -1372,14 +2102,23 @@ document.addEventListener('DOMContentLoaded', () => {
             });
             html += '</div>';
         }
+
         // Planner DAG & Reasoning Trace
-        if (data.reasoning_trace || (data.plan_steps && data.plan_steps.length > 0)) {
+        if (data.reasoning_trace || (data.plan_steps && data.plan_steps.length > 0) || data.latency_breakdown) {
             html += `
             <div class="viz-card viz-card-wide bg-slate-50 border border-slate-200 mt-4 shadow-none">
                 <div class="viz-card-header text-slate-500 border-b border-slate-200">
-                    <i class="fa-solid fa-code-branch text-slate-400"></i> Dấu vết suy luận (DAG Planner Trace)
+                    <i class="fa-solid fa-code-branch text-slate-400"></i> Dấu vết hệ thống (V2 Enterprise AI)
                 </div>
                 <div class="viz-card-body p-4 text-sm text-slate-600">
+                    ${data.intent_model_version ? `
+                    <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-4 text-xs">
+                        <div class="p-2 bg-white border border-slate-200 rounded"><div class="font-bold text-slate-400">Intent Model</div><div class="font-mono text-sky-600">${escapeHtml(String(data.intent_model_version))}</div></div>
+                        <div class="p-2 bg-white border border-slate-200 rounded"><div class="font-bold text-slate-400">Planner Policy</div><div class="font-mono text-indigo-600">${escapeHtml(String(data.planner_policy_version || 'v2'))}</div></div>
+                        <div class="p-2 bg-white border border-slate-200 rounded"><div class="font-bold text-slate-400">Debate Session</div><div class="font-mono text-rose-600">${data.debate_session_id ? escapeHtml(String(data.debate_session_id).substring(0,8)) : 'N/A'}</div></div>
+                        <div class="p-2 bg-white border border-slate-200 rounded"><div class="font-bold text-slate-400">Synthesis Tier</div><div class="font-mono text-emerald-600">${data.synthesis_json ? escapeHtml(String(JSON.parse(data.synthesis_json).tier)) : 'N/A'}</div></div>
+                    </div>` : ''}
+                    
                     ${data.reasoning_trace ? `<div class="mb-3 italic border-l-2 border-slate-300 pl-3">" ${formatMarkdown(data.reasoning_trace)} "</div>` : ''}
                     
                     ${data.plan_steps && data.plan_steps.length > 0 ? `
@@ -1393,6 +2132,16 @@ document.addEventListener('DOMContentLoaded', () => {
                         `).join('')}
                     </div>
                     ` : ''}
+
+                    ${data.latency_breakdown ? `
+                    <div class="mt-4 pt-3 border-t border-slate-200">
+                        <div class="text-xs font-bold text-slate-400 mb-2 uppercase tracking-wide">Latency Breakdown</div>
+                        <div class="flex flex-wrap gap-2 text-[10px]">
+                            ${Object.entries(typeof data.latency_breakdown === 'string' ? JSON.parse(data.latency_breakdown) : data.latency_breakdown).map(([k, v]) => `
+                                <span class="bg-white border border-slate-200 px-2 py-1 rounded text-slate-500"><span class="font-semibold text-slate-700">${k}:</span> ${(v*1000).toFixed(0)}ms</span>
+                            `).join('')}
+                        </div>
+                    </div>` : ''}
                 </div>
             </div>`;
         }
@@ -1418,8 +2167,92 @@ document.addEventListener('DOMContentLoaded', () => {
                 else if (cfg.type === 'knowledge_graph') renderKnowledgeGraph(el, cfg.data);
                 else if (cfg.type === 'uplift') renderUpliftChart(el, cfg.data);
                 else if (cfg.type === 'shap_waterfall') renderShapWaterfall(el, cfg.data);
+                else if (cfg.type === 'radar') renderRadarChart(el, cfg.data);
+                else if (cfg.type === 'generic_line') renderGenericLineChart(el, cfg.data);
+                else if (cfg.type === 'generic_bar') renderGenericBarChart(el, cfg.data);
+                else if (cfg.type === 'generic_scatter') renderGenericScatterChart(el, cfg.data);
             } catch (e) { console.warn('Chart render error:', e); }
         }
+    }
+
+    function renderRadarChart(canvas, data) {
+        new Chart(canvas, {
+            type: 'radar',
+            data: {
+                labels: data.labels || [],
+                datasets: [{
+                    label: 'Risk factors',
+                    data: data.values || [],
+                    borderColor: '#0F766E',
+                    backgroundColor: '#0F766E20',
+                    pointBackgroundColor: '#0F766E',
+                    borderWidth: 2,
+                }]
+            },
+            options: {
+                responsive: true, maintainAspectRatio: false,
+                scales: { r: { beginAtZero: true, max: 100, grid: { color: '#E2E8F0' } } },
+                plugins: { legend: { display: false } },
+            }
+        });
+    }
+
+    function renderGenericLineChart(canvas, data) {
+        new Chart(canvas, {
+            type: 'line',
+            data: {
+                labels: data.labels || [],
+                datasets: [{
+                    label: data.label || 'Giá trị',
+                    data: data.values || [],
+                    borderColor: '#0B2D52',
+                    backgroundColor: '#0B2D5218',
+                    fill: true,
+                    tension: 0.28,
+                    pointRadius: 4,
+                }]
+            },
+            options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true } } }
+        });
+    }
+
+    function renderGenericBarChart(canvas, data) {
+        new Chart(canvas, {
+            type: 'bar',
+            data: {
+                labels: data.labels || [],
+                datasets: [{
+                    label: data.label || 'Số lượng',
+                    data: data.values || [],
+                    backgroundColor: ['#DC2626', '#F97316', '#EAB308', '#16A34A', '#64748B'],
+                    borderRadius: 5,
+                }]
+            },
+            options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true } } }
+        });
+    }
+
+    function renderGenericScatterChart(canvas, data) {
+        new Chart(canvas, {
+            type: 'scatter',
+            data: {
+                datasets: [{
+                    label: data.label || 'Scatter',
+                    data: (data.points || []).map(p => ({ x: Number(p.x || 0), y: Number(p.y || 0) })),
+                    backgroundColor: '#2563EB80',
+                    borderColor: '#2563EB',
+                    pointRadius: 4,
+                }]
+            },
+            options: {
+                responsive: true, maintainAspectRatio: false,
+                plugins: { legend: { display: false } },
+                scales: {
+                    x: { title: { display: true, text: 'Doanh thu' } },
+                    y: { beginAtZero: true, title: { display: true, text: 'Điểm rủi ro' } },
+                }
+            }
+        });
     }
 
     function renderGaugeChart(canvas, data) {
@@ -1520,7 +2353,8 @@ document.addEventListener('DOMContentLoaded', () => {
         const edges = data.edges || [];
         if (!nodes.length) return;
 
-        const w = 400, h = 200;
+        const w = Math.max(260, Number(svg.clientWidth || 0) || 520);
+        const h = Math.max(160, Number(svg.clientHeight || 0) || 220);
         const cx = w / 2, cy = h / 2;
 
         // Position nodes in a circle
@@ -1558,6 +2392,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         });
 
+        svg.setAttribute('viewBox', `0 0 ${w} ${h}`);
         svg.innerHTML = svgHtml;
     }
 
@@ -1727,8 +2562,9 @@ document.addEventListener('DOMContentLoaded', () => {
                     fileHtml = `<div class="mt-2 flex justify-end"><img src="${URL.createObjectURL(file)}" class="max-w-[320px] max-h-[320px] object-cover rounded-xl border border-slate-200 shadow-sm" alt="Upload"></div>`;
                 } else {
                     let icon = 'fa-file';
-                    if (file.name.endsWith('.pdf')) icon = 'fa-file-pdf text-red-500';
-                    if (file.name.endsWith('.csv')) icon = 'fa-file-csv text-emerald-500';
+                    if (file.name.match(/\.pdf$/i)) icon = 'fa-file-pdf text-red-500';
+                    if (file.name.match(/\.csv$/i)) icon = 'fa-file-csv text-emerald-500';
+                    if (file.name.match(/\.xlsx?$/i)) icon = 'fa-file-excel text-green-700';
                     fileHtml = `<div class="mt-2 flex items-center gap-3 bg-white px-4 py-3 rounded-xl w-fit border border-slate-200 shadow-sm ml-auto">
                         <i class="fa-solid ${icon} text-3xl"></i>
                         <div class="text-xs text-left">
@@ -1814,13 +2650,20 @@ document.addEventListener('DOMContentLoaded', () => {
         if (isScanning) {
             contentHtml = `
                 <div class="agent-message flex flex-col gap-2 p-4 w-64 border border-sky-200 bg-sky-50/50">
-                    <div class="flex items-center gap-2 text-sky-700 text-sm font-bold">
+                    <div class="flex items-center gap-2 text-sky-700 text-sm font-bold scan-status">
                         <i class="fa-solid fa-camera-viewfinder fa-beat"></i> Đang quét dữ liệu...
                     </div>
                     <div class="w-full h-1 bg-slate-200 rounded-full overflow-hidden relative">
-                        <div class="absolute top-0 left-0 h-full bg-sky-400 w-full animate-pulse"></div>
+                        <div class="absolute top-0 left-0 h-full bg-sky-400 w-0 transition-all duration-300 scan-progress-fill"></div>
                     </div>
-                    <div class="text-[10px] text-slate-400 uppercase tracking-wider">OCR & Schema Detect</div>
+                    <div class="flex items-center justify-between text-[10px] text-slate-400 uppercase tracking-wider">
+                        <span class="scan-phase">OCR & Schema Detect</span>
+                        <span class="scan-percent">0.0%</span>
+                    </div>
+                    <div class="text-[10px] text-slate-500">ETA: <span class="scan-eta">Đang ước tính...</span></div>
+                    <button type="button" class="async-cancel-btn inline-flex items-center justify-center gap-1 rounded-md border border-slate-200 bg-white px-2 py-1 text-[10px] font-semibold text-slate-600 hover:border-red-200 hover:text-red-600">
+                        <i class="fa-solid fa-ban"></i> Hủy
+                    </button>
                 </div>
             `;
         } else {
@@ -1940,7 +2783,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 const cells = cellsArr.map(c => `<td>${c.trim()}</td>`).join('');
                 return `<tr>${cells}</tr>`;
             }).join('');
-            return `<div class="overflow-x-auto my-3"><table class="viz-table"><thead><tr>${heads}</tr></thead><tbody>${rows}</tbody></table></div>`;
+            return `<div class="overflow-x-auto my-3 viz-md-table-wrap"><table class="viz-table"><thead><tr>${heads}</tr></thead><tbody>${rows}</tbody></table></div>`;
         });
         
         // Lists and paragraphs
@@ -1977,6 +2820,8 @@ document.addEventListener('DOMContentLoaded', () => {
             .replace(/"/g, '&quot;')
             .replace(/'/g, '&#039;');
     }
+
+    const escapeHtml = (s) => escapeHTML(String(s ?? ''));
 
     // ═══════════════════════════════════════════════════════════
     //  FEEDBACK BUTTONS (Gap 5)
@@ -2138,6 +2983,35 @@ document.addEventListener('DOMContentLoaded', () => {
             closeModal();
         });
     });
+    function renderModeWorkspace(modeWorkspace, fullData = {}) {
+        let ws = modeWorkspace && Object.keys(modeWorkspace || {}).length ? modeWorkspace : null;
+        if (!ws && fullData.mode_workspace && Object.keys(fullData.mode_workspace || {}).length) {
+            ws = fullData.mode_workspace;
+        }
+        const mode = (ws && ws.mode) || fullData.model_mode || currentModelMode;
+        try {
+            if (ws) sessionStorage.setItem('tax_agent_mode_workspace', JSON.stringify(ws));
+        } catch (_) { /* ignore */ }
+
+        if (ws && ws.panel === 'legal') {
+            renderLegalWorkspace(ws.legal || fullData.legal_workspace || {});
+            return;
+        }
+        if (ws && ws.panel === 'simulation') {
+            renderSimulationWorkspace(ws.simulation || fullData.simulation_workspace || {});
+            return;
+        }
+        if (mode === 'legal' && fullData.legal_workspace) {
+            renderLegalWorkspace(fullData.legal_workspace);
+        }
+        if (mode === 'macro' && fullData.simulation_workspace) {
+            renderSimulationWorkspace(fullData.simulation_workspace);
+        }
+        if (fullData.simulation_workspace && Object.keys(fullData.simulation_workspace || {}).length) {
+            renderSimulationWorkspace(fullData.simulation_workspace);
+        }
+    }
+
     function renderLegalWorkspace(wsData) {
         const lwPanel = document.getElementById('legalWorkspacePanel');
         if (!lwPanel) return;
@@ -2225,6 +3099,58 @@ document.addEventListener('DOMContentLoaded', () => {
                     </div>
                 `;
             }).join('');
+        }
+    }
+
+    function renderSimulationWorkspace(wsData) {
+        const simPanel = document.getElementById('simulationWorkspacePanel');
+        if (!simPanel) return;
+
+        if ((currentModelMode === 'macro' || wsData.result || wsData.current_params) && simPanel.classList.contains('hidden')) {
+            simPanel.classList.remove('hidden');
+            setTimeout(() => simPanel.classList.remove('translate-x-full', 'opacity-0'), 10);
+        }
+
+        try {
+            sessionStorage.setItem('tax_agent_sim_workspace', JSON.stringify(wsData || {}));
+        } catch (_) { /* ignore */ }
+
+        const setJson = (id, value, empty = 'Chưa có dữ liệu') => {
+            const el = document.getElementById(id);
+            if (!el) return;
+            const hasValue = value && ((Array.isArray(value) && value.length) || (!Array.isArray(value) && Object.keys(value).length));
+            el.textContent = hasValue ? JSON.stringify(value, null, 2) : empty;
+        };
+
+        if (wsData.current_params) {
+            applySimulationParams(wsData.current_params);
+        }
+        const result = wsData.result || {};
+        const kpis = wsData.kpis || {
+            simulated_high_risk_count: result.simulated_high_risk_count,
+            simulated_delinquency_rate: result.simulated_delinquency_rate,
+            simulated_estimated_loss: result.simulated_estimated_loss,
+            simulated_total_revenue: result.simulated_total_revenue,
+            scenario_health_score: result.scenario_health_score,
+        };
+        setJson('sim-current-params', {
+            params: wsData.current_params || collectSimulationParams(),
+            kpis,
+        });
+        setJson('sim-recommended-params', wsData.recommended_params || {});
+        setJson('sim-param-ranges', wsData.ranges || {});
+        setJson('sim-sensitivity', wsData.sensitivity_top_factors || []);
+
+        const metaEl = document.getElementById('sim-scenario-meta');
+        if (metaEl) {
+            const label = wsData.scenario_label || 'Mô phỏng mặc định';
+            const horizon = wsData.projection_years || wsData.horizon_years || 'N/A';
+            const updated = wsData.updated_at || 'N/A';
+            metaEl.innerHTML = `
+                <div><span class="font-semibold text-slate-700">Kịch bản:</span> ${escapeHtml(String(label))}</div>
+                <div><span class="font-semibold text-slate-700">Horizon:</span> ${escapeHtml(String(horizon))}</div>
+                <div><span class="font-semibold text-slate-700">Cập nhật:</span> ${escapeHtml(String(updated))}</div>
+            `;
         }
     }
 
@@ -2483,5 +3409,49 @@ document.addEventListener('DOMContentLoaded', () => {
 
         svg.innerHTML = h;
     }
+
+    // --- Report Export Functionality ---
+    window.exportReport = async function(sessionId, format) {
+        const btnId = `btn-export-${format}`;
+        const toast = document.createElement('div');
+        toast.className = 'fixed bottom-4 right-4 bg-slate-800 text-white px-4 py-2 rounded shadow-lg z-50 animate-fadeIn';
+        toast.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-2"></i> Đang tạo báo cáo chuyên nghiệp...';
+        document.body.appendChild(toast);
+
+        try {
+            const formData = new FormData();
+            formData.append('session_id', sessionId);
+            formData.append('format', format);
+
+            const fetchFn = typeof window.secureFetch === 'function' ? window.secureFetch : fetch;
+            const API_ENDPOINT = (window.API_BASE_URL || "http://localhost:8000/api") + '/tax-agent/export-report';
+            
+            const response = await fetchFn(API_ENDPOINT, {
+                method: 'POST',
+                body: formData
+            });
+
+            if (!response.ok) {
+                throw new Error('Export failed');
+            }
+
+            const blob = await response.blob();
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `BaoCao_PhanTich_TaxInspector_${new Date().toISOString().slice(0,10).replace(/-/g,'')}.${format}`;
+            document.body.appendChild(a);
+            a.click();
+            window.URL.revokeObjectURL(url);
+            document.body.removeChild(a);
+            
+            toast.innerHTML = '<i class="fa-solid fa-check text-emerald-400 mr-2"></i> Tải báo cáo thành công!';
+            setTimeout(() => toast.remove(), 3000);
+        } catch (e) {
+            console.error(e);
+            toast.innerHTML = '<i class="fa-solid fa-triangle-exclamation text-rose-400 mr-2"></i> Lỗi khi tạo báo cáo.';
+            setTimeout(() => toast.remove(), 4000);
+        }
+    };
 
 });

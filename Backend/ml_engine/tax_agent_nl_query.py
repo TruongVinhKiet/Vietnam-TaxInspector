@@ -303,7 +303,7 @@ class NLQueryExecutor:
                     "total": int(result.get("total_companies") or len(assessments)),
                     "by_level": by_level,
                     "top_5": assessments[:5],
-                    "assessments": assessments[:50],
+                    "assessments": assessments,
                     "statistics": result.get("statistics", {}),
                     "filename": filename,
                     "status": "success",
@@ -367,7 +367,7 @@ class NLQueryExecutor:
                 "total": len(assessments),
                 "by_level": by_level,
                 "top_5": assessments[:5],
-                "assessments": assessments[:50],
+                "assessments": assessments,
                 "filename": filename,
                 "status": "success",
             }
@@ -375,6 +375,87 @@ class NLQueryExecutor:
         except Exception as exc:
             logger.warning("[NLQuery] batch_inline failed: %s", exc)
             return {"total": 0, "status": "error", "error": str(exc), "filename": filename}
+
+    def execute_vat_graph_inline(
+        self,
+        db,
+        *,
+        csv_content: bytes,
+        filename: str,
+    ) -> dict[str, Any]:
+        """Analyze VAT invoice CSV and return network summary stats."""
+        t0 = time.perf_counter()
+        try:
+            import pandas as pd
+
+            df = pd.read_csv(io.BytesIO(csv_content), low_memory=False)
+            total_invoices = int(len(df))
+            if total_invoices <= 0:
+                return {"total_invoices": 0, "status": "empty_file", "filename": filename, "analysis_type": "vat_graph_csv"}
+
+            to_numeric = lambda series: pd.to_numeric(series, errors="coerce").fillna(0.0)  # noqa: E731
+            amount_col = None
+            for candidate in ("total_amount", "invoice_amount", "vat_amount", "amount"):
+                if candidate in df.columns:
+                    amount_col = candidate
+                    break
+            total_amount = float(to_numeric(df[amount_col]).sum()) if amount_col else 0.0
+
+            sellers = int(df["seller_tax_code"].astype("string").dropna().nunique()) if "seller_tax_code" in df.columns else 0
+            buyers = int(df["buyer_tax_code"].astype("string").dropna().nunique()) if "buyer_tax_code" in df.columns else 0
+
+            suspicious_count = 0
+            if "suspicious_flag" in df.columns:
+                suspicious_count = int((to_numeric(df["suspicious_flag"]) == 1).sum())
+
+            top_edges: list[dict[str, Any]] = []
+            if {"seller_tax_code", "buyer_tax_code"}.issubset(set(df.columns)):
+                grouped = (
+                    df.groupby(["seller_tax_code", "buyer_tax_code"], dropna=False)
+                    .size()
+                    .sort_values(ascending=False)
+                    .head(10)
+                )
+                top_edges = [
+                    {
+                        "seller_tax_code": str(seller or ""),
+                        "buyer_tax_code": str(buyer or ""),
+                        "invoice_count": int(count),
+                    }
+                    for (seller, buyer), count in grouped.items()
+                ]
+
+            latency = (time.perf_counter() - t0) * 1000.0
+            return {
+                "batch_id": None,
+                "filename": filename,
+                "processed_rows": total_invoices,
+                "summary": {
+                    "companies": max(sellers, buyers),
+                    "invoices": total_invoices,
+                    "cycles": 0,
+                    "total_suspicious_amount": 0.0,
+                    "top_edges": top_edges,
+                    "top_nodes": [],
+                },
+                "total_invoices": total_invoices,
+                "total_amount": round(total_amount, 2),
+                "unique_sellers": sellers,
+                "unique_buyers": buyers,
+                "suspicious_count": suspicious_count,
+                "suspicious_rate": round((suspicious_count / max(1, total_invoices)) * 100, 2),
+                "status": "success",
+                "analysis_type": "vat_graph_csv",
+                "latency_ms": round(latency, 1),
+            }
+        except Exception as exc:
+            logger.warning("[NLQuery] vat_graph_inline failed: %s", exc)
+            return {
+                "filename": filename,
+                "status": "error",
+                "analysis_type": "vat_graph_csv",
+                "error": str(exc),
+            }
 
 
 # ─── Utility Functions ────────────────────────────────────────────────────────

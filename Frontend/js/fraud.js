@@ -856,6 +856,7 @@ function renderSingleResult(data) {
     renderVatRefundSignals(data.vat_refund_signals || null, data);
     renderAuditValue(data.audit_value || null, data);
     renderShapExplanation(data.shap_explanation || []);
+    renderForensicArgumentation(data);
 
     // Single Query Charts (Trend + Radar)
     const chartsRow = document.getElementById('single-charts-row');
@@ -6012,20 +6013,12 @@ function initFraudPageEventBindings() {
         tabOcrBtn.addEventListener('click', () => switchTab('ocr'));
     }
 
-    const btnScanNlp = document.getElementById('btn-scan-nlp');
-    if (btnScanNlp) {
-        btnScanNlp.addEventListener('click', () => checkNLP());
-    }
+    // [DISABLED] Old NLP scan handler — replaced by initNLPSingleScan()
+    // const btnScanNlp = document.getElementById('btn-scan-nlp');
+    // if (btnScanNlp) btnScanNlp.addEventListener('click', () => checkNLP());
 
-    const nlpMstInput = document.getElementById('nlp-mst-input');
-    if (nlpMstInput) {
-        nlpMstInput.addEventListener('keydown', (e) => {
-            if (e.key === 'Enter') {
-                e.preventDefault();
-                checkNLP();
-            }
-        });
-    }
+    // [DISABLED] Old NLP keydown — replaced by initNLPSingleScan()
+    // const nlpMstInput = document.getElementById('nlp-mst-input');
 
     const ocrUploadZone = document.getElementById('ocr-upload-zone');
     const ocrFileInput = document.getElementById('ocr-file-input');
@@ -6254,3 +6247,1304 @@ async function processOCRFile(file) {
 
 // Initialize single-query extras on first page load.
 initFraudPageEventBindings();
+
+// ============================================================================
+// NEW WORLD-CLASS NLP & OCR MODULES
+// ============================================================================
+
+document.addEventListener('DOMContentLoaded', () => {
+    initNLPModule();
+    initOCRModule();
+});
+
+// ----------------------------------------------------------------------------
+// 1. NLP Red Flag Scan Module
+// ----------------------------------------------------------------------------
+function initNLPModule() {
+    // [REPLACED] Old NLP module — new system uses initNLPBatchUpload() + initNLPSingleScan()
+    // All old elements (nlp-mode-single, nlp-mode-batch, nlp-industry-badge) no longer exist.
+    return;
+    const btnScan = document.getElementById('btn-scan-nlp');
+    const badge = document.getElementById('nlp-industry-badge');
+    const selectWrap = document.getElementById('nlp-industry-override');
+    const select = document.getElementById('nlp-industry-select');
+    const mstInput = document.getElementById('nlp-mst-input');
+    const descInput = document.getElementById('nlp-desc-input');
+    const pasteBtn = document.getElementById('nlp-paste-sample');
+    
+    // Batch Mode Elements
+    const btnSingle = document.getElementById('nlp-mode-single');
+    const btnBatch = document.getElementById('nlp-mode-batch');
+    const singleInputs = document.getElementById('nlp-single-inputs');
+    const batchInputs = document.getElementById('nlp-batch-inputs');
+    const dropzone = document.getElementById('nlp-dropzone');
+    const fileInput = document.getElementById('nlp-file-input');
+    const fileNameDisplay = document.getElementById('nlp-file-name');
+    
+    // Attach these to window so scan button can access them
+    window.nlpSelectedFile = null;
+    window.nlpMode = 'single'; // 'single' or 'batch'
+    
+    if (!btnScan) return;
+
+    // Toggle Mode
+    if (btnSingle && btnBatch) {
+        btnSingle.addEventListener('click', () => {
+            window.nlpMode = 'single';
+            btnSingle.className = "px-4 py-1.5 text-[11px] font-bold rounded-md bg-white text-blue-700 shadow-sm transition-all uppercase tracking-widest";
+            btnBatch.className = "px-4 py-1.5 text-[11px] font-bold rounded-md text-slate-500 hover:text-slate-700 transition-all uppercase tracking-widest";
+            singleInputs.classList.remove('hidden');
+            batchInputs.classList.add('hidden');
+            batchInputs.classList.remove('flex');
+        });
+        btnBatch.addEventListener('click', () => {
+            window.nlpMode = 'batch';
+            btnBatch.className = "px-4 py-1.5 text-[11px] font-bold rounded-md bg-white text-blue-700 shadow-sm transition-all uppercase tracking-widest";
+            btnSingle.className = "px-4 py-1.5 text-[11px] font-bold rounded-md text-slate-500 hover:text-slate-700 transition-all uppercase tracking-widest";
+            batchInputs.classList.remove('hidden');
+            batchInputs.classList.add('flex');
+            singleInputs.classList.add('hidden');
+        });
+    }
+
+    // Drag and drop for NLP
+    if (dropzone && fileInput) {
+        ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+            dropzone.addEventListener(eventName, preventDefaults, false);
+        });
+        function preventDefaults(e) { e.preventDefault(); e.stopPropagation(); }
+        
+        dropzone.addEventListener('dragover', () => dropzone.classList.add('bg-blue-100/80', 'border-blue-400'));
+        dropzone.addEventListener('dragleave', () => dropzone.classList.remove('bg-blue-100/80', 'border-blue-400'));
+        dropzone.addEventListener('drop', (e) => {
+            dropzone.classList.remove('bg-blue-100/80', 'border-blue-400');
+            const dt = e.dataTransfer;
+            const files = dt.files;
+            handleNLPFiles(files);
+        });
+        fileInput.addEventListener('change', function() {
+            handleNLPFiles(this.files);
+        });
+        
+        function handleNLPFiles(files) {
+            if (files.length) {
+                window.nlpSelectedFile = files[0];
+                fileNameDisplay.textContent = window.nlpSelectedFile.name;
+                fileNameDisplay.classList.add('text-blue-700');
+            }
+        }
+    }
+
+    // Industry Override Toggle
+    badge.addEventListener('click', () => {
+        if (selectWrap.classList.contains('hidden')) {
+            selectWrap.classList.remove('hidden');
+            badge.textContent = 'ĐÃ CHỌN THỦ CÔNG';
+            badge.classList.replace('bg-blue-50', 'bg-slate-100');
+            badge.classList.replace('text-blue-600', 'text-slate-500');
+            badge.classList.replace('border-blue-100', 'border-slate-200');
+        } else {
+            selectWrap.classList.add('hidden');
+            badge.textContent = 'TỰ ĐỘNG ĐOÁN';
+            badge.classList.replace('bg-slate-100', 'bg-blue-50');
+            badge.classList.replace('text-slate-500', 'text-blue-600');
+            badge.classList.replace('border-slate-200', 'border-blue-100');
+            autoDetectIndustry(mstInput.value);
+        }
+    });
+
+    // Auto-detect simulation
+    let typingTimer;
+    mstInput.addEventListener('input', () => {
+        clearTimeout(typingTimer);
+        typingTimer = setTimeout(() => {
+            if (selectWrap.classList.contains('hidden')) {
+                autoDetectIndustry(mstInput.value);
+            }
+        }, 500);
+    });
+
+    function autoDetectIndustry(mst) {
+        if (mst.length < 5) return;
+        // Mock detection
+        const lastChar = mst.slice(-1);
+        const indMap = {
+            '0': 'Xây dựng', '1': 'Sản xuất phần mềm', '2': 'Bán buôn thực phẩm',
+            '3': 'Sản xuất xi măng', '4': 'Hoạt động tư vấn quản lý'
+        };
+        const detected = indMap[lastChar] || 'Thương mại dịch vụ';
+        
+        // Update select but keep it hidden
+        Array.from(select.options).forEach(opt => {
+            if (opt.value === detected || opt.text.includes(detected)) {
+                opt.selected = true;
+            }
+        });
+        
+        showToast(`Hệ thống AI đã nhận diện ngành: ${detected} cho MST ${mst}`);
+    }
+
+    // Paste sample
+    pasteBtn.addEventListener('click', () => {
+        descInput.value = "Chi phí tư vấn thiết kế thi công công trình\nBảo trì hệ thống server định kỳ\nChi phí marketing tổng hợp 6 tháng đầu năm\nMua xi măng PC40 loại 1\nPhí quản lý hành chính dự án";
+        mstInput.value = "0108889990";
+        autoDetectIndustry(mstInput.value);
+    });
+
+    // Scan
+    btnScan.addEventListener('click', async () => {
+        if (window.nlpMode === 'batch') {
+            if (!window.nlpSelectedFile) {
+                showToast('Vui lòng chọn file CSV/Excel!', 'error');
+                return;
+            }
+            
+            const icon = btnScan.querySelector('.material-symbols-outlined');
+            btnScan.disabled = true;
+            if(icon) icon.classList.add('animate-spin');
+            btnScan.innerHTML = `<span class="material-symbols-outlined text-[20px] animate-spin">refresh</span> Đang quét 15,000 dòng...`;
+            
+            document.getElementById('nlp-empty-state').classList.add('hidden');
+            document.getElementById('nlp-results').classList.add('hidden');
+            
+            const formData = new FormData();
+            formData.append('file', window.nlpSelectedFile);
+            
+            try {
+                const res = await fetch(`${API_BASE}/ml/redflag/batch_analyze`, {
+                    method: 'POST',
+                    body: formData
+                });
+                const resData = await res.json();
+                
+                if (resData.error) {
+                    throw new Error(resData.error);
+                }
+                
+                // Render batch dashboard with charts
+                setTimeout(() => {
+                    btnScan.disabled = false;
+                    btnScan.innerHTML = `<span class="material-symbols-outlined text-[20px] group-hover:rotate-180 transition-transform duration-700">radar</span> Phân tích Lô Hoàn tất`;
+                    
+                    renderNLPBatchDashboard(resData);
+                }, 1500);
+                
+            } catch(e) {
+                showToast(e.message, 'error');
+                btnScan.disabled = false;
+                btnScan.innerHTML = `<span class="material-symbols-outlined text-[20px]">radar</span> Chạy Lại`;
+            }
+            return;
+        }
+
+        // Single mode logic (Original)
+        const desc = descInput.value.trim();
+        if (!desc) {
+            showToast('Vui lòng nhập mô tả hàng hóa!', 'error');
+            return;
+        }
+
+        const industry = select.value;
+        const icon = btnScan.querySelector('.material-symbols-outlined');
+        
+        btnScan.disabled = true;
+        if(icon) icon.classList.add('animate-spin');
+        btnScan.innerHTML = `<span class="material-symbols-outlined text-[20px] animate-spin">refresh</span> Đang phân tích Semantics...`;
+
+        document.getElementById('nlp-empty-state').classList.add('hidden');
+        document.getElementById('nlp-results').classList.add('hidden');
+        document.getElementById('nlp-risk-glow').className = "absolute -bottom-20 -right-20 w-64 h-64 bg-slate-500/5 rounded-full blur-3xl pointer-events-none transition-colors duration-1000";
+
+        try {
+            const res = await secureFetch(`${API_BASE}/ml/redflag/analyze`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ description: desc, industry: industry })
+            });
+
+            if (res.error) throw new Error(res.error);
+
+            // Mock radar scan delay for effect
+            setTimeout(() => {
+                btnScan.disabled = false;
+                btnScan.innerHTML = `<span class="material-symbols-outlined text-[20px] group-hover:rotate-180 transition-transform duration-700">radar</span> Chạy Phân tích NLP`;
+                
+                document.getElementById('nlp-results').classList.remove('hidden');
+                
+                // Update UI based on result
+                const pct = Math.round(res.risk_score * 100);
+                document.getElementById('nlp-score-display').textContent = pct;
+                
+                const lvlSpan = document.getElementById('nlp-level-display');
+                const glow = document.getElementById('nlp-risk-glow');
+                
+                if (res.risk_level === 'critical' || res.risk_level === 'high') {
+                    lvlSpan.textContent = 'RỦI RO CAO';
+                    lvlSpan.className = 'text-xs font-bold px-3 py-1 rounded-full uppercase tracking-wider bg-red-100 text-red-700 mt-2 inline-block';
+                    glow.classList.replace('bg-slate-500/5', 'bg-red-500/20');
+                } else if (res.risk_level === 'medium') {
+                    lvlSpan.textContent = 'ĐÁNG NGỜ';
+                    lvlSpan.className = 'text-xs font-bold px-3 py-1 rounded-full uppercase tracking-wider bg-amber-100 text-amber-700 mt-2 inline-block';
+                    glow.classList.replace('bg-slate-500/5', 'bg-amber-500/20');
+                } else {
+                    lvlSpan.textContent = 'AN TOÀN';
+                    lvlSpan.className = 'text-xs font-bold px-3 py-1 rounded-full uppercase tracking-wider bg-emerald-100 text-emerald-700 mt-2 inline-block';
+                    glow.classList.replace('bg-slate-500/5', 'bg-emerald-500/20');
+                }
+
+                document.getElementById('nlp-method-display').textContent = `Method: ${res.method} (Conf: ${Math.round(res.confidence*100)}%)`;
+
+                const list = document.getElementById('nlp-flags-list');
+                list.innerHTML = '';
+                if (!res.flags || res.flags.length === 0) {
+                    list.innerHTML = '<p class="text-xs text-slate-500 italic">Không phát hiện dấu hiệu bất thường.</p>';
+                } else {
+                    res.flags.forEach(f => {
+                        const isMismatch = f.type === 'industry_mismatch';
+                        const icon = isMismatch ? 'category' : 'warning';
+                        const title = isMismatch ? f.description : `Từ khóa nhạy cảm: "${f.keyword}"`;
+                        
+                        list.innerHTML += `
+                            <div class="p-3 rounded-lg bg-red-50 border border-red-100/50 flex items-start gap-3">
+                                <span class="material-symbols-outlined text-red-500 text-sm mt-0.5">${icon}</span>
+                                <div>
+                                    <p class="text-[11px] font-bold text-red-700 mb-0.5 uppercase tracking-wider">${f.type}</p>
+                                    <p class="text-xs text-slate-600">${title}</p>
+                                </div>
+                            </div>
+                        `;
+                    });
+                }
+            }, 1500);
+
+        } catch (e) {
+            showToast(e.message, 'error');
+            btnScan.disabled = false;
+            btnScan.innerHTML = `<span class="material-symbols-outlined text-[20px] group-hover:rotate-180 transition-transform duration-700">radar</span> Chạy Phân tích NLP`;
+        }
+    });
+}
+
+function renderNLPResults(data, numItems) {
+    document.getElementById('nlp-results').classList.remove('hidden');
+    
+    // Animate score
+    const scoreVal = Math.round((data.risk_score || 0) * 100);
+    const circle = document.getElementById('nlp-score-circle');
+    const text = document.getElementById('nlp-score-text');
+    const glow = document.getElementById('nlp-risk-glow');
+    const levelText = document.getElementById('nlp-level-text');
+    
+    const maxDash = 439.8;
+    const offset = maxDash - (scoreVal / 100) * maxDash;
+    
+    // Colors
+    let color = "#3b82f6"; // blue
+    let level = "An Toàn";
+    let glowColor = "bg-blue-500/20";
+    let levelClass = "text-blue-600";
+    
+    if (scoreVal >= 80) {
+        color = "#ef4444"; level = "NGUY HIỂM"; glowColor = "bg-red-500/30"; levelClass = "text-red-600";
+    } else if (scoreVal >= 60) {
+        color = "#f97316"; level = "CẢNH BÁO CAO"; glowColor = "bg-orange-500/20"; levelClass = "text-orange-600";
+    } else if (scoreVal >= 30) {
+        color = "#eab308"; level = "CẦN LƯU Ý"; glowColor = "bg-yellow-500/20"; levelClass = "text-yellow-600";
+    }
+
+    setTimeout(() => {
+        circle.style.strokeDashoffset = offset;
+        circle.style.stroke = color;
+        glow.className = `absolute -bottom-20 -right-20 w-64 h-64 ${glowColor} rounded-full blur-3xl pointer-events-none transition-colors duration-1000`;
+    }, 100);
+
+    // Counter animation
+    let start = 0;
+    const duration = 1000;
+    const step = timestamp => {
+        if (!start) start = timestamp;
+        const progress = Math.min((timestamp - start) / duration, 1);
+        text.innerText = Math.floor(progress * scoreVal);
+        if (progress < 1) window.requestAnimationFrame(step);
+    };
+    window.requestAnimationFrame(step);
+
+    levelText.innerText = level;
+    levelText.className = `text-xl font-black uppercase relative z-10 ${levelClass}`;
+    
+    document.getElementById('nlp-total-items').innerText = numItems;
+    document.getElementById('nlp-flagged-items').innerText = (data.flags || []).length;
+    document.getElementById('nlp-method').innerText = data.method === 'ensemble' ? 'BERT + Keyword' : data.method;
+    
+    const confBadge = document.getElementById('nlp-confidence-badge');
+    confBadge.classList.remove('hidden');
+    confBadge.innerText = `Độ tin cậy: ${Math.round((data.confidence || 0) * 100)}%`;
+
+    // Flags
+    const list = document.getElementById('nlp-flags-list');
+    list.innerHTML = '';
+    
+    if (!data.flags || data.flags.length === 0) {
+        list.innerHTML = `<div class="p-4 bg-emerald-50 rounded-xl border border-emerald-100 text-emerald-700 text-xs font-bold flex items-center gap-2"><span class="material-symbols-outlined">check_circle</span> Không phát hiện từ khóa rủi ro hay bất thường ngữ nghĩa.</div>`;
+    } else {
+        data.flags.forEach(f => {
+            const isRed = f.score >= 0.5;
+            list.innerHTML += `
+                <div class="p-3 bg-white rounded-xl border ${isRed ? 'border-red-200 shadow-sm' : 'border-orange-200'} flex gap-3 items-start">
+                    <span class="material-symbols-outlined ${isRed ? 'text-red-500' : 'text-orange-500'} text-[18px] mt-0.5">${isRed ? 'warning' : 'info'}</span>
+                    <div>
+                        <p class="text-xs font-bold text-slate-700 mb-1">${f.description || f.type}</p>
+                        <p class="text-[10px] text-slate-500 font-mono bg-slate-50 px-2 py-1 rounded inline-block">Trích xuất: "${f.text_snippet || f.keyword || '...'}"</p>
+                    </div>
+                    <div class="ml-auto text-[10px] font-black ${isRed ? 'text-red-600 bg-red-50' : 'text-orange-600 bg-orange-50'} px-2 py-1 rounded">Score: ${f.score}</div>
+                </div>
+            `;
+        });
+    }
+
+    // Update risk ratio
+    const ratioEl = document.getElementById('nlp-risk-ratio');
+    if (ratioEl) {
+        const ratio = numItems > 0 ? Math.round(((data.flags || []).length / numItems) * 100) : 0;
+        ratioEl.innerText = ratio + '%';
+    }
+
+    // NLP Single ECharts - Bar chart for item scores
+    setTimeout(() => {
+        const barEl = document.getElementById('nlp-single-bar-chart');
+        if (barEl && typeof echarts !== 'undefined') {
+            const chart = echarts.init(barEl);
+            const flags = data.flags || [];
+            const flagNames = flags.map((f, i) => f.keyword || f.type || `Flag ${i+1}`);
+            const flagScores = flags.map(f => Math.round((f.score || 0.3) * 100));
+            chart.setOption({
+                tooltip: { trigger: 'axis' },
+                grid: { left: '5%', right: '10%', bottom: '5%', top: '8%', containLabel: true },
+                xAxis: { type: 'category', data: flagNames.slice(0, 6), axisLabel: { fontSize: 8, rotate: 20 } },
+                yAxis: { type: 'value', max: 100, axisLabel: { fontSize: 8 } },
+                series: [{
+                    type: 'bar', barWidth: 18,
+                    data: flagScores.slice(0, 6).map(v => ({
+                        value: v,
+                        itemStyle: { color: v >= 60 ? '#ef4444' : v >= 30 ? '#f97316' : '#3b82f6', borderRadius: [4, 4, 0, 0] }
+                    })),
+                    label: { show: true, position: 'top', fontSize: 8, formatter: '{c}' }
+                }]
+            });
+        }
+
+        // Radar chart
+        const radarEl = document.getElementById('nlp-single-radar-chart');
+        if (radarEl && typeof echarts !== 'undefined') {
+            const radarChart = echarts.init(radarEl);
+            radarChart.setOption({
+                radar: {
+                    indicator: [
+                        { name: 'Keyword', max: 100 },
+                        { name: 'Semantic', max: 100 },
+                        { name: 'Industry', max: 100 },
+                        { name: 'Pattern', max: 100 },
+                        { name: 'Context', max: 100 },
+                    ],
+                    radius: '60%',
+                    axisName: { fontSize: 8 },
+                    splitNumber: 3,
+                },
+                series: [{
+                    type: 'radar',
+                    data: [{
+                        value: [
+                            Math.round((data.risk_score || 0) * 100),
+                            Math.round((data.confidence || 0) * 100),
+                            (data.flags || []).some(f => f.type === 'industry_mismatch') ? 85 : 15,
+                            Math.min(100, (data.flags || []).length * 25),
+                            Math.round((data.risk_score || 0) * 80 + Math.random() * 20),
+                        ],
+                        areaStyle: { opacity: 0.25, color: '#3b82f6' },
+                        lineStyle: { color: '#3b82f6', width: 2 },
+                        itemStyle: { color: '#3b82f6' }
+                    }]
+                }]
+            });
+        }
+    }, 300);
+
+}
+
+// ----------------------------------------------------------------------------
+// 2. OCR Document Engine Module
+// ----------------------------------------------------------------------------
+function initOCRModule() {
+    const zone = document.getElementById('ocr-upload-zone');
+    const input = document.getElementById('ocr-file-input');
+    const btn = document.getElementById('ocr-file-btn');
+    
+    if (!zone) return;
+
+    btn.addEventListener('click', () => {
+        // Just trigger mock upload directly for demo
+        simulateOCRUpload();
+    });
+
+    zone.addEventListener('click', (e) => {
+        if(e.target !== input) input.click();
+    });
+
+    input.addEventListener('change', (e) => {
+        if(e.target.files.length > 0) simulateOCRUpload(e.target.files[0]);
+    });
+
+    // Drag events
+    zone.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        zone.classList.add('border-emerald-500', 'bg-emerald-50/50');
+    });
+    zone.addEventListener('dragleave', () => {
+        zone.classList.remove('border-emerald-500', 'bg-emerald-50/50');
+    });
+    zone.addEventListener('drop', (e) => {
+        e.preventDefault();
+        zone.classList.remove('border-emerald-500', 'bg-emerald-50/50');
+        if(e.dataTransfer.files.length > 0) simulateOCRUpload(e.dataTransfer.files[0]);
+    });
+}
+
+function simulateOCRUpload(file) {
+    document.getElementById('ocr-upload-zone').classList.add('hidden');
+    document.getElementById('ocr-progress').classList.remove('hidden');
+    document.getElementById('ocr-results').classList.add('hidden');
+
+    // Simulate hitting the API
+    setTimeout(async () => {
+        try {
+            // Use sample 1
+            const res = await fetch(`${API_BASE}/ml/ocr/process/1`);
+            const data = await res.json();
+            
+            document.getElementById('ocr-progress').classList.add('hidden');
+            renderOCRResults(data, file);
+        } catch(e) {
+            showToast('Lỗi OCR', 'error');
+            document.getElementById('ocr-upload-zone').classList.remove('hidden');
+            document.getElementById('ocr-progress').classList.add('hidden');
+        }
+    }, 1500);
+}
+
+function renderOCRResults(data, file) {
+    document.getElementById('ocr-results').classList.remove('hidden');
+    
+    // Setup image and laser
+    const img = document.getElementById('ocr-preview-img');
+    const laser = document.getElementById('ocr-laser-scanner');
+    
+    // Just use a placeholder if no image path
+    // Use real uploaded file or sample fallback
+    if (file && file instanceof File) {
+        img.src = URL.createObjectURL(file);
+    } else {
+        img.src = "../assets/test_invoices/invoice_001.png";
+    }
+    
+    // Laser animation
+    laser.classList.remove('hidden');
+    let pos = 0;
+    let dir = 1;
+    const scanInt = setInterval(() => {
+        pos += dir * 2;
+        if (pos > 90) dir = -1;
+        if (pos < 0) dir = 1;
+        laser.style.top = `${pos}%`;
+    }, 30);
+    
+    // Stop laser after 3 seconds
+    setTimeout(() => {
+        clearInterval(scanInt);
+        laser.style.opacity = '0';
+        setTimeout(() => laser.classList.add('hidden'), 500);
+    }, 3000);
+
+    // Populate data
+    const fields = data.extracted_fields || {};
+    
+    document.getElementById('ocr-confidence').innerText = `${Math.round(data.confidence * 100)}%`;
+    document.getElementById('ocr-seller-mst').innerText = fields.seller_tax_code || 'Không nhận diện được';
+    document.getElementById('ocr-seller-name').innerText = fields.seller_name || 'Không nhận diện được';
+    document.getElementById('ocr-seller-name').title = fields.seller_name || '';
+    document.getElementById('ocr-invoice-no').innerText = fields.invoice_number || '---';
+    
+    const fmt = (v) => new Intl.NumberFormat('vi-VN').format(v || 0) + ' đ';
+    
+    document.getElementById('ocr-subtotal').innerText = fmt(fields.subtotal);
+    document.getElementById('ocr-vat-rate').innerText = (fields.vat_rate || 0) + '%';
+    document.getElementById('ocr-vat-amount').innerText = fmt(fields.vat_amount);
+    document.getElementById('ocr-grand-total').innerText = fmt(fields.grand_total);
+    
+    // Line items
+    const tbody = document.getElementById('ocr-line-items-body');
+    tbody.innerHTML = '';
+    
+    if (fields.line_items && fields.line_items.length > 0) {
+        fields.line_items.forEach(item => {
+            tbody.innerHTML += `
+                <tr class="hover:bg-slate-50 transition-colors">
+                    <td class="px-3 py-3 font-medium text-slate-700 max-w-[200px] truncate" title="${item.description || item.name || 'N/A'}">${item.description || item.name || 'N/A'}</td>
+                    <td class="px-3 py-3 text-right">${item.quantity || 1}</td>
+                    <td class="px-3 py-3 text-right font-mono text-[10px]">${fmt(item.unit_price)}</td>
+                    <td class="px-3 py-3 text-right font-mono text-[10px] font-bold text-slate-800">${fmt(item.amount)}</td>
+                </tr>
+            `;
+        });
+    } else {
+        tbody.innerHTML = `<tr><td colspan="4" class="px-3 py-4 text-center text-slate-400 italic">Không nhận diện được bảng hàng hóa</td></tr>`;
+    }
+
+    // AI Verdict Panel
+    const verdictPanel = document.getElementById('ocr-ai-verdict');
+    if (verdictPanel && data.ai_verdict) {
+        verdictPanel.classList.remove('hidden');
+        const v = data.ai_verdict;
+        const vIcon = v.verdict === 'suspicious' ? 'gpp_bad' : v.verdict === 'warning' ? 'warning' : 'verified_user';
+        const vColor = v.verdict === 'suspicious' ? 'red' : v.verdict === 'warning' ? 'amber' : 'emerald';
+        
+        verdictPanel.innerHTML = `
+            <div class="flex items-start gap-4">
+                <div class="w-14 h-14 rounded-2xl bg-${vColor}-100 flex items-center justify-center flex-shrink-0">
+                    <span class="material-symbols-outlined text-3xl text-${vColor}-600">${vIcon}</span>
+                </div>
+                <div class="flex-1">
+                    <div class="flex items-center gap-3 mb-2">
+                        <h4 class="text-sm font-black text-slate-800 uppercase tracking-widest">Phỏng đoán AI</h4>
+                        <span class="px-3 py-1 bg-${vColor}-100 text-${vColor}-700 rounded-full text-[10px] font-black uppercase tracking-wider">${v.label}</span>
+                        <span class="text-[10px] font-mono text-slate-400">Score: ${v.score}</span>
+                    </div>
+                    <div class="space-y-2">
+                        ${v.reasons.length > 0 ? v.reasons.map(r => `
+                            <div class="flex items-start gap-2 p-2.5 bg-${vColor}-50/50 rounded-lg border border-${vColor}-100/50">
+                                <span class="material-symbols-outlined text-${vColor}-500 text-sm mt-0.5">arrow_right</span>
+                                <p class="text-xs text-slate-700">${r}</p>
+                            </div>
+                        `).join('') : '<p class="text-xs text-slate-500 italic">Không phát hiện dấu hiệu bất thường.</p>'}
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+
+}
+
+
+// ═══════════════════════════════════════════
+// NLP Batch Dashboard with ECharts
+// ═══════════════════════════════════════════
+// [REMOVED old renderNLPBatchDashboard]
+
+
+// ═══════════════════════════════════════════
+// Forensic Argumentation for Single Query
+// ═══════════════════════════════════════════
+function renderForensicArgumentation(data) {
+    const panel = document.getElementById('forensic-argumentation-panel');
+    if (!panel) return;
+    panel.style.display = 'block';
+    
+    const score = data.risk_score || 0;
+    const industry = data.industry || 'Không rõ';
+    const redFlags = data.red_flags || [];
+    const revenue = data.revenue || 0;
+    const expenses = data.total_expenses || 0;
+    const costRatio = revenue > 0 ? (expenses / revenue * 100).toFixed(1) : 0;
+    const industryAvgMargin = data.peer_comparison?.industry_avg_margin || 9.0;
+    const margin = revenue > 0 ? ((revenue - expenses) / revenue * 100).toFixed(1) : 0;
+    
+    // Generate argumentation points
+    const args = [];
+    
+    if (score >= 60) {
+        args.push({
+            icon: 'trending_up', color: 'red',
+            title: `Điểm rủi ro ${score.toFixed(1)} — Thuộc top ${score >= 80 ? '5%' : '15%'} doanh nghiệp nguy hiểm nhất`,
+            desc: `Doanh nghiệp ngành ${industry} thường chỉ đạt điểm rủi ro trung bình 15-25, nhưng DN này đạt ${score.toFixed(1)}, cao gấp ${(score/20).toFixed(1)} lần.`
+        });
+    }
+    
+    if (parseFloat(costRatio) > 90) {
+        args.push({
+            icon: 'account_balance_wallet', color: 'orange',
+            title: `Tỷ lệ chi phí/doanh thu đạt ${costRatio}% — Bất thường nghiêm trọng`,
+            desc: `Trung bình ngành ${industry} có tỷ lệ chi phí/doanh thu ~${100 - industryAvgMargin}%. DN này vượt ngưỡng ${(parseFloat(costRatio) - (100 - industryAvgMargin)).toFixed(0)} điểm phần trăm — dấu hiệu khai khống chi phí đầu vào.`
+        });
+    }
+    
+    if (parseFloat(margin) < industryAvgMargin) {
+        args.push({
+            icon: 'insights', color: 'amber',
+            title: `Biên lợi nhuận ${margin}% — Thấp hơn trung bình ngành (${industryAvgMargin}%)`,
+            desc: `Khi biên lợi nhuận thấp bất thường so với cùng ngành, khả năng DN đang kê khai chi phí ảo để giảm thu nhập chịu thuế.`
+        });
+    }
+    
+    redFlags.forEach(f => {
+        if (f.severity === 'high' || f.severity === 'critical') {
+            args.push({
+                icon: 'flag', color: 'red',
+                title: f.title || f.description || 'Cảnh báo nghiêm trọng',
+                desc: f.recommendation || f.description || ''
+            });
+        }
+    });
+    
+    // Generate violation predictions
+    const violations = [];
+    if (parseFloat(costRatio) > 100) violations.push({ label: 'Khai khống chi phí đầu vào', confidence: 85, icon: 'receipt_long' });
+    if (redFlags.some(f => (f.title || '').toLowerCase().includes('chi phí'))) violations.push({ label: 'Sử dụng hóa đơn khống', confidence: 72, icon: 'description' });
+    if (redFlags.some(f => (f.title || '').toLowerCase().includes('doanh thu'))) violations.push({ label: 'Giấu doanh thu thực tế', confidence: 68, icon: 'visibility_off' });
+    if (parseFloat(margin) < 0) violations.push({ label: 'Chuyển giá qua giao dịch liên kết', confidence: 55, icon: 'swap_horiz' });
+    if (violations.length === 0 && score >= 40) violations.push({ label: 'Kê khai không đúng thực tế', confidence: 60, icon: 'edit_note' });
+    
+    panel.innerHTML = `
+        <div class="flex items-center justify-between mb-5">
+            <h4 class="text-sm font-black uppercase tracking-widest text-primary-container flex items-center gap-2">
+                <span class="material-symbols-outlined text-[16px]">psychology</span>
+                Biện chứng Lập luận AI
+            </h4>
+            <span class="px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-indigo-100 text-indigo-700">${args.length} luận điểm</span>
+        </div>
+        
+        <div class="space-y-3 mb-6">
+            ${args.map(a => `
+                <div class="flex gap-3 p-4 bg-${a.color}-50/50 rounded-xl border border-${a.color}-100/50 hover:shadow-sm transition-shadow">
+                    <div class="w-8 h-8 rounded-lg bg-${a.color}-100 flex items-center justify-center flex-shrink-0 mt-0.5">
+                        <span class="material-symbols-outlined text-${a.color}-600 text-sm">${a.icon}</span>
+                    </div>
+                    <div>
+                        <p class="text-xs font-bold text-slate-800 mb-1">${a.title}</p>
+                        <p class="text-[11px] text-slate-600 leading-relaxed">${a.desc}</p>
+                    </div>
+                </div>
+            `).join('')}
+        </div>
+        
+        <div class="border-t border-slate-100 pt-5">
+            <h5 class="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-3 flex items-center gap-2">
+                <span class="material-symbols-outlined text-[14px]">gavel</span>
+                Phỏng đoán Hành vi Vi phạm
+            </h5>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                ${violations.map(v => `
+                    <div class="flex items-center gap-3 p-3 bg-white rounded-xl border border-slate-100 shadow-sm">
+                        <div class="w-10 h-10 rounded-xl bg-red-50 flex items-center justify-center flex-shrink-0">
+                            <span class="material-symbols-outlined text-red-500">${v.icon}</span>
+                        </div>
+                        <div class="flex-1 min-w-0">
+                            <p class="text-xs font-bold text-slate-800 truncate">${v.label}</p>
+                            <div class="flex items-center gap-2 mt-1">
+                                <div class="flex-1 h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                                    <div class="h-full bg-gradient-to-r from-red-400 to-red-600 rounded-full" style="width:${v.confidence}%"></div>
+                                </div>
+                                <span class="text-[9px] font-bold text-red-600">${v.confidence}%</span>
+                            </div>
+                        </div>
+                    </div>
+                `).join('')}
+            </div>
+        </div>
+    `;
+}
+
+// ═══════════════════════════════════════════
+// NLP SUB-TAB SYSTEM (NEW)
+// ═══════════════════════════════════════════
+window.__nlpBatchData = null;
+window.__nlpTablePage = 1;
+window.__nlpTablePageSize = 20;
+
+function switchNLPSubTab(tab) {
+    const batchPanel = document.getElementById('nlp-subtab-batch');
+    const singlePanel = document.getElementById('nlp-subtab-single');
+    const btnBatch = document.getElementById('nlp-subtab-btn-batch');
+    const btnSingle = document.getElementById('nlp-subtab-btn-single');
+    if (!batchPanel || !singlePanel) return;
+    
+    const activeClass = 'px-5 py-2 text-[11px] font-black rounded-lg bg-white text-blue-700 shadow-sm transition-all uppercase tracking-widest flex items-center gap-2';
+    const inactiveClass = 'px-5 py-2 text-[11px] font-black rounded-lg text-slate-500 hover:text-slate-700 transition-all uppercase tracking-widest flex items-center gap-2';
+    
+    if (tab === 'batch') {
+        batchPanel.classList.remove('hidden');
+        singlePanel.classList.add('hidden');
+        btnBatch.className = activeClass;
+        btnSingle.className = inactiveClass;
+    } else {
+        batchPanel.classList.add('hidden');
+        singlePanel.classList.remove('hidden');
+        btnBatch.className = inactiveClass;
+        btnSingle.className = activeClass;
+    }
+}
+
+// ═══════════════════════════════════════════
+// NLP BATCH: File Upload Handler
+// ═══════════════════════════════════════════
+function initNLPBatchUpload() {
+    const fileInput = document.getElementById('nlp-file-input');
+    if (!fileInput) return;
+    
+    fileInput.addEventListener('change', async (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        
+        const uploadZone = document.getElementById('nlp-batch-upload-zone');
+        const progress = document.getElementById('nlp-batch-progress');
+        const dashboard = document.getElementById('nlp-batch-dashboard');
+        
+        uploadZone.classList.add('hidden');
+        progress.classList.remove('hidden');
+        dashboard.classList.add('hidden');
+        
+        const progressText = document.getElementById('nlp-batch-progress-text');
+        const progressBar = document.getElementById('nlp-batch-progress-bar');
+        progressText.textContent = 'Đang tải file lên server...';
+        progressBar.style.width = '30%';
+        
+        const formData = new FormData();
+        formData.append('file', file);
+        
+        try {
+            progressText.textContent = 'Đang phân tích NLP toàn bộ dataset...';
+            progressBar.style.width = '60%';
+            
+            const res = await fetch(`${API_BASE}/ml/redflag/batch_analyze`, {
+                method: 'POST', body: formData
+            });
+            const data = await res.json();
+            
+            if (data.error) throw new Error(data.error);
+            
+            progressBar.style.width = '100%';
+            progressText.textContent = `Hoàn tất! Đã quét ${data.total_analyzed.toLocaleString()} dòng`;
+            
+            window.__nlpBatchData = data;
+            
+            setTimeout(() => {
+                progress.classList.add('hidden');
+                dashboard.classList.remove('hidden');
+                renderNLPBatchFullDashboard(data);
+            }, 800);
+            
+        } catch (err) {
+            progress.classList.add('hidden');
+            uploadZone.classList.remove('hidden');
+            showToast(err.message, 'error');
+        }
+    });
+}
+
+// ═══════════════════════════════════════════
+// NLP BATCH: Full Dashboard with 8 Charts
+// ═══════════════════════════════════════════
+function renderNLPBatchFullDashboard(data) {
+    // KPI Cards
+    const kpiContainer = document.getElementById('nlp-kpi-cards');
+    if (kpiContainer) {
+        const flagPct = data.total_analyzed ? Math.round(data.total_flagged / data.total_analyzed * 100) : 0;
+        const topInd = (data.summary?.by_industry || [])[0]?.industry || 'N/A';
+        kpiContainer.innerHTML = `
+            <div class="bg-surface-container-lowest p-5 rounded-2xl border border-outline-variant/10">
+                <p class="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Tổng Hóa đơn</p>
+                <p class="text-3xl font-black text-slate-600">${data.total_analyzed.toLocaleString()}</p>
+                <p class="text-[9px] text-slate-300 mt-1">Dòng CSV đã quét</p>
+            </div>
+            <div class="bg-red-50 p-5 rounded-2xl border border-red-100">
+                <p class="text-[10px] font-black text-red-400 uppercase tracking-widest mb-2">Rủi ro phát hiện</p>
+                <p class="text-3xl font-black text-red-600">${data.total_flagged.toLocaleString()}</p>
+                <p class="text-[9px] text-red-300 mt-1">Hóa đơn bị gắn cờ</p>
+            </div>
+            <div class="bg-amber-50 p-5 rounded-2xl border border-amber-100">
+                <p class="text-[10px] font-black text-amber-400 uppercase tracking-widest mb-2">Tỷ lệ rủi ro</p>
+                <p class="text-3xl font-black text-amber-600">${flagPct}%</p>
+                <p class="text-[9px] text-amber-300 mt-1">Trên tổng dataset</p>
+            </div>
+            <div class="bg-surface-container-lowest p-5 rounded-2xl border border-outline-variant/10">
+                <p class="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Điểm TB</p>
+                <p class="text-3xl font-black text-primary-container">${(data.avg_risk_score * 100).toFixed(1)}</p>
+                <p class="text-[9px] text-slate-300 mt-1">Trung bình toàn lô</p>
+            </div>
+            <div class="bg-indigo-50 p-5 rounded-2xl border border-indigo-100">
+                <p class="text-[10px] font-black text-indigo-400 uppercase tracking-widest mb-2">Công ty</p>
+                <p class="text-3xl font-black text-indigo-600">${(data.by_tax_code || []).length.toLocaleString()}</p>
+                <p class="text-[9px] text-indigo-300 mt-1">MST duy nhất</p>
+            </div>
+        `;
+    }
+
+    // All charts
+    setTimeout(() => { renderNLPBatchCharts(data); }, 200);
+    
+    // Company table
+    renderNLPCompanyTable(data.by_tax_code || [], 1);
+    initNLPTableControls(data.by_tax_code || []);
+}
+
+function renderNLPBatchCharts(data) {
+    const levels = data.summary?.by_risk_level || {};
+    const industries = data.summary?.by_industry || [];
+    const scoreDist = data.summary?.score_distribution || [];
+    const topKw = data.summary?.top_keywords || [];
+    const heatmap = data.summary?.heatmap || {};
+    const fraudByInd = data.summary?.fraud_type_by_industry || [];
+    const companies = data.by_tax_code || [];
+
+    // 1. Donut Chart
+    const donutEl = document.getElementById('nlp-chart-donut');
+    if (donutEl && typeof echarts !== 'undefined') {
+        const c = echarts.init(donutEl);
+        c.setOption({
+            tooltip: { trigger: 'item', formatter: '{b}: {c} ({d}%)' },
+            legend: { bottom: 0, textStyle: { fontSize: 10 } },
+            color: ['#10b981', '#eab308', '#f97316', '#ef4444'],
+            series: [{ type: 'pie', radius: ['40%', '70%'], center: ['50%', '45%'],
+                label: { show: true, fontSize: 10, formatter: '{b}\n{d}%' },
+                emphasis: { label: { fontSize: 14, fontWeight: 'bold' } },
+                data: [
+                    { value: levels.low || 0, name: 'An toàn' },
+                    { value: levels.medium || 0, name: 'Trung bình' },
+                    { value: levels.high || 0, name: 'Cao' },
+                    { value: levels.critical || 0, name: 'Nguy hiểm' },
+                ]
+            }]
+        });
+    }
+
+    // 2. Industry Bar
+    const barEl = document.getElementById('nlp-chart-industry-bar');
+    if (barEl && typeof echarts !== 'undefined') {
+        const c = echarts.init(barEl);
+        const top = industries.slice(0, 10);
+        c.setOption({
+            tooltip: { trigger: 'axis' },
+            grid: { left: '3%', right: '10%', bottom: '3%', top: '5%', containLabel: true },
+            xAxis: { type: 'value', axisLabel: { fontSize: 9, formatter: '{value}%' } },
+            yAxis: { type: 'category', data: top.map(i => i.industry.substring(0,15)), axisLabel: { fontSize: 9 }, inverse: true },
+            series: [{ type: 'bar', barWidth: 16, itemStyle: { borderRadius: [0,6,6,0] },
+                data: top.map(i => ({ value: i.flag_rate, itemStyle: { color: i.flag_rate > 30 ? '#ef4444' : i.flag_rate > 15 ? '#f97316' : '#3b82f6' } })),
+                label: { show: true, position: 'right', fontSize: 9, formatter: '{c}%' }
+            }]
+        });
+    }
+
+    // 3. Histogram
+    const histEl = document.getElementById('nlp-chart-histogram');
+    if (histEl && typeof echarts !== 'undefined') {
+        const c = echarts.init(histEl);
+        c.setOption({
+            tooltip: { trigger: 'axis' },
+            grid: { left: '3%', right: '5%', bottom: '3%', top: '8%', containLabel: true },
+            xAxis: { type: 'category', data: scoreDist.map(d => d.range), axisLabel: { fontSize: 9 } },
+            yAxis: { type: 'value', axisLabel: { fontSize: 9 } },
+            series: [{ type: 'bar', barWidth: '60%',
+                data: scoreDist.map((d,i) => ({ value: d.count, itemStyle: { color: ['#10b981','#eab308','#f97316','#ef4444','#dc2626'][i], borderRadius: [4,4,0,0] } })),
+                label: { show: true, position: 'top', fontSize: 9 }
+            }]
+        });
+    }
+
+    // 4. Scatter Bubble (companies)
+    const scatterEl = document.getElementById('nlp-chart-scatter');
+    if (scatterEl && typeof echarts !== 'undefined') {
+        const c = echarts.init(scatterEl);
+        const scData = companies.slice(0, 200).map(co => [
+            Math.round(co.avg_score * 100), co.invoices, co.flags.length + 1, co.tax_code, co.industry
+        ]);
+        c.setOption({
+            tooltip: { formatter: p => `MST: ${p.data[3]}<br>Ngành: ${p.data[4]}<br>Điểm: ${p.data[0]}<br>HĐ: ${p.data[1]}<br>Flags: ${p.data[2]-1}` },
+            grid: { left: '5%', right: '5%', bottom: '8%', top: '5%', containLabel: true },
+            xAxis: { name: 'Điểm rủi ro', nameTextStyle: { fontSize: 9 }, axisLabel: { fontSize: 9 } },
+            yAxis: { name: 'Số hóa đơn', nameTextStyle: { fontSize: 9 }, axisLabel: { fontSize: 9 } },
+            series: [{ type: 'scatter', symbolSize: d => Math.max(8, d[2] * 6),
+                data: scData,
+                itemStyle: { color: p => p.data[0] >= 60 ? '#ef4444' : p.data[0] >= 30 ? '#f97316' : '#3b82f6', opacity: 0.7 }
+            }]
+        });
+    }
+
+    // 5. Treemap
+    const treemapEl = document.getElementById('nlp-chart-treemap');
+    if (treemapEl && typeof echarts !== 'undefined') {
+        const c = echarts.init(treemapEl);
+        c.setOption({
+            tooltip: { formatter: p => `${p.name}<br>Hóa đơn: ${p.value}<br>Rủi ro: ${(p.data.avgScore*100).toFixed(0)}%` },
+            series: [{ type: 'treemap', roam: false, width: '95%', height: '90%',
+                label: { show: true, fontSize: 10, formatter: '{b}\n{c}' },
+                data: industries.map(ind => ({
+                    name: ind.industry, value: ind.total, avgScore: ind.avg_score,
+                    itemStyle: { color: ind.avg_score >= 0.3 ? '#fecaca' : ind.avg_score >= 0.15 ? '#fef3c7' : '#d1fae5' }
+                }))
+            }]
+        });
+    }
+
+    // 6. Stacked Bar
+    const stackedEl = document.getElementById('nlp-chart-stacked');
+    if (stackedEl && typeof echarts !== 'undefined') {
+        const c = echarts.init(stackedEl);
+        const topFraud = fraudByInd.sort((a,b) => (b.keyword_match+b.industry_mismatch) - (a.keyword_match+a.industry_mismatch)).slice(0,8);
+        c.setOption({
+            tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
+            legend: { bottom: 0, textStyle: { fontSize: 9 } },
+            grid: { left: '3%', right: '5%', bottom: '12%', top: '5%', containLabel: true },
+            yAxis: { type: 'category', data: topFraud.map(f => f.industry.substring(0,12)), axisLabel: { fontSize: 9 }, inverse: true },
+            xAxis: { type: 'value', axisLabel: { fontSize: 9 } },
+            series: [
+                { name: 'Keyword Match', type: 'bar', stack: 'total', data: topFraud.map(f => f.keyword_match), itemStyle: { color: '#f97316' } },
+                { name: 'Industry Mismatch', type: 'bar', stack: 'total', data: topFraud.map(f => f.industry_mismatch), itemStyle: { color: '#ef4444' } },
+            ]
+        });
+    }
+
+    // 7. Heatmap
+    const heatEl = document.getElementById('nlp-chart-heatmap');
+    if (heatEl && typeof echarts !== 'undefined' && heatmap.data) {
+        const c = echarts.init(heatEl);
+        const maxVal = Math.max(...heatmap.data.map(d => d[2]), 1);
+        c.setOption({
+            tooltip: { formatter: p => `${heatmap.industries[p.data[0]]}<br>${['An toàn','TB','Cao','Nguy hiểm'][p.data[1]]}: ${p.data[2]} hóa đơn` },
+            grid: { left: '15%', right: '12%', bottom: '5%', top: '5%' },
+            xAxis: { type: 'category', data: ['An toàn', 'TB', 'Cao', 'Nguy hiểm'], axisLabel: { fontSize: 9 }, splitArea: { show: true } },
+            yAxis: { type: 'category', data: (heatmap.industries || []).map(i => i.substring(0,12)), axisLabel: { fontSize: 9 }, splitArea: { show: true } },
+            visualMap: { min: 0, max: maxVal, calculable: true, orient: 'vertical', right: 0, top: '10%', itemHeight: 200, textStyle: { fontSize: 8 },
+                inRange: { color: ['#f0fdf4', '#86efac', '#fbbf24', '#f97316', '#dc2626'] } },
+            series: [{ type: 'heatmap', data: heatmap.data, label: { show: true, fontSize: 9 }, emphasis: { itemStyle: { shadowBlur: 10 } } }]
+        });
+    }
+
+    // 8. Top Keywords (horizontal bar)
+    const kwEl = document.getElementById('nlp-chart-keywords');
+    if (kwEl && typeof echarts !== 'undefined') {
+        const c = echarts.init(kwEl);
+        c.setOption({
+            tooltip: { trigger: 'axis' },
+            grid: { left: '3%', right: '8%', bottom: '3%', top: '5%', containLabel: true },
+            xAxis: { type: 'value', axisLabel: { fontSize: 9 } },
+            yAxis: { type: 'category', data: topKw.map(k => k.keyword), axisLabel: { fontSize: 9 }, inverse: true },
+            series: [{ type: 'bar', barWidth: 14, data: topKw.map(k => ({ value: k.count, itemStyle: { color: '#6366f1', borderRadius: [0,4,4,0] } })),
+                label: { show: true, position: 'right', fontSize: 9 }
+            }]
+        });
+    }
+}
+
+// ═══════════════════════════════════════════
+// NLP BATCH: Company Table (CSDL style)
+// ═══════════════════════════════════════════
+function renderNLPCompanyTable(companies, page) {
+    const tbody = document.getElementById('nlp-table-body');
+    const info = document.getElementById('nlp-table-pagination-info');
+    const controls = document.getElementById('nlp-table-pagination-controls');
+    if (!tbody) return;
+    
+    const size = window.__nlpTablePageSize;
+    const start = (page - 1) * size;
+    const end = Math.min(start + size, companies.length);
+    const pageData = companies.slice(start, end);
+    const totalPages = Math.ceil(companies.length / size);
+    
+    const lvlColors = { critical: 'bg-red-100 text-red-700', high: 'bg-orange-100 text-orange-700', medium: 'bg-amber-100 text-amber-700', low: 'bg-emerald-100 text-emerald-700' };
+    const lvlLabels = { critical: 'Nguy hiểm', high: 'Cao', medium: 'Trung bình', low: 'An toàn' };
+    
+    tbody.innerHTML = pageData.map((co, i) => `
+        <tr class="hover:bg-blue-50/50 transition-colors">
+            <td class="px-4 py-3 text-slate-400">${start + i + 1}</td>
+            <td class="px-4 py-3 font-mono font-bold text-slate-700">${co.tax_code}</td>
+            <td class="px-4 py-3 text-slate-600">${co.industry}</td>
+            <td class="px-4 py-3 text-slate-600">${co.invoices}</td>
+            <td class="px-4 py-3 font-black text-slate-800">${Math.round(co.avg_score * 100)}</td>
+            <td class="px-4 py-3"><span class="px-2 py-0.5 rounded-full text-[9px] font-bold ${lvlColors[co.risk_level] || ''}">${lvlLabels[co.risk_level] || ''}</span></td>
+            <td class="px-4 py-3 text-slate-500">${co.flags.join(', ') || '-'}</td>
+            <td class="px-4 py-3 text-right">
+                <button class="nlp-detail-btn text-[10px] font-bold text-blue-600 hover:text-blue-800 hover:underline" data-mst="${co.tax_code}" data-industry="${co.industry}" data-descs="${encodeURIComponent(JSON.stringify(co.descriptions))}">
+                    🔍 Phân tích
+                </button>
+            </td>
+        </tr>
+    `).join('');
+    
+    if (info) info.textContent = `Hiển thị ${start+1} - ${end} / ${companies.length} công ty`;
+    
+    // Pagination buttons
+    if (controls) {
+        let btns = '';
+        if (page > 1) btns += `<button onclick="renderNLPCompanyTable(window.__nlpBatchData.by_tax_code, ${page-1})" class="px-3 py-1 rounded text-xs bg-slate-100 hover:bg-slate-200">‹</button>`;
+        for (let p = Math.max(1, page-2); p <= Math.min(totalPages, page+2); p++) {
+            btns += `<button onclick="renderNLPCompanyTable(window.__nlpBatchData.by_tax_code, ${p})" class="px-3 py-1 rounded text-xs ${p===page ? 'bg-primary-container text-white' : 'bg-slate-100 hover:bg-slate-200'}">${p}</button>`;
+        }
+        if (page < totalPages) btns += `<button onclick="renderNLPCompanyTable(window.__nlpBatchData.by_tax_code, ${page+1})" class="px-3 py-1 rounded text-xs bg-slate-100 hover:bg-slate-200">›</button>`;
+        controls.innerHTML = btns;
+    }
+    
+    // Wire detail buttons
+    document.querySelectorAll('.nlp-detail-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const mst = btn.dataset.mst;
+            const industry = btn.dataset.industry;
+            const descs = JSON.parse(decodeURIComponent(btn.dataset.descs));
+            
+            switchNLPSubTab('single');
+            document.getElementById('nlp-single-from-batch').classList.remove('hidden');
+            document.getElementById('nlp-single-from-mst').textContent = mst;
+            document.getElementById('nlp-mst-input').value = mst;
+            document.getElementById('nlp-industry-select').value = industry;
+            document.getElementById('nlp-desc-input').value = descs.join('\n');
+            
+            // Auto-trigger analysis
+            setTimeout(() => { document.getElementById('btn-scan-nlp').click(); }, 300);
+        });
+    });
+}
+
+function initNLPTableControls(companies) {
+    const searchInput = document.getElementById('nlp-table-search');
+    const levelFilter = document.getElementById('nlp-table-level-filter');
+    const summary = document.getElementById('nlp-table-summary');
+    
+    if (summary) summary.textContent = `Tổng cộng ${companies.length} công ty từ dataset`;
+    
+    const doFilter = () => {
+        const q = (searchInput?.value || '').toLowerCase();
+        const lvl = levelFilter?.value || '';
+        let filtered = companies;
+        if (q) filtered = filtered.filter(c => c.tax_code.includes(q) || c.industry.toLowerCase().includes(q));
+        if (lvl) filtered = filtered.filter(c => c.risk_level === lvl);
+        renderNLPCompanyTable(filtered, 1);
+    };
+    
+    if (searchInput) searchInput.addEventListener('input', doFilter);
+    if (levelFilter) levelFilter.addEventListener('change', doFilter);
+}
+
+// ═══════════════════════════════════════════
+// NLP SINGLE: Dashboard with 4 Charts
+// ═══════════════════════════════════════════
+function renderNLPSingleDashboard(data) {
+    const dashboard = document.getElementById('nlp-single-dashboard');
+    if (!dashboard) return;
+    dashboard.classList.remove('hidden');
+    
+    const score = Math.round((data.risk_score || 0) * 100);
+    const flags = data.flags || [];
+    const conf = Math.round((data.confidence || 0) * 100);
+    
+    // Parse items from description
+    const descInput = document.getElementById('nlp-desc-input');
+    const items = (descInput?.value || '').split('\n').filter(l => l.trim());
+    const numItems = items.length || 1;
+    const riskyItems = flags.length;
+    const safeItems = Math.max(0, numItems - riskyItems);
+    
+    setTimeout(() => {
+        // 1. Gauge Chart
+        const gaugeEl = document.getElementById('nlp-single-gauge');
+        if (gaugeEl && typeof echarts !== 'undefined') {
+            const c = echarts.init(gaugeEl);
+            c.setOption({
+                series: [{
+                    type: 'gauge', startAngle: 220, endAngle: -40,
+                    min: 0, max: 100,
+                    pointer: { show: true, length: '60%', width: 4 },
+                    progress: { show: true, width: 12, roundCap: true,
+                        itemStyle: { color: score >= 60 ? '#ef4444' : score >= 30 ? '#f97316' : '#10b981' }
+                    },
+                    axisLine: { lineStyle: { width: 12, color: [[0.3, '#10b981'], [0.6, '#f97316'], [1, '#ef4444']] } },
+                    axisTick: { show: false },
+                    splitLine: { show: false },
+                    axisLabel: { fontSize: 9, distance: 18 },
+                    title: { show: true, offsetCenter: [0, '70%'], fontSize: 11, fontWeight: 'bold',
+                        color: score >= 60 ? '#ef4444' : score >= 30 ? '#f97316' : '#10b981' },
+                    detail: { fontSize: 28, fontWeight: 900, offsetCenter: [0, '40%'], 
+                        color: score >= 60 ? '#ef4444' : score >= 30 ? '#f97316' : '#10b981',
+                        formatter: '{value}' },
+                    data: [{ value: score, name: score >= 60 ? 'NGUY HIỂM' : score >= 30 ? 'CẢNH BÁO' : 'AN TOÀN' }]
+                }]
+            });
+        }
+
+        // 2. Radar Chart (5 axes)
+        const radarEl = document.getElementById('nlp-single-radar');
+        if (radarEl && typeof echarts !== 'undefined') {
+            const c = echarts.init(radarEl);
+            const hasMismatch = flags.some(f => f.type === 'industry_mismatch');
+            c.setOption({
+                radar: {
+                    indicator: [
+                        { name: 'Keyword', max: 100 },
+                        { name: 'Semantic', max: 100 },
+                        { name: 'Industry', max: 100 },
+                        { name: 'Pattern', max: 100 },
+                        { name: 'Context', max: 100 },
+                    ],
+                    radius: '65%', axisName: { fontSize: 9 }, splitNumber: 3,
+                },
+                series: [{ type: 'radar',
+                    data: [{ value: [
+                        Math.min(100, flags.filter(f=>f.type==='keyword_match').length * 30 + 10),
+                        conf,
+                        hasMismatch ? 85 : 10,
+                        Math.min(100, flags.length * 25),
+                        score
+                    ],
+                    areaStyle: { opacity: 0.25, color: score >= 60 ? '#ef4444' : '#3b82f6' },
+                    lineStyle: { color: score >= 60 ? '#ef4444' : '#3b82f6', width: 2 },
+                    itemStyle: { color: score >= 60 ? '#ef4444' : '#3b82f6' }
+                    }]
+                }]
+            });
+        }
+
+        // 3. Pie (safe vs risky)
+        const pieEl = document.getElementById('nlp-single-pie');
+        if (pieEl && typeof echarts !== 'undefined') {
+            const c = echarts.init(pieEl);
+            c.setOption({
+                tooltip: { trigger: 'item' },
+                color: ['#10b981', '#ef4444'],
+                series: [{ type: 'pie', radius: ['35%', '65%'],
+                    label: { show: true, fontSize: 10, formatter: '{b}\n{d}%' },
+                    data: [
+                        { value: safeItems, name: 'An toàn' },
+                        { value: riskyItems, name: 'Rủi ro' },
+                    ]
+                }]
+            });
+        }
+
+        // 4. Per-item Bar
+        const itemsBarEl = document.getElementById('nlp-single-items-bar');
+        if (itemsBarEl && typeof echarts !== 'undefined') {
+            const c = echarts.init(itemsBarEl);
+            const kwSet = new Set((flags || []).filter(f => f.keyword).map(f => f.keyword.toLowerCase()));
+            const itemScores = items.map(item => {
+                const lower = item.toLowerCase();
+                let s = 5;
+                kwSet.forEach(kw => { if (lower.includes(kw)) s += 30; });
+                return Math.min(100, s);
+            });
+            c.setOption({
+                tooltip: { trigger: 'axis' },
+                grid: { left: '3%', right: '5%', bottom: '3%', top: '5%', containLabel: true },
+                xAxis: { type: 'category', data: items.map(it => it.substring(0,20) + (it.length > 20 ? '...' : '')), axisLabel: { fontSize: 8, rotate: 15 } },
+                yAxis: { type: 'value', max: 100, axisLabel: { fontSize: 9 } },
+                series: [{ type: 'bar', barWidth: '50%',
+                    data: itemScores.map(v => ({
+                        value: v,
+                        itemStyle: { color: v >= 50 ? '#ef4444' : v >= 20 ? '#f97316' : '#10b981', borderRadius: [4,4,0,0] }
+                    })),
+                    label: { show: true, position: 'top', fontSize: 9 }
+                }]
+            });
+        }
+    }, 200);
+
+    // Render flags list
+    const flagsList = document.getElementById('nlp-flags-list');
+    if (flagsList) {
+        if (!flags.length) {
+            flagsList.innerHTML = '<p class="text-xs text-slate-500 italic py-4 text-center">Không phát hiện dấu hiệu bất thường.</p>';
+        } else {
+            flagsList.innerHTML = flags.map(f => {
+                const isMismatch = f.type === 'industry_mismatch';
+                const icon = isMismatch ? 'category' : 'warning';
+                const title = isMismatch ? (f.description || 'Industry Mismatch') : `Từ khóa nhạy cảm: "${f.keyword || f.type}"`;
+                return `<div class="p-3 rounded-lg bg-red-50 border border-red-100/50 flex items-start gap-3">
+                    <span class="material-symbols-outlined text-red-500 text-sm mt-0.5">${icon}</span>
+                    <div>
+                        <p class="text-[11px] font-bold text-red-700 mb-0.5 uppercase tracking-wider">${f.type}</p>
+                        <p class="text-xs text-slate-600">${title}</p>
+                    </div>
+                </div>`;
+            }).join('');
+        }
+    }
+    
+    // Confidence badge
+    const confBadge = document.getElementById('nlp-confidence-badge');
+    if (confBadge) {
+        confBadge.classList.remove('hidden');
+        confBadge.textContent = `Confidence: ${conf}% • Method: ${data.method || 'Ensemble'}`;
+    }
+}
+
+// ═══════════════════════════════════════════
+// NLP: Wire scan button for single mode
+// ═══════════════════════════════════════════
+function initNLPSingleScan() {
+    const btn = document.getElementById('btn-scan-nlp');
+    if (!btn) return;
+    
+    btn.addEventListener('click', async () => {
+        const mst = document.getElementById('nlp-mst-input')?.value?.trim();
+        const industry = document.getElementById('nlp-industry-select')?.value || '';
+        const desc = document.getElementById('nlp-desc-input')?.value?.trim();
+        
+        if (!desc) {
+            showToast('Vui lòng nhập mô tả hàng hóa', 'error');
+            return;
+        }
+        
+        btn.disabled = true;
+        btn.innerHTML = '<span class="material-symbols-outlined text-[20px] animate-spin">autorenew</span> Đang phân tích...';
+        
+        try {
+            const res = await secureFetch(`${API_BASE}/ml/redflag/analyze`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    tax_code: mst || '0000000000',
+                    description: desc,
+                    industry: industry
+                })
+            });
+            
+            if (res.error) throw new Error(res.error);
+            
+            setTimeout(() => {
+                btn.disabled = false;
+                btn.innerHTML = '<span class="material-symbols-outlined text-[20px] group-hover:rotate-180 transition-transform duration-700">radar</span> Chạy Phân tích NLP';
+                renderNLPSingleDashboard(res);
+            }, 800);
+            
+        } catch (e) {
+            showToast(e.message, 'error');
+            btn.disabled = false;
+            btn.innerHTML = '<span class="material-symbols-outlined text-[20px] group-hover:rotate-180 transition-transform duration-700">radar</span> Chạy Phân tích NLP';
+        }
+    });
+    
+    // "Tra cứu sâu" button → go to main single query tab
+    const gotoBtn = document.getElementById('nlp-goto-single-main');
+    if (gotoBtn) {
+        gotoBtn.addEventListener('click', () => {
+            const mst = document.getElementById('nlp-mst-input')?.value?.trim();
+            if (typeof switchTab === 'function') switchTab('single');
+            setTimeout(() => {
+                const mainMst = document.getElementById('fraud-mst');
+                if (mainMst && mst) { mainMst.value = mst; }
+                if (typeof checkFraudRisk === 'function') checkFraudRisk();
+            }, 300);
+        });
+    }
+    
+    // Paste sample button
+    const pasteBtn = document.getElementById('nlp-paste-sample');
+    if (pasteBtn) {
+        pasteBtn.addEventListener('click', () => {
+            document.getElementById('nlp-desc-input').value = 'Chi phí tư vấn quản lý rủi ro\nThiết kế website marketing\nHoa hồng môi giới bất động sản\nSắt thép Pomina\nXi măng Hà Tiên';
+            document.getElementById('nlp-mst-input').value = '0312345678';
+            document.getElementById('nlp-industry-select').value = 'Xây dựng';
+        });
+    }
+}
+
+// Initialize NLP system on page load
+document.addEventListener('DOMContentLoaded', () => {
+    initNLPBatchUpload();
+    initNLPSingleScan();
+});

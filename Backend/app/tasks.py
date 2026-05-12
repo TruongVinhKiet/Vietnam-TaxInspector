@@ -140,7 +140,12 @@ def _save_assessments(assessments: list, chunk_size: int = 2000):
         db.close()
 
 
-def run_batch_analysis(file_path: str, batch_id: int) -> dict:
+def run_batch_analysis(
+    file_path: str,
+    batch_id: int,
+    *,
+    progress_hook=None,
+) -> dict:
     """
     Core batch analysis logic.
     Can be called by Celery task or directly (synchronous).
@@ -152,6 +157,11 @@ def run_batch_analysis(file_path: str, batch_id: int) -> dict:
             status="processing",
             started_at=datetime.utcnow(),
         )
+        if callable(progress_hook):
+            try:
+                progress_hook({"phase": "processing", "processed": 0, "total": None})
+            except Exception:
+                pass
 
         # Read CSV with tax_code as string to preserve leading-zero MST values.
         df = pd.read_csv(file_path, dtype={"tax_code": "string"}, low_memory=False)
@@ -161,6 +171,11 @@ def run_batch_analysis(file_path: str, batch_id: int) -> dict:
         total_companies = df["tax_code"].nunique() if "tax_code" in df.columns else len(df)
 
         _update_batch_status(batch_id, total_rows=total_companies)
+        if callable(progress_hook):
+            try:
+                progress_hook({"phase": "read_csv", "processed": 0, "total": int(total_companies)})
+            except Exception:
+                pass
 
         # Load and run pipeline
         pipeline = get_pipeline()
@@ -173,6 +188,11 @@ def run_batch_analysis(file_path: str, batch_id: int) -> dict:
             if processed == total or (processed - last_reported) >= 1000:
                 _update_batch_status(batch_id, processed_rows=processed)
                 last_reported = processed
+            if callable(progress_hook):
+                try:
+                    progress_hook({"phase": "model_inference", "processed": int(processed), "total": int(total)})
+                except Exception:
+                    pass
 
         result = pipeline.predict_batch(df, batch_id=batch_id,
                                          progress_callback=progress_cb)
@@ -183,6 +203,11 @@ def run_batch_analysis(file_path: str, batch_id: int) -> dict:
             status="finalizing",
             processed_rows=result["total_companies"],
         )
+        if callable(progress_hook):
+            try:
+                progress_hook({"phase": "finalizing", "processed": int(result["total_companies"]), "total": int(result["total_companies"])})
+            except Exception:
+                pass
 
         # Save individual assessments to DB
         _save_assessments(result["assessments"], chunk_size=2000)
@@ -195,6 +220,11 @@ def run_batch_analysis(file_path: str, batch_id: int) -> dict:
             result_summary=result["statistics"],
             completed_at=datetime.utcnow(),
         )
+        if callable(progress_hook):
+            try:
+                progress_hook({"phase": "done", "processed": int(result["total_companies"]), "total": int(result["total_companies"])})
+            except Exception:
+                pass
 
         return {
             "batch_id": batch_id,

@@ -186,8 +186,8 @@ class ModelServingGateway:
         # 4. HeteroGNN
         self._registered["hetero_gnn"] = ModelMeta(
             name="hetero_gnn",
-            model_path=str(MODEL_DIR / "hetero_gnn.pt"),
-            config_path=str(MODEL_DIR / "hetero_gnn_config.json"),
+            model_path=str(MODEL_DIR / "hgt_model.pt"),
+            config_path=str(MODEL_DIR / "hgt_config.json"),
             factory=self._factory_hetero_gnn,
             version="1.0",
         )
@@ -222,10 +222,13 @@ class ModelServingGateway:
 
     @staticmethod
     def _factory_hetero_gnn(config: dict) -> nn.Module:
-        from ml_engine.hetero_gnn_model import HeteroTaxGNN
-        return HeteroTaxGNN(
-            node_feat_dim=config.get("node_feat_dim", 22),
-            edge_feat_dim=config.get("edge_feat_dim", 13),
+        from ml_engine.hetero_gnn_model import TaxFraudHGT
+        return TaxFraudHGT(
+            node_feature_dim=config.get("node_feature_dim", 15),
+            hidden_dim=config.get("hidden_dim", 64),
+            num_heads=config.get("num_heads", 4),
+            num_layers=config.get("num_layers", 2),
+            dropout=config.get("dropout", 0.3),
         )
 
     # ─── Core API ─────────────────────────────────────────────────
@@ -283,6 +286,8 @@ class ModelServingGateway:
                     "file_exists": model_exists,
                     "loaded": name in self._models,
                     "version": reg.version,
+                    "model_path": reg.model_path,
+                    "config_path": reg.config_path,
                     "load_count": meta.load_count if meta else 0,
                     "access_count": meta.access_count if meta else 0,
                     "last_accessed": meta.last_accessed if meta else None,

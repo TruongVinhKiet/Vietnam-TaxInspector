@@ -24,6 +24,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Optional
 
+from ml_engine.tax_agent_mode_contracts import AgentModeContractRegistry
+
 logger = logging.getLogger(__name__)
 
 
@@ -135,28 +137,52 @@ class TaxAgentPlanner:
     """
 
     # Intent → default tools mapping
+    PLANNER_POLICY_VERSION = "planner-v2.0"
+
+    TOOL_PRIORITY: list[str] = [
+        "top_n_risky_companies",
+        "company_name_search",
+        "company_risk_lookup",
+        "macro_forecast",
+        "delinquency_check",
+        "temporal_delinquency_deep",
+        "causal_uplift_recommend",
+        "revenue_forecast",
+        "invoice_risk_scan",
+        "vat_refund_risk",
+        "gnn_analysis",
+        "hetero_gnn_risk",
+        "vae_anomaly_scan",
+        "nlp_red_flag_scan",
+        "motif_detection",
+        "ring_scoring",
+        "ownership_analysis",
+        "entity_resolution_check",
+        "knowledge_search",
+    ]
+
     INTENT_TOOL_MAP: dict[str, list[str]] = {
         "vat_refund_risk": [
-            "knowledge_search", "company_risk_lookup", "invoice_risk_scan",
+            "company_risk_lookup", "invoice_risk_scan", "vat_refund_risk",
             "nlp_red_flag_scan", "vae_anomaly_scan",
         ],
         "invoice_risk": [
-            "knowledge_search", "invoice_risk_scan", "motif_detection",
+            "invoice_risk_scan", "motif_detection",
             "nlp_red_flag_scan", "vae_anomaly_scan",
         ],
         "delinquency": [
-            "knowledge_search", "company_risk_lookup", "delinquency_check",
+            "company_risk_lookup", "delinquency_check",
             "revenue_forecast", "temporal_delinquency_deep", "causal_uplift_recommend",
         ],
         "osint_ownership": [
-            "knowledge_search", "ownership_analysis", "company_risk_lookup", "gnn_analysis",
+            "ownership_analysis", "company_risk_lookup", "gnn_analysis",
             "entity_resolution_check", "hetero_gnn_risk",
         ],
         "transfer_pricing": [
-            "knowledge_search", "company_risk_lookup", "invoice_risk_scan",
+            "company_risk_lookup", "invoice_risk_scan",
         ],
         "audit_selection": [
-            "knowledge_search", "company_risk_lookup", "delinquency_check",
+            "company_risk_lookup", "delinquency_check",
             "invoice_risk_scan", "nlp_red_flag_scan",
         ],
         "top_n_query": [
@@ -165,8 +191,13 @@ class TaxAgentPlanner:
         "company_name_lookup": [
             "company_name_search",
         ],
-        "batch_analysis": [
-            "knowledge_search",
+        "batch_analysis": [],
+        "vat_network_analysis": [
+            "company_risk_lookup", "invoice_risk_scan", "gnn_analysis",
+            "motif_detection", "ring_scoring", "ownership_analysis",
+        ],
+        "macro_forecast": [
+            "macro_forecast",
         ],
         "general_tax_query": [
             "knowledge_search",
@@ -193,6 +224,8 @@ class TaxAgentPlanner:
         tax_period: str | None = None,
         context_intents: list[str] | None = None,
         model_mode: str = "full",
+        routing_decision: Any | None = None,
+        allowed_tools: set[str] | list[str] | None = None,
     ) -> ExecutionPlan:
         """
         Generate an execution plan for the given query.
@@ -221,6 +254,9 @@ class TaxAgentPlanner:
         tools = self._select_tools(
             intent, complexity,
             has_tax_code=bool(tax_code),
+            model_mode=model_mode,
+            routing_decision=routing_decision,
+            allowed_tools=set(allowed_tools) if allowed_tools is not None else None,
         )
 
         # Step 3: Build execution steps
@@ -256,6 +292,7 @@ class TaxAgentPlanner:
                 "tax_code": tax_code,
                 "tax_period": tax_period,
                 "tools_selected": [t for t in tools],
+                "planner_policy_version": self.PLANNER_POLICY_VERSION,
                 "planning_latency_ms": (time.perf_counter() - t0) * 1000.0,
                 "budget_ms": budget_ms,
                 "retry_policy": retry_policy,
@@ -313,10 +350,62 @@ class TaxAgentPlanner:
         complexity: QueryComplexity,
         *,
         has_tax_code: bool,
+        model_mode: str = "full",
+        routing_decision: Any | None = None,
+        allowed_tools: set[str] | None = None,
     ) -> list[str]:
         """Select tools based on intent and complexity."""
+        mode = (model_mode or "full").lower()
+        if routing_decision is not None:
+            route_allowed = getattr(routing_decision, "allowed_tools", None)
+            if route_allowed is not None:
+                allowed_tools = set(route_allowed)
+            allow_legal = bool(getattr(routing_decision, "allow_legal", True))
+        else:
+            allow_legal = True
+
+        if allowed_tools is not None:
+            return self._select_tools_from_scope(
+                intent=intent,
+                complexity=complexity,
+                allowed_tools=set(allowed_tools),
+                allow_legal=allow_legal,
+                model_mode=mode,
+            )
+
+        if mode == "macro":
+            return ["macro_forecast"]
+        if mode == "delinquency" and intent in {"general_tax_query", "delinquency"}:
+            return [
+                "company_risk_lookup",
+                "delinquency_check",
+                "temporal_delinquency_deep",
+                "causal_uplift_recommend",
+                "revenue_forecast",
+            ]
+        if mode == "fraud" and intent in {"general_tax_query", "audit_selection"}:
+            return [
+                "company_risk_lookup",
+                "invoice_risk_scan",
+                "gnn_analysis",
+                "hetero_gnn_risk",
+                "vae_anomaly_scan",
+            ]
+        if mode == "vat" and intent in {"general_tax_query", "invoice_risk", "vat_refund_risk", "vat_network_analysis"}:
+            return [
+                "company_risk_lookup",
+                "invoice_risk_scan",
+                "vat_refund_risk",
+                "gnn_analysis",
+                "motif_detection",
+                "ring_scoring",
+                "ownership_analysis",
+            ]
+
         # Get default tools for intent
-        default_tools = list(self.INTENT_TOOL_MAP.get(intent, ["knowledge_search"]))
+        default_tools = list(self.INTENT_TOOL_MAP.get(intent, ["knowledge_search"] if allow_legal else ["company_risk_lookup"]))
+        if not allow_legal:
+            default_tools = [tool for tool in default_tools if tool != "knowledge_search"]
 
         if complexity == QueryComplexity.SIMPLE:
             # Preserve direct-data tools for simple lookup intents.
@@ -341,6 +430,74 @@ class TaxAgentPlanner:
             return investigation_tools
 
         return default_tools
+
+    def _select_tools_from_scope(
+        self,
+        *,
+        intent: str,
+        complexity: QueryComplexity,
+        allowed_tools: set[str],
+        allow_legal: bool,
+        model_mode: str,
+    ) -> list[str]:
+        """Planner v2: pick tools only inside Router/ModeContract scope."""
+        if not allowed_tools:
+            return []
+
+        contract = AgentModeContractRegistry.get(model_mode)
+        if contract.allowed_tools:
+            allowed_tools = allowed_tools.intersection(contract.allowed_tools)
+        if not allow_legal:
+            allowed_tools.discard("knowledge_search")
+
+        if intent == "top_n_query" and "top_n_risky_companies" in allowed_tools:
+            return ["top_n_risky_companies"]
+        if intent == "company_name_lookup" and "company_name_search" in allowed_tools:
+            return ["company_name_search"]
+        if intent == "macro_forecast" and "macro_forecast" in allowed_tools:
+            return ["macro_forecast"]
+        if allow_legal and intent in {"general_tax_query", "transfer_pricing"} and "knowledge_search" in allowed_tools:
+            return ["knowledge_search"]
+
+        intent_order = {
+            "delinquency": [
+                "company_risk_lookup", "delinquency_check", "temporal_delinquency_deep",
+                "causal_uplift_recommend", "revenue_forecast",
+            ],
+            "vat_network_analysis": [
+                "company_risk_lookup", "invoice_risk_scan", "vat_refund_risk",
+                "gnn_analysis", "motif_detection", "ring_scoring", "ownership_analysis",
+            ],
+            "vat_refund_risk": [
+                "company_risk_lookup", "invoice_risk_scan", "vat_refund_risk",
+                "gnn_analysis", "motif_detection", "ring_scoring",
+            ],
+            "invoice_risk": [
+                "invoice_risk_scan", "nlp_red_flag_scan", "vae_anomaly_scan", "motif_detection",
+            ],
+            "audit_selection": [
+                "company_risk_lookup", "invoice_risk_scan", "gnn_analysis",
+                "hetero_gnn_risk", "vae_anomaly_scan", "nlp_red_flag_scan",
+            ],
+            "batch_analysis": [
+                "company_risk_lookup", "invoice_risk_scan", "gnn_analysis",
+                "hetero_gnn_risk", "vae_anomaly_scan",
+            ],
+        }
+        preferred = intent_order.get(intent)
+        if not preferred:
+            preferred = self.TOOL_PRIORITY
+        selected = [tool for tool in preferred if tool in allowed_tools]
+        if not selected:
+            selected = [tool for tool in self.TOOL_PRIORITY if tool in allowed_tools]
+
+        cap = {
+            QueryComplexity.SIMPLE: 1,
+            QueryComplexity.MODERATE: 3,
+            QueryComplexity.COMPLEX: 6,
+            QueryComplexity.INVESTIGATION: len(selected),
+        }[complexity]
+        return selected[:cap]
 
     def _build_steps(
         self,
@@ -406,6 +563,18 @@ class TaxAgentPlanner:
             analytics_step_ids.append(step_id)
             step_id += 1
 
+        if "macro_forecast" in tools:
+            steps.append(SubTask(
+                step_id=step_id,
+                step_type=PlanStep.CHECK_DELINQUENCY,
+                tool_name="macro_forecast",
+                tool_inputs={"scenario": {}, "action": "run"},
+                description="Chạy mô phỏng vĩ mô bằng ScenarioInput hiện hành",
+                priority=1,
+            ))
+            analytics_step_ids.append(step_id)
+            step_id += 1
+
         if "company_risk_lookup" in tools and tax_code:
             steps.append(SubTask(
                 step_id=step_id,
@@ -425,6 +594,18 @@ class TaxAgentPlanner:
                 tool_name="delinquency_check",
                 tool_inputs={"tax_code": tax_code},
                 description=f"Kiểm tra rủi ro nợ đọng DN {tax_code}",
+                priority=3,
+            ))
+            analytics_step_ids.append(step_id)
+            step_id += 1
+
+        if "vat_refund_risk" in tools and tax_code:
+            steps.append(SubTask(
+                step_id=step_id,
+                step_type=PlanStep.SCAN_INVOICES,
+                tool_name="vat_refund_risk",
+                tool_inputs={"tax_code": tax_code},
+                description=f"Đánh giá rủi ro hoàn thuế VAT DN {tax_code}",
                 priority=3,
             ))
             analytics_step_ids.append(step_id)
@@ -462,6 +643,19 @@ class TaxAgentPlanner:
                 tool_name="motif_detection",
                 tool_inputs={"tax_code": tax_code},
                 description=f"Phát hiện mẫu giao dịch đáng ngờ DN {tax_code}",
+                depends_on=[],
+                priority=5,
+                optional=True,
+            ))
+            step_id += 1
+
+        if "ring_scoring" in tools and tax_code:
+            steps.append(SubTask(
+                step_id=step_id,
+                step_type=PlanStep.DETECT_MOTIFS,
+                tool_name="ring_scoring",
+                tool_inputs={"tax_code": tax_code},
+                description=f"Chấm điểm vòng giao dịch VAT DN {tax_code}",
                 depends_on=[],
                 priority=5,
                 optional=True,
@@ -672,6 +866,9 @@ class TaxAgentPlanner:
             "hetero_gnn_risk": 1200,
             "vae_anomaly_scan": 900,
             "causal_uplift_recommend": 700,
+            "vat_refund_risk": 500,
+            "ring_scoring": 900,
+            "macro_forecast": 1200,
         }
 
         # Simple estimate: sum of sequential stages
@@ -760,6 +957,9 @@ class TaxAgentPlanner:
             "nlp_red_flag_scan": 15000,
             "revenue_forecast": 10000,
             "entity_resolution_check": 15000,
+            "vat_refund_risk": 10000,
+            "ring_scoring": 15000,
+            "macro_forecast": 20000,
         }.get(tool_name, 10000)
 
     def _tool_max_retries(self, tool_name: str) -> int:
@@ -782,6 +982,9 @@ class TaxAgentPlanner:
             "vae_anomaly_scan": {"required_fields": ["status", "anomaly_count", "anomaly_ratio"]},
             "ownership_analysis": {"required_fields": ["status", "summary"]},
             "motif_detection": {"required_fields": ["status", "summary"]},
+            "vat_refund_risk": {"required_fields": ["status"]},
+            "ring_scoring": {"required_fields": ["status", "ring_score"]},
             "causal_uplift_recommend": {"required_fields": ["status", "recommended_action"]},
+            "macro_forecast": {"required_fields": ["status", "result"]},
         }
         return contracts.get(tool_name, {"required_fields": ["status"]})

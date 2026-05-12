@@ -1220,6 +1220,11 @@ def _build_vat_refund_signals_payload(
             "Xac suat can can thiep hoan thue do mo hinh VAT chuyen biet du bao.",
         )
 
+    if f3 >= 0.70 and vat_ratio >= 1.20:
+        priority_raw = max(priority_raw, 60.0)
+    if vat_flag_count >= 2:
+        priority_raw = max(priority_raw, 62.0)
+
     priority_score = int(max(0, min(100, round(priority_raw))))
 
     queue = "monitor"
@@ -1439,7 +1444,7 @@ def _build_audit_value_payload(
         recommended_lane = "monitor"
 
     confidence_signal = confidence_raw
-    if model_probability is not None:
+    if model_probability is not None and specialized_model_override_enabled:
         confidence_signal = max(confidence_raw, abs(model_probability - 0.5) * 200.0)
 
     if confidence_signal >= 80.0:
@@ -2029,10 +2034,18 @@ def single_query(tax_code: str, db: Session = Depends(get_db)):
     ).first()
 
     if not company:
-        raise HTTPException(
-            status_code=404,
-            detail=f"Không tìm thấy doanh nghiệp MST {resolved_tax_code}. Hãy kiểm tra lại dữ liệu hoặc upload CSV.",
+        # Fallback: check if we have data from a batch upload in AIRiskAssessment
+        cached_from_batch = (
+            db.query(models.AIRiskAssessment)
+            .filter(models.AIRiskAssessment.tax_code == resolved_tax_code)
+            .order_by(models.AIRiskAssessment.created_at.desc())
+            .first()
         )
+        if not cached_from_batch:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Không tìm thấy doanh nghiệp MST {resolved_tax_code}. Hãy kiểm tra lại dữ liệu hoặc upload CSV.",
+            )
 
     # Check if we have tax returns for this company
     tax_returns = (
@@ -3278,4 +3291,3 @@ def get_inspector_labels(
         "labels": [schemas.InspectorLabelResponse.model_validate(l) for l in labels],
         "total": len(labels),
     }
-

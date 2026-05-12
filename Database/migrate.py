@@ -5,6 +5,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from sqlalchemy import text
 
+from Backend.app.agent_schema import ensure_agent_resilience_schema
 from Backend.app.database import engine
 
 
@@ -685,14 +686,74 @@ def _run_agent_routing_telemetry_migration(conn) -> None:
             model_mode VARCHAR(40) NOT NULL DEFAULT 'full',
             selected_tools_json JSONB,
             suppressed_tools_json JSONB,
+            requested_domain VARCHAR(40),
+            selected_model_bundle_json JSONB,
+            mode_validation_json JSONB,
+            mode_mismatch BOOLEAN NOT NULL DEFAULT FALSE,
+            suggested_mode VARCHAR(40),
+            suppressed_domains_json JSONB,
             route_confidence FLOAT,
             focus_score FLOAT,
             route_violation BOOLEAN NOT NULL DEFAULT FALSE,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
     """))
+    conn.execute(text("ALTER TABLE agent_route_events ADD COLUMN IF NOT EXISTS requested_domain VARCHAR(40);"))
+    conn.execute(text("ALTER TABLE agent_route_events ADD COLUMN IF NOT EXISTS selected_model_bundle_json JSONB;"))
+    conn.execute(text("ALTER TABLE agent_route_events ADD COLUMN IF NOT EXISTS mode_validation_json JSONB;"))
+    conn.execute(text("ALTER TABLE agent_route_events ADD COLUMN IF NOT EXISTS mode_mismatch BOOLEAN NOT NULL DEFAULT FALSE;"))
+    conn.execute(text("ALTER TABLE agent_route_events ADD COLUMN IF NOT EXISTS suggested_mode VARCHAR(40);"))
+    conn.execute(text("ALTER TABLE agent_route_events ADD COLUMN IF NOT EXISTS suppressed_domains_json JSONB;"))
     conn.execute(text("CREATE INDEX IF NOT EXISTS idx_agent_route_events_created ON agent_route_events (created_at DESC);"))
     conn.execute(text("CREATE INDEX IF NOT EXISTS idx_agent_route_events_contract ON agent_route_events (answer_contract, created_at DESC);"))
+    conn.execute(text("CREATE INDEX IF NOT EXISTS idx_agent_route_events_domain ON agent_route_events (requested_domain, created_at DESC);"))
+    conn.execute(text("CREATE INDEX IF NOT EXISTS idx_agent_route_events_mismatch ON agent_route_events (mode_mismatch, created_at DESC);"))
+
+
+def _run_agent_session_resilience_migration(conn) -> None:
+    conn.execute(text("""
+        CREATE TABLE IF NOT EXISTS agent_session_snapshots (
+            id SERIAL PRIMARY KEY,
+            session_id VARCHAR(120) NOT NULL REFERENCES agent_sessions(session_id) ON DELETE CASCADE,
+            scope VARCHAR(60) NOT NULL,
+            payload_json JSONB,
+            updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+            expires_at TIMESTAMPTZ
+        );
+    """))
+    conn.execute(text("""
+        CREATE UNIQUE INDEX IF NOT EXISTS uq_agent_session_snapshot_scope
+        ON agent_session_snapshots (session_id, scope);
+    """))
+    conn.execute(text("""
+        CREATE INDEX IF NOT EXISTS idx_agent_session_snapshots_exp
+        ON agent_session_snapshots (expires_at);
+    """))
+
+    conn.execute(text("""
+        CREATE TABLE IF NOT EXISTS agent_async_file_jobs (
+            id SERIAL PRIMARY KEY,
+            job_id VARCHAR(64) NOT NULL UNIQUE,
+            session_id VARCHAR(120) REFERENCES agent_sessions(session_id) ON DELETE SET NULL,
+            filename VARCHAR(500),
+            status VARCHAR(20) NOT NULL DEFAULT 'pending',
+            phase VARCHAR(80),
+            progress FLOAT NOT NULL DEFAULT 0.0,
+            error_message TEXT,
+            response_json JSONB,
+            created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+        );
+    """))
+    conn.execute(text("""
+        CREATE INDEX IF NOT EXISTS idx_agent_async_file_jobs_status
+        ON agent_async_file_jobs (status, updated_at DESC);
+    """))
+    conn.execute(text("""
+        CREATE INDEX IF NOT EXISTS idx_agent_async_file_jobs_session
+        ON agent_async_file_jobs (session_id, updated_at DESC);
+    """))
+    ensure_agent_resilience_schema(conn)
 
 
 def run_migration() -> None:
@@ -709,6 +770,7 @@ def run_migration() -> None:
         _run_multimodal_upload_migration(conn)
         _run_legal_agent_v2_migration(conn)
         _run_agent_routing_telemetry_migration(conn)
+        _run_agent_session_resilience_migration(conn)
 
     print("[OK] Completed migration: user profile columns + offshore proxy mapping + numeric tax_code contract + multimodal uploads + legal agent v2 + agent routing telemetry.")
 

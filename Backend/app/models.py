@@ -1274,6 +1274,12 @@ class AgentRouteEvent(Base):
     model_mode = Column(String(40), nullable=False, default="full", index=True)
     selected_tools_json = Column(JSON, nullable=True)
     suppressed_tools_json = Column(JSON, nullable=True)
+    requested_domain = Column(String(40), nullable=True, index=True)
+    selected_model_bundle_json = Column(JSON, nullable=True)
+    mode_validation_json = Column(JSON, nullable=True)
+    mode_mismatch = Column(Boolean, nullable=False, default=False, index=True)
+    suggested_mode = Column(String(40), nullable=True)
+    suppressed_domains_json = Column(JSON, nullable=True)
     route_confidence = Column(Float, nullable=True)
     focus_score = Column(Float, nullable=True)
     route_violation = Column(Boolean, nullable=False, default=False, index=True)
@@ -1512,6 +1518,66 @@ class AgentEntityMemory(Base):
     __table_args__ = (
         UniqueConstraint('session_id', 'entity_type', 'entity_value', name='_session_entity_uc'),
     )
+
+
+class AgentSessionSnapshot(Base):
+    """
+    Durable per-session snapshots for follow-up continuity across restarts/workers.
+    scope examples: risk_batch, vat_snapshot, attachment_summary, prior_answer_facts.
+    """
+    __tablename__ = "agent_session_snapshots"
+
+    id = Column(Integer, primary_key=True, index=True)
+    session_id = Column(String(120), ForeignKey("agent_sessions.session_id", ondelete="CASCADE"), nullable=False, index=True)
+    scope = Column(String(60), nullable=False, index=True)
+    payload_json = Column(JSON, nullable=True)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), index=True)
+    expires_at = Column(DateTime(timezone=True), nullable=True, index=True)
+
+    __table_args__ = (
+        UniqueConstraint("session_id", "scope", name="uq_agent_session_snapshot_scope"),
+    )
+
+
+class AgentPriorAnswerFact(Base):
+    """
+    Structured facts extracted from assistant answers for grounded follow-ups.
+    """
+    __tablename__ = "agent_prior_answer_facts"
+
+    id = Column(Integer, primary_key=True, index=True)
+    session_id = Column(String(120), ForeignKey("agent_sessions.session_id", ondelete="CASCADE"), nullable=False, index=True)
+    turn_id = Column(Integer, ForeignKey("agent_turns.id", ondelete="SET NULL"), nullable=True, index=True)
+    mode = Column(String(40), nullable=False, default="full", index=True)
+    intent = Column(String(80), nullable=True, index=True)
+    subject_key = Column(String(160), nullable=True, index=True)
+    fact_type = Column(String(80), nullable=False, default="claim", index=True)
+    claim_text = Column(Text, nullable=False)
+    value_json = Column(JSON, nullable=True)
+    source_tool = Column(String(120), nullable=True, index=True)
+    confidence = Column(Float, nullable=False, default=0.75)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
+    expires_at = Column(DateTime(timezone=True), nullable=True, index=True)
+
+
+class AgentAsyncFileJob(Base):
+    """
+    Durable async job state for /tax-agent/chat/v2/with-file/async.
+    """
+    __tablename__ = "agent_async_file_jobs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    job_id = Column(String(64), nullable=False, unique=True, index=True)
+    session_id = Column(String(120), ForeignKey("agent_sessions.session_id", ondelete="SET NULL"), nullable=True, index=True)
+    filename = Column(String(500), nullable=True)
+    status = Column(String(20), nullable=False, default="pending", index=True)
+    phase = Column(String(80), nullable=True)
+    progress = Column(Float, nullable=False, default=0.0)
+    error_message = Column(Text, nullable=True)
+    response_json = Column(JSON, nullable=True)
+    cancelled_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), index=True)
 
 
 class DPOTrainingRun(Base):

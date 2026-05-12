@@ -54,6 +54,14 @@ let graphLegendState = {
     shell_node: true,
     offshore_node: true,
 };
+
+// ECharts instance registry cho temporal charts
+let _temporalCharts = {
+    timeline: null,
+    patterns: null,
+    snapshots: null,
+    radar: null,
+};
 let graphSplitTriggerGate = null;
 let activeNodeFocusId = null;
 
@@ -172,12 +180,16 @@ function renderGraphRiskAnalytics(data) {
     if (!panel || !barsHost || !cumulativeHost) return;
 
     const nodes = Array.isArray(data?.nodes) ? data.nodes : [];
-    if (!nodes.length) {
+    const hasTemporalData = data && data.temporal_analysis && data.temporal_analysis.patterns;
+
+    if (!nodes.length && !hasTemporalData) {
         panel.classList.add("hidden");
         return;
     }
 
-    panel.classList.remove("hidden");
+    if (nodes.length) {
+        panel.classList.remove("hidden");
+    }
 
     const bucketDefs = [
         { key: "critical", label: "Nghiêm trọng", color: "#ef4444", test: (score) => score >= 80 },
@@ -242,6 +254,348 @@ function renderGraphRiskAnalytics(data) {
             </div>
         </div>
     `;
+
+    // Render Temporal Analytics
+    const temporalPanel = document.getElementById("graph-temporal-analytics");
+    const temporalContent = document.getElementById("graph-temporal-content");
+    const temporalAlerts = document.getElementById("graph-temporal-alerts");
+    if (temporalPanel && temporalContent && temporalAlerts) {
+        if (data && data.temporal_analysis && data.temporal_analysis.patterns) {
+            temporalPanel.classList.remove("hidden");
+            const temp = data.temporal_analysis.patterns;
+            const snaps = data.temporal_analysis.snapshots || [];
+            const summary = data.temporal_analysis.summary || {};
+            const riskScores = data.temporal_analysis.risk_scores || {};
+
+            // ── KPI Cards: đồng bộ style với investigation-summary-card ──
+            const migCount  = temp.network_migration       ? temp.network_migration.length       : 0;
+            const burstCount = temp.temporal_burst         ? temp.temporal_burst.length          : 0;
+            const dormCount  = temp.dormancy_reactivation  ? temp.dormancy_reactivation.length   : 0;
+            const carCount   = temp.seasonal_carousel      ? temp.seasonal_carousel.length       : 0;
+
+            temporalContent.innerHTML = `
+                <div class="investigation-summary-card">
+                    <p class="label">Kỳ thời gian</p>
+                    <p class="value">${snaps.length}</p>
+                    <p class="hint">Số quý trong phân tích</p>
+                </div>
+                <div class="investigation-summary-card">
+                    <p class="label">Dịch chuyển cụm</p>
+                    <p class="value ${migCount > 0 ? 'text-amber-700' : ''}">${migCount}</p>
+                    <p class="hint">Cụm di cư đối tác</p>
+                </div>
+                <div class="investigation-summary-card">
+                    <p class="label">Đột biến giao dịch</p>
+                    <p class="value ${burstCount > 0 ? 'text-error' : ''}">${burstCount}</p>
+                    <p class="hint">Tăng bất thường theo kỳ</p>
+                </div>
+                <div class="investigation-summary-card">
+                    <p class="label">Ngủ đông – Tái HĐ</p>
+                    <p class="value ${dormCount > 0 ? 'text-primary-container' : ''}">${dormCount}</p>
+                    <p class="hint">Tái kích hoạt sau im lặng</p>
+                </div>
+            `;
+
+            // ── Alert rows ──
+            const severityChip = (sev) => {
+                const map = { critical: 'bg-red-100 text-red-700', high: 'bg-orange-100 text-orange-700', medium: 'bg-amber-100 text-amber-700', low: 'bg-slate-100 text-slate-600' };
+                const label = { critical: 'NGHIÊM TRỌNG', high: 'CAO', medium: 'TRUNG BÌNH', low: 'THẤP' };
+                const cls = map[sev] || map.medium;
+                return `<span class="text-[9px] font-black px-1.5 py-0.5 rounded uppercase ${cls}">${label[sev] || sev}</span>`;
+            };
+
+            let alertsHtml = '';
+            if (migCount > 0) {
+                alertsHtml += temp.network_migration.slice(0, 3).map(m => `
+                    <div class="flex items-center justify-between gap-2 px-3 py-2 rounded-lg border border-outline-variant/20 bg-surface-container-low/40 hover:bg-surface-container-low transition-colors">
+                        <span class="font-mono text-primary-container font-bold text-[11px] shrink-0">${escapeHtml(m.company)}</span>
+                        <span class="flex-1 text-slate-600 text-[11px] font-medium truncate">
+                            <span class="material-symbols-outlined text-[13px] align-middle text-amber-600 mr-0.5">swap_horiz</span>
+                            Dịch chuyển đối tác (mới: ${m.new_partners})
+                        </span>
+                        ${severityChip(m.severity || 'medium')}
+                        <span class="font-black text-slate-700 border border-outline-variant/30 px-2 py-0.5 rounded text-[10px] shrink-0">Risk ${(m.risk_score || 0).toFixed(0)}</span>
+                    </div>`).join('');
+            }
+            if (burstCount > 0) {
+                alertsHtml += temp.temporal_burst.slice(0, 3).map(m => `
+                    <div class="flex items-center justify-between gap-2 px-3 py-2 rounded-lg border border-outline-variant/20 bg-surface-container-low/40 hover:bg-surface-container-low transition-colors">
+                        <span class="font-mono text-primary-container font-bold text-[11px] shrink-0">${escapeHtml(m.company)}</span>
+                        <span class="flex-1 text-slate-600 text-[11px] font-medium truncate">
+                            <span class="material-symbols-outlined text-[13px] align-middle text-error mr-0.5">trending_up</span>
+                            Khối lượng tăng đột biến ${(m.burst_multiplier || 0).toFixed(1)}x
+                        </span>
+                        ${severityChip(m.severity || 'high')}
+                        <span class="font-black text-slate-700 border border-outline-variant/30 px-2 py-0.5 rounded text-[10px] shrink-0">Risk ${(m.risk_score || 0).toFixed(0)}</span>
+                    </div>`).join('');
+            }
+            if (dormCount > 0) {
+                alertsHtml += temp.dormancy_reactivation.slice(0, 3).map(m => `
+                    <div class="flex items-center justify-between gap-2 px-3 py-2 rounded-lg border border-outline-variant/20 bg-surface-container-low/40 hover:bg-surface-container-low transition-colors">
+                        <span class="font-mono text-primary-container font-bold text-[11px] shrink-0">${escapeHtml(m.company)}</span>
+                        <span class="flex-1 text-slate-600 text-[11px] font-medium truncate">
+                            <span class="material-symbols-outlined text-[13px] align-middle text-primary-container mr-0.5">bedtime</span>
+                            Ngủ đông ${m.dormancy_quarters || '?'} quý rồi tái hoạt động
+                        </span>
+                        ${severityChip(m.severity || 'medium')}
+                        <span class="font-black text-slate-700 border border-outline-variant/30 px-2 py-0.5 rounded text-[10px] shrink-0">Risk ${(m.risk_score || 0).toFixed(0)}</span>
+                    </div>`).join('');
+            }
+            if (carCount > 0) {
+                alertsHtml += temp.seasonal_carousel.slice(0, 2).map(m => `
+                    <div class="flex items-center justify-between gap-2 px-3 py-2 rounded-lg border border-outline-variant/20 bg-surface-container-low/40 hover:bg-surface-container-low transition-colors">
+                        <span class="font-mono text-primary-container font-bold text-[11px] shrink-0">${escapeHtml(m.company)}</span>
+                        <span class="flex-1 text-slate-600 text-[11px] font-medium truncate">
+                            <span class="material-symbols-outlined text-[13px] align-middle text-amber-700 mr-0.5">autorenew</span>
+                            Vòng xoay mùa vụ (${(m.appearance_periods || []).join(', ')})
+                        </span>
+                        ${severityChip(m.severity || 'medium')}
+                        <span class="font-black text-slate-700 border border-outline-variant/30 px-2 py-0.5 rounded text-[10px] shrink-0">Risk ${(m.risk_score || 0).toFixed(0)}</span>
+                    </div>`).join('');
+            }
+
+            // Summary bar
+            const summaryBar = summary.total_patterns > 0 ? `
+                <div class="mt-2 pt-2 border-t border-outline-variant/20 flex justify-between items-center text-[10px] text-slate-400">
+                    <span class="flex items-center gap-1"><span class="material-symbols-outlined text-[12px]">date_range</span>${summary.period_range || ''}</span>
+                    <span>${summary.total_patterns} mẫu phát hiện · ${summary.entities_at_risk || 0} thực thể rủi ro</span>
+                    <span class="text-slate-300">${summary.latency_ms ? summary.latency_ms + 'ms' : ''}</span>
+                </div>` : '';
+
+            temporalAlerts.innerHTML = (alertsHtml || '<div class="text-slate-400 italic text-center p-3 text-xs">Không phát hiện hành vi dịch chuyển cấu trúc hoặc đột biến đáng ngờ.</div>') + summaryBar;
+
+            // ── ECharts: render 4 biểu đồ ──
+            renderTemporalCharts(snaps, temp, riskScores, summary);
+        } else {
+            temporalPanel.classList.add("hidden");
+        }
+    }
+}
+
+
+// ════════════════════════════════════════════════════════════════
+//  Temporal Charts (ECharts)
+// ════════════════════════════════════════════════════════════════
+function _initTemporalChart(id, key) {
+    const el = document.getElementById(id);
+    if (!el) return null;
+    if (_temporalCharts[key]) {
+        try { _temporalCharts[key].dispose(); } catch (_) {}
+    }
+    if (typeof echarts === "undefined") return null;
+    _temporalCharts[key] = echarts.init(el, null, { renderer: "canvas" });
+    return _temporalCharts[key];
+}
+
+function renderTemporalCharts(snapshots, patterns, riskScores, summary) {
+    if (typeof echarts === "undefined") return;
+
+    const PALETTE = {
+        primary:  "#002147",
+        amber:    "#d97706",
+        red:      "#dc2626",
+        violet:   "#7c3aed",
+        emerald:  "#059669",
+        sky:      "#0284c7",
+        slate:    "#64748b",
+        grid:     "rgba(148,163,184,0.18)",
+        axisLine: "#e2e8f0",
+    };
+
+    // ── 1. Biểu đồ Diễn biến mạng lưới theo quý (Area stacked) ──
+    const chartTimeline = _initTemporalChart("temporal-chart-timeline", "timeline");
+    if (chartTimeline && snapshots.length > 0) {
+        const periods  = snapshots.map(s => s.period || s.period_label || "");
+        const nodeData = snapshots.map(s => s.nodes  || 0);
+        const edgeData = snapshots.map(s => s.edges  || 0);
+        const sccData  = snapshots.map(s => s.scc_count || 0);
+        chartTimeline.setOption({
+            tooltip: { trigger: "axis", axisPointer: { type: "cross" } },
+            legend: {
+                bottom: 4, textStyle: { fontSize: 10, color: PALETTE.slate },
+                data: ["Số nút", "Số cạnh", "Chu trình đóng (SCC)"],
+            },
+            grid: { top: 16, left: 48, right: 16, bottom: 48 },
+            xAxis: {
+                type: "category", data: periods,
+                axisLabel: { fontSize: 9, color: PALETTE.slate },
+                axisLine: { lineStyle: { color: PALETTE.axisLine } },
+                splitLine: { lineStyle: { color: PALETTE.grid } },
+            },
+            yAxis: {
+                type: "value",
+                axisLabel: { fontSize: 9, color: PALETTE.slate },
+                splitLine: { lineStyle: { color: PALETTE.grid } },
+            },
+            series: [
+                {
+                    name: "Số nút", type: "line", smooth: true,
+                    data: nodeData, symbol: "circle", symbolSize: 5,
+                    lineStyle: { color: PALETTE.primary, width: 2 },
+                    areaStyle: { color: { type: "linear", x: 0, y: 0, x2: 0, y2: 1,
+                        colorStops: [{ offset: 0, color: "rgba(0,33,71,0.22)" }, { offset: 1, color: "rgba(0,33,71,0.02)" }] } },
+                    itemStyle: { color: PALETTE.primary },
+                },
+                {
+                    name: "Số cạnh", type: "line", smooth: true,
+                    data: edgeData, symbol: "circle", symbolSize: 5,
+                    lineStyle: { color: PALETTE.sky, width: 2 },
+                    areaStyle: { color: { type: "linear", x: 0, y: 0, x2: 0, y2: 1,
+                        colorStops: [{ offset: 0, color: "rgba(2,132,199,0.18)" }, { offset: 1, color: "rgba(2,132,199,0.02)" }] } },
+                    itemStyle: { color: PALETTE.sky },
+                },
+                {
+                    name: "Chu trình đóng (SCC)", type: "line", smooth: true,
+                    data: sccData, symbol: "diamond", symbolSize: 6,
+                    lineStyle: { color: PALETTE.red, width: 2, type: "dashed" },
+                    itemStyle: { color: PALETTE.red },
+                },
+            ],
+        });
+    }
+
+    // ── 2. Biểu đồ Donut – Phân bổ mẫu hành vi ──
+    const chartPatterns = _initTemporalChart("temporal-chart-patterns", "patterns");
+    if (chartPatterns) {
+        const migN  = (patterns.network_migration      || []).length;
+        const burN  = (patterns.temporal_burst         || []).length;
+        const domN  = (patterns.dormancy_reactivation  || []).length;
+        const carN  = (patterns.seasonal_carousel      || []).length;
+        const total = migN + burN + domN + carN;
+        const donutData = [];
+        if (migN)  donutData.push({ value: migN,  name: "Dịch chuyển cụm",    itemStyle: { color: PALETTE.amber   } });
+        if (burN)  donutData.push({ value: burN,  name: "Đột biến giao dịch", itemStyle: { color: PALETTE.red     } });
+        if (domN)  donutData.push({ value: domN,  name: "Ngủ đông – Tái HĐ", itemStyle: { color: PALETTE.primary } });
+        if (carN)  donutData.push({ value: carN,  name: "Vòng xoay mùa vụ",  itemStyle: { color: PALETTE.violet  } });
+        if (!total) donutData.push({ value: 1, name: "Chưa phát hiện", itemStyle: { color: "#e2e8f0" } });
+
+        chartPatterns.setOption({
+            tooltip: {
+                trigger: "item",
+                formatter: (p) => total > 0 ? `${p.name}<br/><b>${p.value}</b> mẫu (${p.percent}%)` : p.name,
+            },
+            legend: {
+                orient: "vertical", right: 8, top: "center",
+                textStyle: { fontSize: 9, color: PALETTE.slate },
+            },
+            series: [{
+                name: "Mẫu hành vi", type: "pie",
+                radius: ["42%", "68%"],
+                center: ["36%", "50%"],
+                label: { show: true, position: "center",
+                    formatter: () => `{a|${total}}\n{b|mẫu}`,
+                    rich: { a: { fontSize: 22, fontWeight: 900, color: PALETTE.primary },
+                            b: { fontSize: 9,  color: PALETTE.slate } } },
+                labelLine: { show: false },
+                data: donutData,
+                emphasis: { itemStyle: { shadowBlur: 10, shadowOffsetX: 0, shadowColor: "rgba(0,0,0,0.25)" } },
+            }],
+        });
+    }
+
+    // ── 3. Biểu đồ cột nhóm – Quy mô giao dịch theo kỳ ──
+    const chartSnapshots = _initTemporalChart("temporal-chart-snapshots", "snapshots");
+    if (chartSnapshots && snapshots.length > 0) {
+        const periods  = snapshots.map(s => s.period || "");
+        const nodeData = snapshots.map(s => s.nodes || 0);
+        const edgeData = snapshots.map(s => s.edges || 0);
+        const amtData  = snapshots.map(s => Math.round((s.total_amount || 0) / 1e6)); // triệu VND
+
+        chartSnapshots.setOption({
+            tooltip: {
+                trigger: "axis",
+                formatter: (params) => {
+                    let tip = `<b>${params[0].axisValue}</b><br/>`;
+                    params.forEach(p => { tip += `${p.marker}${p.seriesName}: <b>${p.value.toLocaleString("vi-VN")}</b><br/>`; });
+                    return tip;
+                },
+            },
+            legend: { bottom: 4, textStyle: { fontSize: 10, color: PALETTE.slate } },
+            grid: { top: 8, left: 52, right: 16, bottom: 52 },
+            xAxis: {
+                type: "category", data: periods,
+                axisLabel: { fontSize: 9, color: PALETTE.slate, rotate: periods.length > 5 ? 30 : 0 },
+                axisLine: { lineStyle: { color: PALETTE.axisLine } },
+            },
+            yAxis: [
+                { type: "value", name: "Số nút/cạnh",  nameTextStyle: { fontSize: 9 },
+                  axisLabel: { fontSize: 9, color: PALETTE.slate },
+                  splitLine: { lineStyle: { color: PALETTE.grid } } },
+                { type: "value", name: "Tr. VNĐ", nameTextStyle: { fontSize: 9 },
+                  axisLabel: { fontSize: 9, color: PALETTE.slate },
+                  splitLine: { show: false } },
+            ],
+            series: [
+                { name: "Số nút",  type: "bar", data: nodeData, yAxisIndex: 0,
+                  itemStyle: { color: PALETTE.primary, borderRadius: [3,3,0,0] }, barMaxWidth: 28 },
+                { name: "Số cạnh", type: "bar", data: edgeData, yAxisIndex: 0,
+                  itemStyle: { color: PALETTE.sky,     borderRadius: [3,3,0,0] }, barMaxWidth: 28 },
+                { name: "Giá trị (Tr. VNĐ)", type: "line", data: amtData, yAxisIndex: 1,
+                  symbol: "circle", symbolSize: 5, smooth: true,
+                  lineStyle: { color: PALETTE.amber, width: 2 },
+                  itemStyle: { color: PALETTE.amber } },
+            ],
+        });
+    }
+
+    // ── 4. Biểu đồ Radar – Hồ sơ rủi ro đa chiều ──
+    const chartRadar = _initTemporalChart("temporal-chart-radar", "radar");
+    if (chartRadar) {
+        const migN  = (patterns.network_migration      || []).length;
+        const burN  = (patterns.temporal_burst         || []).length;
+        const domN  = (patterns.dormancy_reactivation  || []).length;
+        const carN  = (patterns.seasonal_carousel      || []).length;
+        const riskEntities  = Object.keys(riskScores).length;
+        const highRisk      = (summary.high_risk_entities || 0);
+        const totalPatterns = (summary.total_patterns || 0);
+        const snapCount     = snapshots.length;
+
+        // Normalize sang thang 0-100
+        const maxRef = [10, 10, 10, 10, 20, 10, 10];
+        const normalize = (v, max) => Math.min(100, Math.round((v / Math.max(1, max)) * 100));
+
+        chartRadar.setOption({
+            tooltip: { trigger: "item" },
+            radar: {
+                indicator: [
+                    { name: "Dịch chuyển\ncụm",    max: 100 },
+                    { name: "Đột biến\ngiao dịch",  max: 100 },
+                    { name: "Ngủ đông\nTái HĐ",     max: 100 },
+                    { name: "Vòng xoay\nmùa vụ",    max: 100 },
+                    { name: "Thực thể\nrủi ro",     max: 100 },
+                    { name: "Rủi ro\ncao",          max: 100 },
+                    { name: "Kỳ phân\ntích",        max: 100 },
+                ],
+                center: ["50%", "52%"],
+                radius: "62%",
+                nameGap: 6,
+                name: { textStyle: { fontSize: 9, color: PALETTE.slate, fontWeight: "bold" } },
+                splitLine: { lineStyle: { color: PALETTE.grid } },
+                axisLine:  { lineStyle: { color: PALETTE.grid } },
+                splitArea: { areaStyle: { color: ["rgba(0,33,71,0.03)", "rgba(0,33,71,0.06)"] } },
+            },
+            series: [{
+                name: "Hồ sơ Temporal",
+                type: "radar",
+                data: [{
+                    value: [
+                        normalize(migN,  maxRef[0]),
+                        normalize(burN,  maxRef[1]),
+                        normalize(domN,  maxRef[2]),
+                        normalize(carN,  maxRef[3]),
+                        normalize(riskEntities, maxRef[4]),
+                        normalize(highRisk,     maxRef[5]),
+                        normalize(snapCount,    maxRef[6]),
+                    ],
+                    name: "Rủi ro Temporal",
+                    symbol: "circle", symbolSize: 5,
+                    lineStyle: { color: PALETTE.primary, width: 2 },
+                    areaStyle: { color: "rgba(0,33,71,0.15)" },
+                    itemStyle: { color: PALETTE.primary },
+                }],
+            }],
+        });
+    }
 }
 
 
@@ -728,8 +1082,8 @@ function setupVATUpload() {
     });
 
     async function handleFileUpload(file) {
-        if (!file.name.toLowerCase().endsWith('.csv')) {
-            showGraphToast("Định dạng không hợp lệ", "Vui lòng chọn file CSV.", "warning");
+        if (!file.name.toLowerCase().match(/\.(csv|xlsx|xls)$/i)) {
+            showGraphToast("Định dạng không hợp lệ", "Vui lòng chọn file CSV hoặc Excel (.xlsx/.xls).", "warning");
             return;
         }
 
@@ -760,7 +1114,7 @@ function setupVATUpload() {
             progressBar.style.width = '40%';
             progressPct.textContent = '40%';
 
-            if (data.status === 'completed') {
+            if (String(data.status || '').toLowerCase() === 'done') {
                 finalizeUpload(data);
             } else {
                 pollBatchStatus(batchId);
@@ -783,20 +1137,24 @@ function setupVATUpload() {
                 if (!res.ok) throw new Error("Status check failed");
                 const data = await res.json();
                 
-                // Simulate progress visualization
-                const progress = Math.min(95, 40 + (attempts * 2));
+                const serverProgress = Number(data.progress || 0);
+                const progress = Math.max(0, Math.min(99, Number.isFinite(serverProgress) ? serverProgress : 0));
                 progressBar.style.width = `${progress}%`;
                 progressPct.textContent = `${progress}%`;
+                progressStatus.textContent = String(data.phase || 'Đang xử lý dữ liệu...');
 
-                if (data.status === 'completed') {
+                const status = String(data.status || '').toLowerCase();
+                if (status === 'done' || status === 'completed') {
                     clearInterval(interval);
-                    finalizeUpload(data);
-                } else if (data.status === 'failed') {
+                    const resultRes = await fetch(`${GRAPH_API_BASE}/graph/batch-results/${batchId}`);
+                    const resultData = resultRes.ok ? await resultRes.json() : data;
+                    finalizeUpload(resultData);
+                } else if (status === 'error' || status === 'failed') {
                     clearInterval(interval);
-                    throw new Error("Batch processing failed on server");
+                    throw new Error(data.error_message || "Batch processing failed on server");
                 } else if (attempts >= maxAttempts) {
                     clearInterval(interval);
-                    throw new Error("Timeout processing batch");
+                    throw new Error("Timeout processing batch. Hệ thống chưa trả trạng thái done.");
                 }
             } catch (err) {
                 clearInterval(interval);
@@ -1480,7 +1838,7 @@ function setupGlobalWorkbenchShortcuts() {
 
 
 function switchWorkbenchMode(mode, options = {}) {
-    const validModes = new Set(["graph", "forensic", "companies", "osint", "entity"]);
+    const validModes = new Set(["graph", "forensic", "companies", "osint", "entity", "tp"]);
     const nextMode = validModes.has(mode) ? mode : "companies";
     if (!options.force && activeWorkbenchMode === nextMode) return;
     activeWorkbenchMode = nextMode;
@@ -1496,6 +1854,7 @@ function switchWorkbenchMode(mode, options = {}) {
     const companiesSection = document.getElementById("companies-section");
     const osintSection = document.getElementById("osint-section");
     const entitySection = document.getElementById("entity-section");
+    const tpSection = document.getElementById("tp-section");
     if (!investigationSection || !companiesSection) return;
 
     if (nextMode !== "graph") {
@@ -1512,6 +1871,12 @@ function switchWorkbenchMode(mode, options = {}) {
         entitySection.classList.add("hidden");
         entitySection.setAttribute("hidden", "");
         entitySection.style.display = "none";
+    }
+
+    if (tpSection) {
+        tpSection.classList.add("hidden");
+        tpSection.setAttribute("hidden", "");
+        tpSection.style.display = "none";
     }
 
     if (nextMode === "companies") {
@@ -1540,6 +1905,24 @@ function switchWorkbenchMode(mode, options = {}) {
             osintSection.style.display = "flex";
             if (!options.skipScroll) {
                 osintSection.scrollIntoView({ behavior: "smooth", block: "start" });
+            }
+        }
+        return;
+    }
+
+    if (nextMode === "tp") {
+        investigationSection.classList.add("hidden", "opacity-0");
+        investigationSection.classList.remove("workbench-forensic-mode");
+        investigationSection.setAttribute("hidden", "");
+        companiesSection.classList.add("hidden");
+        companiesSection.setAttribute("hidden", "");
+
+        if (tpSection) {
+            tpSection.classList.remove("hidden");
+            tpSection.removeAttribute("hidden");
+            tpSection.style.display = "flex";
+            if (!options.skipScroll) {
+                tpSection.scrollIntoView({ behavior: "smooth", block: "start" });
             }
         }
         return;
