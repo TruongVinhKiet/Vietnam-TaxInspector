@@ -59,9 +59,12 @@ Hệ thống được thiết kế tối giản, loại bỏ các chi tiết th�
 
 ## 🤖 3. Phân Hệ Đa Tác Tử (Multi-Agent Debate & ReAct Framework)
 
-Trái tim của khả năng giao tiếp ngôn ngữ tự nhiên trong TaxInspector chính là hệ thống **Multi-Agent**. Thay vì sử dụng một mô hình LLM đơn lẻ dễ bị "ảo giác" (hallucination), chúng tôi thiết kế một kiến trúc phân tán gồm nhiều Agent chuyên biệt hoạt động dưới sự giám sát của một Orchestrator trung tâm.
+Trái tim của khả năng giao tiếp ngôn ngữ tự nhiên trong TaxInspector chính là hệ thống **Multi-Agent** được thiết kế theo cấu trúc ReAct Framework. Gần đây nhất, hệ thống đã được nâng cấp lên **Phiên bản V5 Production** (Fine-tune mô hình 1.5B tham số trên bộ dữ liệu 130,000 bản ghi sinh tự động). Điểm nổi bật của Agent V5:
+- **Làm chủ 21 Công cụ (Tools):** Thay vì bị giới hạn ở 15 công cụ cơ bản, V5 đã tích hợp toàn bộ các thuật toán chuyên sâu như `gnn_vat_fraud`, `vat_refund_risk`, `hetero_gnn_risk`, `ocr_document_process`, và `nlp_red_flag_scan`.
+- **Kháng lỗi ngôn ngữ (Noise Robustness):** Xử lý mượt mà tiếng Việt không dấu, viết tắt (VD: "MST", "HĐĐT", "GTGT") và lỗi chính tả nhẹ (Typos).
+- **Tránh Ảo giác (Hallucination Prevention):** Agent được huấn luyện để chỉ trả lời khi có đủ dữ kiện. Nó biết khi nào nên hỏi lại để làm rõ MST, và khi nào nên tra cứu GraphRAG thay vì tự suy diễn luật.
 
-### 2.1. Vòng Đời Xử Lý Ngôn Ngữ Tự Nhiên (The Agentic Lifecycle)
+### 3.1. Vòng Đời Xử Lý Ngôn Ngữ Tự Nhiên (The Agentic Lifecycle)
 
 Quá trình xử lý một yêu cầu của người dùng đi qua 5 Giai đoạn (Phases) cực kỳ nghiêm ngặt:
 
@@ -82,11 +85,11 @@ Một câu hỏi phức tạp (VD: "Phân tích rủi ro của công ty A và đ
 - Để chống vòng lặp vô hạn (Infinite Loop) - một lỗi phổ biến của AutoGPT, hệ thống áp dụng cơ chế **Budgeting**. Mỗi Node/Task chỉ được cấp tối đa `X` tokens hoặc `Y` lần gọi API. Khi hết Budget, Task sẽ bị Terminal Error và Orchestrator sẽ bẻ lái sang kế hoạch dự phòng.
 
 **Phase 3: Tool Execution & RAG (Thực thi Công cụ & Truy xuất)**
-Dựa vào DAG, hệ thống kích hoạt **ReAct Framework** (Reasoning + Acting). Tác tử được quyền chủ động sử dụng các Tools:
-- `SQLQueryTool`: Chuyển đổi ngôn ngữ tự nhiên sang SQL an toàn (Text-to-SQL) để query bảng `companies`, `tax_returns`.
-- `KnowledgeRetrievalTool`: Kích hoạt RAG để tìm kiếm văn bản quy phạm pháp luật.
-- `GraphAnalysisTool`: Tương tác với NetworkX Backend để lấy các chỉ số Centrality từ đồ thị hóa đơn.
-- `DocumentOCRTool`: Chạy model bóc tách hóa đơn trong thời gian thực.
+Dựa vào DAG, hệ thống kích hoạt **ReAct Framework** (Reasoning + Acting). Tác tử được quyền chủ động sử dụng 21 Tools (được cấp phép động dựa vào phân loại rủi ro), bao gồm:
+- `company_risk_lookup` / `invoice_risk_scan`: Truy vấn Database và Module ML truyền thống.
+- `knowledge_search`: Kích hoạt RAG / GraphRAG để tìm kiếm văn bản quy phạm pháp luật và chuỗi thẩm quyền pháp lý (Authority Path).
+- `gnn_vat_fraud` / `vat_refund_risk`: Kích hoạt các thuật toán Mạng lưới chuyên sâu trên Graph DB để truy vết rửa tiền và hoàn thuế.
+- `ocr_document_process`: Kích hoạt Computer Vision Pipeline để bóc tách hóa đơn trong thời gian thực.
 
 **Phase 4: Multi-Agent Debate & Escalation (Tranh biện & Nâng cấp rủi ro)**
 Đây là điểm sáng tạo nhất của hệ thống. Nếu sau khi thu thập dữ liệu, câu trả lời dự kiến có độ tin cậy (Confidence) < 0.8 hoặc bài toán có tính rủi ro cao (VD: Hoàn thuế hàng tỷ đồng), Orchestrator sẽ không trả lời ngay mà tạo ra một **Cuộc Tranh Biện (Debate)** nội bộ.
@@ -398,7 +401,7 @@ Nguồn chuẩn kỹ thuật của danh mục model nằm tại `Backend/ml_engi
 | `ocr-document-v1` | OCR | `table_transformer/`, OCR engines | `download_table_models.py` | `/api/ml/ocr/*`, `ocr_document_process` | PaddleOCR -> EasyOCR -> Tesseract -> regex_only |
 | `tax-agent-intent-v1` | Tax Agent | `tax_agent_intent_model.joblib`, `tax_agent_intent_vectorizer.joblib` | `Backend/ml_engine/train_tax_agent_intent.py` | `/api/tax-agent/chat/v2` | rule/regex router |
 | `tax-agent-rag-v1` | RAG | `embeddings/`, `reranker/`, pgvector KB | `ingest_tax_knowledge.py` | `knowledge_search`, GraphRAG | BM25 + hash-TF retrieval |
-| `tax-agent-llm-v1` | Local LLM | `tax_llm_lora/` | `Backend/run_llm_training.py` | local synthesis adapter | template synthesis |
+| `tax-agent-llm-v1` | Local LLM | `tax_agent_lora_v5/` (130k SFT records) | `Backend/run_llm_training.py`, `Colab Notebook` | local synthesis & agent routing | rule/regex router |
 | `dpo-rlhf-v1` | Governance | preference/eval data | `Backend/ml_engine/rlhf_dpo_trainer.py` | `/api/tax-agent/feedback`, DPO eval | feedback logging |
 
 #### 12.2.1. Reproducible Experimental Evaluation
