@@ -347,6 +347,22 @@ SNIPPETS: tuple[CitizenLegalSnippet, ...] = (
         text="Người lao động ký hợp đồng thời vụ, hợp đồng giao khoán dưới 3 tháng hoặc hợp đồng thử việc có thu nhập từ 2 triệu đồng/lần trở lên bị khấu trừ 10% thuế TNCN trước khi nhận lương.",
         next_steps=("Tương tự freelancer, nếu tổng thu nhập trong năm chưa đến mức đóng thuế, có thể nộp bản cam kết 08/CK-TNCN.", "Cung cấp MST cá nhân cho công ty để làm cam kết 08.", "Lưu ý nếu có nhiều nguồn thu nhập cùng lúc thì không được làm cam kết 08.")
     ),
+    CitizenLegalSnippet(
+        key="two_workplaces_pit_finalization",
+        title="Quyết toán thuế TNCN hai nơi",
+        legal_reference="Luật Thuế TNCN; Thông tư 111/2013/TT-BTC; Công văn 4846/TCT-DNNCN",
+        keywords=("hai noi", "nhieu noi", "quyet toan", "uy quyen", "thu nhap vang lai", "khau tru 10"),
+        text="Cá nhân có thu nhập từ tiền lương, tiền công từ hai nơi trở lên không được ủy quyền quyết toán thuế cho công ty nếu khoản thu nhập vãng lai chưa được khấu trừ 10% hoặc bình quân vượt quá 10 triệu đồng/tháng. Trong trường hợp này, cá nhân bắt buộc phải tự quyết toán trực tiếp với cơ quan thuế.",
+        next_steps=("Yêu cầu tất cả các công ty chi trả cấp Chứng từ khấu trừ thuế TNCN.", "Tổng hợp thu nhập và tính lại số thuế phải nộp trong năm.", "Kê khai quyết toán trực tuyến trên eTax Mobile hoặc website Thuế điện tử.")
+    ),
+    CitizenLegalSnippet(
+        key="tax_extension_2024",
+        title="Gia hạn nộp thuế 2024",
+        legal_reference="Nghị định 64/2024/NĐ-CP",
+        keywords=("gia han", "nop thue", "gia han 2024", "cham nop", "thue gtgt", "thue tndn"),
+        text="Năm 2024, Chính phủ ban hành Nghị định 64/2024/NĐ-CP cho phép gia hạn nộp thuế GTGT (5 tháng đối với các kỳ từ tháng 5 đến tháng 9), thuế TNDN tạm nộp quý II (3 tháng) và tiền thuê đất cho các doanh nghiệp, hộ kinh doanh thuộc các ngành nghề ưu tiên và doanh nghiệp nhỏ, siêu nhỏ.",
+        next_steps=("Kiểm tra mã ngành nghề kinh doanh xem có thuộc đối tượng được gia hạn theo NĐ 64/2024 không.", "Nộp Giấy đề nghị gia hạn nộp thuế cho cơ quan thuế trước ngày 30/09/2024.", "Lưu ý gia hạn nộp thuế không có nghĩa là miễn thuế, cần chuẩn bị tài chính để nộp khi hết hạn.")
+    ),
 )
 
 

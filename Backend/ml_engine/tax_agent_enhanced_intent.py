@@ -27,6 +27,12 @@ from typing import Any, Optional
 
 import numpy as np
 
+from ml_engine.tax_agent_text_normalization import (
+    is_probable_greeting,
+    is_probable_thanks,
+    normalize_vietnamese_text,
+)
+
 logger = logging.getLogger(__name__)
 
 
@@ -444,6 +450,18 @@ class EnhancedIntentClassifier:
         normalized = self._normalize_ascii(query)
         if not normalized:
             return None
+        domain_markers = (
+            "thue", "vat", "gtgt", "tncn", "tndn", "mst", "hoa don", "rui ro",
+            "doanh nghiep", "cong ty", "ke khai", "hoan thue", "no dong",
+            "phap ly", "quy dinh", "nghi dinh", "thong tu",
+        )
+        has_domain_task = any(marker in normalized for marker in domain_markers)
+        if not has_domain_task and is_probable_greeting(query):
+            return "smalltalk"
+        if not has_domain_task and is_probable_thanks(query):
+            return "smalltalk"
+        if has_domain_task:
+            return None
         exact = {
             "xin chao", "chao", "chao ban", "hello", "hi", "cam on",
             "thanks", "thank you", "tam biet", "bye",
@@ -462,16 +480,7 @@ class EnhancedIntentClassifier:
 
     @staticmethod
     def _normalize_ascii(value: str) -> str:
-        try:
-            import unicodedata
-
-            text = unicodedata.normalize("NFD", value or "")
-            text = "".join(ch for ch in text if unicodedata.category(ch) != "Mn")
-            text = text.replace("đ", "d").replace("Đ", "D")
-        except Exception:
-            text = value or ""
-        text = re.sub(r"[^\w\s]", " ", text.lower())
-        return re.sub(r"\s+", " ", text).strip()
+        return normalize_vietnamese_text(value)
 
     def _classify_semantic(
         self,

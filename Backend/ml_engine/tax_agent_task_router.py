@@ -14,6 +14,7 @@ from enum import Enum
 from typing import Any
 
 from ml_engine.tax_agent_mode_contracts import AgentModeContractRegistry
+from ml_engine.tax_agent_text_normalization import normalize_vietnamese_text
 
 
 class AnswerContract(str, Enum):
@@ -113,7 +114,7 @@ class TaskRouter:
             (mode == "vat" or requested_domain == "vat")
             and legal_requested
             and any(hint in normalized for hint in ("vat", "hoa don", "hoan thue", "khau tru", "thue gtgt"))
-            and intent in LEGAL_INTENTS
+            and (intent in LEGAL_INTENTS or intent in VAT_GRAPH_INTENTS)
         )
         if vat_legal_requested:
             requested_domain = "vat"
@@ -385,13 +386,4 @@ class TaskRouter:
 
     @staticmethod
     def _normalize(value: str) -> str:
-        try:
-            import unicodedata
-
-            normalized = unicodedata.normalize("NFD", value or "")
-            stripped = "".join(ch for ch in normalized if unicodedata.category(ch) != "Mn")
-            stripped = stripped.replace("đ", "d").replace("Đ", "D")
-        except Exception:
-            stripped = value or ""
-        stripped = re.sub(r"[^\w\s]", " ", stripped.lower())
-        return re.sub(r"\s+", " ", stripped).strip()
+        return normalize_vietnamese_text(value)

@@ -54,5 +54,5 @@ def test_synthesizer_uses_citizen_fallback_as_legal_evidence() -> None:
     )
 
     assert result.evidence
-    assert "Bước xử lý" in result.detailed_analysis or "BÆ°á»›c xá»­ lÃ½" in result.detailed_analysis
+    assert "các bước tiếp theo" in result.detailed_analysis.lower() or "bước xử lý" in result.detailed_analysis.lower()
     assert result.confidence > 0

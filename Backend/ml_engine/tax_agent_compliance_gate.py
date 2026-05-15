@@ -86,9 +86,9 @@ PII_PATTERNS = {
 # ─── Safety Keywords ─────────────────────────────────────────────────────────
 
 UNSAFE_PATTERNS = [
-    re.compile(r"\b(?:trốn thuế|evade|escape tax|giấu|che giấu thu nhập)\b", re.IGNORECASE),
-    re.compile(r"\b(?:rửa tiền|money laundering|launder)\b", re.IGNORECASE),
-    re.compile(r"\b(?:đe dọa|threaten|bribe|hối lộ)\b", re.IGNORECASE),
+    re.compile(r"\b(?:cách trốn thuế|hướng dẫn trốn thuế|evade taxes|launder money)\b", re.IGNORECASE),
+    re.compile(r"\b(?:rửa tiền|money laundering)\b", re.IGNORECASE),
+    re.compile(r"\b(?:đe dọa|threaten|bribe|hối lộ|đút lót)\b", re.IGNORECASE),
 ]
 
 # ─── Prompt Injection Patterns ───────────────────────────────────────────────

@@ -22,9 +22,14 @@ from __future__ import annotations
 
 import logging
 import re
-import unicodedata
 from dataclasses import dataclass, field
 from typing import Any
+
+from ml_engine.tax_agent_text_normalization import (
+    is_probable_greeting,
+    is_probable_thanks,
+    normalize_vietnamese_text,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -138,11 +143,7 @@ MST_PATTERN = re.compile(r"\b(\d{10}(?:-\d{3})?)\b")
 
 def _normalize_dialogue_text(value: str) -> str:
     """Lowercase and strip Vietnamese accents for robust dialogue-act rules."""
-    normalized = unicodedata.normalize("NFD", value or "")
-    stripped = "".join(ch for ch in normalized if unicodedata.category(ch) != "Mn")
-    stripped = stripped.replace("đ", "d").replace("Đ", "D")
-    stripped = re.sub(r"[^\w\s]", " ", stripped.lower())
-    return re.sub(r"\s+", " ", stripped).strip()
+    return normalize_vietnamese_text(value)
 
 
 # ════════════════════════════════════════════════════════════════
@@ -348,9 +349,9 @@ class ConversationIntelligence:
             )
         )
 
-        if has_thanks and not has_domain_task_keyword:
+        if (has_thanks or is_probable_thanks(message)) and not has_domain_task_keyword:
             return "thanks", "Rất vui được hỗ trợ! Khi cần phân tích thêm, bạn cứ gửi yêu cầu tiếp theo nhé."
-        if has_greeting and not has_domain_task_keyword and len(token_list) <= 8:
+        if (has_greeting or is_probable_greeting(message)) and not has_domain_task_keyword and len(token_list) <= 8:
             return (
                 "greeting",
                 "Xin chào! Bạn có thể gửi MST, tên doanh nghiệp, câu hỏi pháp lý, hoặc tệp cần phân tích.",

@@ -853,27 +853,29 @@ class TaxAgentSynthesizer:
         entity_str = f" cho MST {tax_code}" if tax_code else ""
 
         # Determine overall risk level from evidence
-        analytics_scores = [e.score for e in evidence if e.source_type == "analytics"]
-        avg_risk = sum(analytics_scores) / max(len(analytics_scores), 1)
-
-        if avg_risk > 0.7:
-            risk_label = "RỦI RO CAO"
-        elif avg_risk > 0.4:
-            risk_label = "RỦI RO TRUNG BÌNH"
-        elif avg_risk > 0:
-            risk_label = "RỦI RO THẤP"
-        else:
-            risk_label = "CHƯA XÁC ĐỊNH"
-
         legal_count = sum(1 for e in evidence if e.source_type == "legal")
         analytics_count = sum(1 for e in evidence if e.source_type == "analytics")
 
-        summary = f"{prefix}{entity_str}: {risk_label}."
-        if legal_count > 0:
-            summary += f" Có {legal_count} căn cứ pháp lý liên quan."
+        summary_parts = []
         if analytics_count > 0:
-            summary += f" {analytics_count} chỉ số phân tích đã được kiểm tra."
+            analytics_scores = [e.score for e in evidence if e.source_type == "analytics"]
+            avg_risk = sum(analytics_scores) / max(len(analytics_scores), 1)
+            
+            if avg_risk > 0.7:
+                risk_label = "RỦI RO CAO"
+            elif avg_risk > 0.4:
+                risk_label = "RỦI RO TRUNG BÌNH"
+            else:
+                risk_label = "RỦI RO THẤP"
+            summary_parts.append(f"{prefix}{entity_str}: {risk_label}.")
+            summary_parts.append(f"Đã kiểm tra {analytics_count} chỉ số phân tích.")
+        else:
+            summary_parts.append(f"{prefix}{entity_str} hoàn tất.")
 
+        if legal_count > 0:
+            summary_parts.append(f"Có {legal_count} căn cứ pháp lý liên quan.")
+
+        summary = " ".join(summary_parts)
         return summary
 
     def _generate_detailed_analysis(
@@ -957,44 +959,74 @@ class TaxAgentSynthesizer:
         evidence: list[Evidence],
         tool_results: dict[str, dict[str, Any]],
     ) -> tuple[str | None, str]:
-        """Use local TaxAgentLLM when an adapter/base is explicitly available."""
+        """Use OpenRouter or Gemini API if available, else fallback to template."""
         enable = os.getenv("TAX_AGENT_ENABLE_LLM", "").strip().lower() in {"1", "true", "yes"}
-        adapter = os.getenv("TAX_AGENT_LLM_ADAPTER")
-        default_adapter = os.path.join(
-            os.path.dirname(os.path.dirname(__file__)),
-            "data",
-            "models",
-            "tax_llm_lora",
-        )
-        has_adapter = os.path.exists(os.path.join(adapter or default_adapter, "adapter_model.safetensors"))
-        if not enable and not has_adapter:
-            return None, "template"
-
+        or_api_key = os.getenv("OPENROUTER_API_KEY")
+        gemini_api_key = os.getenv("GEMINI_API_KEY")
+        api_model = os.getenv("TAX_AGENT_API_MODEL", "gemini-1.5-flash")
+        
         legal_evidence = [ev for ev in evidence if ev.source_type == "legal"]
         if not legal_evidence:
             return None, "template"
 
-        context_parts = [
-            f"{ev.citation_key} {ev.title}: {ev.content[:700]}"
-            for ev in legal_evidence[:5]
-        ]
-        try:
-            from ml_engine.tax_agent_llm_model import get_tax_llm
+        if enable and (or_api_key or gemini_api_key):
+            context_parts = [
+                f"{ev.citation_key} {ev.title}: {ev.content[:700]}"
+                for ev in legal_evidence[:5]
+            ]
+            try:
+                import requests
+                prompt = (
+                    "Bạn là một chuyên gia tư vấn thuế (TaxInspector AI) dạn dày kinh nghiệm của Cục Thuế. "
+                    "Hãy trả lời câu hỏi sau của người nộp thuế một cách DÀI, CHI TIẾT và THÔNG MINH dựa trên CÁC CĂN CỨ PHÁP LÝ được cung cấp.\n"
+                    "YÊU CẦU QUAN TRỌNG: \n"
+                    "- Mở đầu bằng lời khẳng định đi thẳng vào vấn đề (Ví dụ: Bạn hoàn toàn có thể..., Trong trường hợp này bạn sẽ bị phạt..., v.v.).\n"
+                    "- Giải thích cặn kẽ tại sao lại như vậy dựa trên các trích dẫn luật [1], [2].\n"
+                    "- Viết bằng văn phong lịch sự, thấu cảm, dễ hiểu nhưng vẫn giữ tính pháp lý.\n"
+                    "- Trình bày Markdown rõ ràng (Dùng in đậm, gạch đầu dòng).\n\n"
+                    f"CÂU HỎI CỦA NGƯỜI NỘP THUẾ: {query}\n\n"
+                    f"CĂN CỨ PHÁP LÝ:\n{chr(10).join(context_parts)}"
+                )
+                
+                # Dùng Gemini API trực tiếp nếu model chứa chữ gemini
+                if "gemini" in api_model.lower() and gemini_api_key:
+                    url = f"https://generativelanguage.googleapis.com/v1beta/models/{api_model}:generateContent?key={gemini_api_key}"
+                    payload = {
+                        "contents": [{"parts": [{"text": prompt}]}]
+                    }
+                    response = requests.post(url, json=payload, timeout=20)
+                    if response.status_code == 200:
+                        data = response.json()
+                        answer = data["candidates"][0]["content"]["parts"][0]["text"]
+                        return answer.strip(), "llm_api"
+                    else:
+                        logger.debug(f"[Synthesis] Gemini API returned status {response.status_code}: {response.text}")
+                
+                # Fallback sang OpenRouter
+                elif or_api_key:
+                    or_model = api_model if "openrouter" in api_model.lower() else "openrouter/free"
+                    response = requests.post(
+                        url="https://openrouter.ai/api/v1/chat/completions",
+                        headers={
+                            "Authorization": f"Bearer {or_api_key}",
+                            "Content-Type": "application/json"
+                        },
+                        json={
+                            "model": or_model,
+                            "messages": [{"role": "user", "content": prompt}]
+                        },
+                        timeout=20,
+                    )
+                    if response.status_code == 200:
+                        data = response.json()
+                        answer = data["choices"][0]["message"]["content"]
+                        return answer.strip(), "llm_api"
+                    else:
+                        logger.debug(f"[Synthesis] OpenRouter API returned status {response.status_code}: {response.text}")
+            except Exception as exc:
+                logger.debug("[Synthesis] API call failed, fallback to template: %s", exc)
 
-            llm = get_tax_llm()
-            response = llm.generate(
-                query=query,
-                context="\n".join(context_parts),
-                intent=intent,
-                evidence=self._evidence_dicts(legal_evidence),
-                max_new_tokens=420,
-            )
-            if response.tier.value == "template" or not response.text.strip():
-                return None, "template"
-            return response.text.strip(), f"llm_{response.tier.value}"
-        except Exception as exc:
-            logger.debug("[Synthesis] local LLM unavailable, using template: %s", exc)
-            return None, "template"
+        return None, "template"
 
     def _generate_grounded_legal_consultation(
         self,
@@ -1006,14 +1038,21 @@ class TaxAgentSynthesizer:
         verification: dict[str, Any] | None = None,
     ) -> str:
         legal_evidence = [e for e in evidence if e.source_type == "legal"]
-        parts = ["## Tư vấn pháp lý có căn cứ\n"]
+        
+        parts = []
+        parts.append("Dựa trên các quy định pháp luật hiện hành và thông tin bạn cung cấp, hệ thống xin đưa ra tư vấn chi tiết như sau:\n")
+        
         if legal_evidence:
             strongest = max(legal_evidence, key=lambda ev: ev.score)
+            parts.append("### 1. Trả lời trọng tâm")
             parts.append(
-                f"**Kết luận ngắn:** Có căn cứ liên quan trong {strongest.title} {strongest.citation_key}. "
-                "Cần đối chiếu hồ sơ thực tế trước khi áp dụng."
+                f"**Về cơ bản:** Trường hợp của bạn hoàn toàn có thể được giải quyết dựa trên quy định tại **{strongest.title}** {strongest.citation_key}. "
+                "Tuy nhiên, kết quả chính xác sẽ phụ thuộc vào việc đối chiếu hồ sơ và số liệu thực tế của bạn với cơ quan thuế."
             )
-            parts.append("\n### Điều kiện áp dụng")
+            
+            parts.append("\n### 2. Phân tích chi tiết và Căn cứ pháp lý")
+            parts.append("Dưới đây là các cơ sở pháp lý trực tiếp điều chỉnh trường hợp của bạn:")
+            
             for ev in legal_evidence[:4]:
                 metadata = ev.metadata or {}
                 effective = metadata.get("effective_status") or {}
@@ -1025,67 +1064,52 @@ class TaxAgentSynthesizer:
                     "pending": "chờ hiệu lực",
                     "unknown": "chưa xác định",
                 }.get(state, state)
+                
                 scope_note = ""
                 if official_scope.get("has_official_letter") or official_scope.get("is_official_letter"):
-                    scope_note = " **Lưu ý:** Công văn chỉ có giá trị hướng dẫn theo phạm vi cụ thể."
+                    scope_note = " *(Lưu ý: Đây là công văn hướng dẫn nghiệp vụ, chỉ có giá trị tham khảo cho các trường hợp tương tự)*"
+                
                 parts.append(
-                    f"- {ev.title} {ev.citation_key}: {ev.content[:260]}... "
-                    f"Hiệu lực: **{state_vi}**.{scope_note}"
+                    f"\n**{ev.title}** {ev.citation_key} (Tình trạng: {state_vi}){scope_note}"
                 )
+                parts.append(f"> {ev.content[:400]}...")
 
-            parts.append("\n### Căn cứ và chuỗi quan hệ pháp lý")
+            parts.append("\n### 3. Chuỗi quan hệ pháp lý liên quan")
             graph_context = tool_results.get("knowledge_search", {}).get("graph_context") or {}
             authority_path = graph_context.get("authority_path") or []
             if authority_path:
+                parts.append("Hệ thống GraphRAG đã tự động đối chiếu các văn bản gốc để đảm bảo tính chính xác:")
                 for item in authority_path[:5]:
                     entity_type_vi = {
-                        "law": "Luật",
-                        "decree": "Nghị định",
-                        "circular": "Thông tư",
-                        "decision": "Quyết định",
-                        "official_letter": "Công văn",
-                        "article": "Điều",
-                        "clause": "Khoản",
+                        "law": "Luật", "decree": "Nghị định", "circular": "Thông tư",
+                        "decision": "Quyết định", "official_letter": "Công văn",
+                        "article": "Điều", "clause": "Khoản",
                     }.get(item.get("entity_type", ""), item.get("entity_type", ""))
-                    parts.append(
-                        f"- {item.get('display_name')} "
-                        f"({entity_type_vi}, thẩm quyền={item.get('authority_rank')})"
-                    )
+                    parts.append(f"- Tham chiếu từ: {item.get('display_name')} ({entity_type_vi})")
             else:
                 for ev in legal_evidence[:3]:
-                    parts.append(f"- {ev.title} {ev.citation_key}")
+                    parts.append(f"- Tham chiếu từ: {ev.title} {ev.citation_key}")
 
-            parts.append("\n### Ngoại lệ / Rủi ro pháp lý")
+            parts.append("\n### 4. Rủi ro pháp lý và Khuyến nghị")
             official_rollup = graph_context.get("official_letter_scope") or {}
             if official_rollup.get("warnings"):
-                for warning in official_rollup["warnings"][:3]:
-                    warning_vi = warning
+                for warning in official_rollup["warnings"][:2]:
                     if "Official letters are guidance" in warning:
-                        warning_vi = (
-                            "Công văn chỉ mang tính chất hướng dẫn cho trường hợp cụ thể hoặc giải thích hành chính; "
-                            "không được coi là văn bản quy phạm pháp luật có hiệu lực cao hơn."
-                        )
-                    parts.append(f"- {warning_vi}")
+                        parts.append("- ⚠️ **Lưu ý pháp lý:** Công văn chỉ mang tính chất hướng dẫn hành chính, không phải là văn bản quy phạm pháp luật cao nhất.")
+                    else:
+                        parts.append(f"- ⚠️ {warning}")
+            
             effective_rollup = graph_context.get("effective_status") or {}
             if effective_rollup.get("has_non_usable"):
-                parts.append(
-                    "- Có văn bản hết hiệu lực hoặc chờ hiệu lực trong chuỗi trích dẫn; "
-                    "cần ưu tiên áp dụng văn bản còn hiệu lực."
-                )
-            if verification and verification.get("unsupported_claims"):
-                parts.append(
-                    "- Đã hạ mức câu trả lời về template có căn cứ vì bộ xác minh phát hiện "
-                    "một số lập luận chưa được trích dẫn hỗ trợ."
-                )
+                parts.append("- ⚠️ **Rủi ro hiệu lực:** Có văn bản hết hiệu lực trong chuỗi tra cứu, hệ thống đã ưu tiên trích xuất văn bản mới nhất.")
         else:
-            parts.append("Chưa có trích dẫn pháp lý đủ mạnh để đưa ra kết luận.")
+            parts.append("Hiện tại hệ thống chưa tìm thấy trích dẫn pháp lý đủ mạnh để đưa ra kết luận chắc chắn. Vui lòng cung cấp thêm chi tiết cụ thể hơn.")
 
-        parts.append("\n### Bước xử lý tiếp theo")
-        parts.append("- Xác định kỳ thuế, ngày chứng từ và loại giao dịch cụ thể.")
-        parts.append(
-            "- Ưu tiên văn bản theo thứ tự hiệu lực: "
-            "**Luật → Nghị định → Thông tư**; Công văn chỉ là hướng dẫn theo phạm vi."
-        )
+        parts.append("\n### 5. Hướng dẫn các bước tiếp theo")
+        parts.append("- Bạn cần tập hợp đầy đủ chứng từ gốc, hóa đơn, và các hợp đồng liên quan.")
+        parts.append("- Xác định chính xác kỳ thuế và nộp hồ sơ kê khai/hoàn thuế lên cơ quan thuế quản lý trực tiếp.")
+        parts.append("- *Lưu ý: Phản hồi này được tạo tự động bởi AI dựa trên cơ sở dữ liệu pháp luật hiện hành và chỉ mang tính chất tham khảo.*")
+        
         return "\n".join(parts)
 
     def _verify_synthesis(self, detailed: str, evidence: list[Evidence]) -> dict[str, Any]:

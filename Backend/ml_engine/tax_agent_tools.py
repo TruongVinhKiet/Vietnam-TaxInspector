@@ -958,20 +958,19 @@ def _tool_knowledge_search(
     try:
         from ml_engine.tax_agent_citizen_legal import retrieve_citizen_legal_snippets
 
-        fallback_needed = max(0, int(top_k) - len(final))
         fallback_hits = retrieve_citizen_legal_snippets(
             effective_query,
-            top_k=max(1, fallback_needed) if fallback_needed else 1,
+            top_k=max(3, int(top_k)),
         )
-        if fallback_hits and (fallback_needed > 0 or not final):
+        if fallback_hits:
             existing_keys = {str(item.get("chunk_key")) for item in final}
             for hit in fallback_hits:
-                if len(final) >= int(top_k):
-                    break
-                if str(hit.get("chunk_key")) in existing_keys:
-                    continue
-                final.append(hit)
-                existing_keys.add(str(hit.get("chunk_key")))
+                if str(hit.get("chunk_key")) not in existing_keys:
+                    final.append(hit)
+                    existing_keys.add(str(hit.get("chunk_key")))
+            
+            final.sort(key=lambda x: x.get("score", 0), reverse=True)
+            final = final[:int(top_k)]
     except Exception as exc:
         logger.debug("[knowledge_search] citizen fallback skipped: %s", exc)
 
@@ -1164,8 +1163,8 @@ def _tool_macro_forecast(
         req_payload = scenario.get("request") or scenario
         if not isinstance(req_payload, dict):
             return {"status": "error", "error": "Invalid sensitivity payload"}
-        req = SensitivityRequest(**req_payload)
-        result = sim_router.sensitivity_analysis(req=req, db=db)
+        req = ScenarioInput(**req_payload)
+        result = sim_router.sensitivity_analysis(base_params=req, db=db)
         return {"status": "analyzed", "action": "sensitivity", "result": _plain(result)}
 
     if safe_action in ("monte-carlo", "montecarlo", "mc"):

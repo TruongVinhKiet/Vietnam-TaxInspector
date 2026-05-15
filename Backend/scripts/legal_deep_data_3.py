@@ -1,0 +1,93 @@
+LEGAL_DEEP_DATA_NEW_3 = [
+    # 9. Hộ kinh doanh & Bán hàng online
+    {
+        "q": "Hộ kinh doanh có doanh thu dưới 100 triệu thì có phải nộp thuế không?",
+        "tool_query": "Thông tư 40/2021/TT-BTC miễn thuế hộ kinh doanh",
+        "doc_title": "Thông tư 40/2021/TT-BTC",
+        "doc_snippet": "Hộ kinh doanh, cá nhân kinh doanh có doanh thu từ hoạt động sản xuất, kinh doanh trong năm dương lịch từ 100 triệu đồng trở xuống thì không phải nộp thuế GTGT và thuế TNCN.",
+        "answer": "Theo quy định tại **Điều 4 Thông tư 40/2021/TT-BTC** của Bộ Tài chính hướng dẫn thuế GTGT, thuế TNCN đối với hộ kinh doanh, cá nhân kinh doanh:\n\n- Hộ kinh doanh, cá nhân kinh doanh có doanh thu từ hoạt động sản xuất, kinh doanh trong năm dương lịch **từ 100 triệu đồng trở xuống** thì **KHÔNG** phải nộp thuế Giá trị gia tăng (GTGT) và **KHÔNG** phải nộp thuế Thu nhập cá nhân (TNCN).\n- Trường hợp doanh thu trong năm dương lịch **trên 100 triệu đồng**, hộ kinh doanh phải nộp thuế GTGT và thuế TNCN theo tỷ lệ quy định đối với từng ngành nghề kinh doanh.\n\n**Các loại thuế phí khác:**\n- Lệ phí môn bài: Hộ kinh doanh có doanh thu từ 100 triệu đồng/năm trở xuống được miễn lệ phí môn bài. Nếu trên 100 triệu, mức nộp là 300.000đ - 1.000.000đ/năm tùy mức doanh thu (theo Nghị định 139/2016/NĐ-CP).\n\n**Lưu ý:** Dù thuộc diện miễn thuế do doanh thu dưới 100 triệu/năm, hộ kinh doanh vẫn phải thực hiện nghĩa vụ khai báo với cơ quan thuế để được xác nhận trạng thái hoạt động."
+    },
+    {
+        "q": "Bán hàng online trên Shopee, Tiktok thì đóng thuế như thế nào?",
+        "tool_query": "Thông tư 40/2021/TT-BTC thuế bán hàng online TMĐT",
+        "doc_title": "Thông tư 40/2021/TT-BTC",
+        "doc_snippet": "Cá nhân kinh doanh thương mại điện tử áp dụng tỷ lệ thuế tính trên doanh thu đối với hoạt động phân phối, cung cấp hàng hóa là 1,5% (GTGT 1%, TNCN 0,5%).",
+        "answer": "Căn cứ **Thông tư 40/2021/TT-BTC** và các quy định về quản lý thuế Thương mại điện tử (TMĐT):\n\nCá nhân mở gian hàng bán sản phẩm trên các sàn TMĐT (Shopee, Lazada, TikTok Shop...) được xem là \"Cá nhân kinh doanh\".\n\n**1. Mức thuế suất áp dụng:**\nHoạt động bán hàng online thuộc nhóm ngành \"Phân phối, cung cấp hàng hóa\". Tổng mức thuế khoán phải nộp là **1,5% trên tổng doanh thu** bán hàng, trong đó:\n- Thuế suất thuế Giá trị gia tăng (GTGT): 1%\n- Thuế suất thuế Thu nhập cá nhân (TNCN): 0,5%\n\n**2. Ngưỡng tính thuế:**\nChỉ phải nộp khoản thuế 1,5% này nếu tổng doanh thu bán hàng trong một năm dương lịch **vượt quá 100 triệu đồng**. (Tính tổng doanh thu trên tất cả các sàn và các kênh bán hàng khác cộng lại).\n\n**Khuyến nghị:** Hiện nay, cơ quan thuế đã kết nối dữ liệu trực tiếp với các sàn TMĐT và các đơn vị vận chuyển (Giao hàng tiết kiệm, Viettel Post...). Cá nhân bán hàng online tuyệt đối không nên trốn thuế vì cơ quan thuế có đầy đủ dữ liệu dòng tiền và có thể truy thu hồi tố cộng tiền phạt."
+    },
+    {
+        "q": "Cơ quan thuế quản lý doanh thu bán hàng qua mạng bằng cách nào?",
+        "tool_query": "Nghị định 91/2022/NĐ-CP quản lý thuế thương mại điện tử",
+        "doc_title": "Nghị định 91/2022/NĐ-CP",
+        "doc_snippet": "Tổ chức thiết lập website thương mại điện tử có trách nhiệm cung cấp thông tin người bán cho cơ quan thuế theo định kỳ hàng quý.",
+        "answer": "Theo **Khoản 7 Điều 1 Nghị định 91/2022/NĐ-CP** sửa đổi bổ sung Nghị định 126/2020/NĐ-CP, cơ quan thuế có rất nhiều công cụ mạnh mẽ để quản lý doanh thu bán hàng online:\n\n**1. Yêu cầu sàn TMĐT cung cấp dữ liệu:**\nTổ chức được thành lập và hoạt động theo pháp luật Việt Nam là chủ sở hữu sàn TMĐT (Shopee, Tiki, Lazada...) có trách nhiệm cung cấp cho cơ quan thuế thông tin của người bán (Tên, MST, CCCD, địa chỉ, tài khoản ngân hàng, **doanh thu bán hàng**...) định kỳ hàng quý thông qua Cổng thông tin điện tử của Tổng cục Thuế.\n\n**2. Khai thuế thay, nộp thuế thay:**\nCác sàn TMĐT có chức năng đặt hàng trực tuyến có thể thực hiện khai thuế thay, nộp thuế thay cho cá nhân kinh doanh trên sàn nếu có ủy quyền.\n\n**3. Kết nối với Ngân hàng và Đơn vị vận chuyển:**\nCơ quan thuế phối hợp với Ngân hàng Nhà nước để rà soát dòng tiền thanh toán COD, thanh toán online và yêu cầu các đơn vị chuyển phát cung cấp lịch sử giao nhận hàng hóa.\n\n**Lưu ý:** Việc bóc tách đơn hàng ảo/đơn hoàn trả sẽ được đối chiếu thông qua dữ liệu đối soát của chính sàn TMĐT cung cấp."
+    },
+
+    # 10. Thuế nhà thầu nước ngoài
+    {
+        "q": "Doanh nghiệp mua phần mềm từ nước ngoài có phải nộp thuế nhà thầu không?",
+        "tool_query": "Thông tư 103/2014/TT-BTC thuế nhà thầu đối với phần mềm",
+        "doc_title": "Thông tư 103/2014/TT-BTC",
+        "doc_snippet": "Bản quyền phần mềm máy tính thuộc diện miễn thuế GTGT nhưng phải chịu thuế TNDN nhà thầu tỷ lệ 10%.",
+        "answer": "Căn cứ **Thông tư 103/2014/TT-BTC** hướng dẫn về Thuế nhà thầu nước ngoài (FCT):\n\nKhi doanh nghiệp Việt Nam mua hoặc thuê phần mềm từ các nhà cung cấp nước ngoài (như Microsoft, Adobe, Oracle...) không có tư cách pháp nhân tại Việt Nam, doanh nghiệp Việt Nam có trách nhiệm khấu trừ và nộp thay thuế nhà thầu trước khi thanh toán cho bên nước ngoài.\n\n**1. Về thuế Giá trị gia tăng (GTGT):**\nTheo Khoản 21 Điều 4 Thông tư 219/2013/TT-BTC, phần mềm máy tính thuộc đối tượng **không chịu thuế GTGT**. Do đó, tỷ lệ % để tính thuế GTGT nhà thầu đối với phần mềm là 0%.\n\n**2. Về thuế Thu nhập doanh nghiệp (TNDN):**\nTiền bản quyền phần mềm, phí cấp phép sử dụng phần mềm thuộc đối tượng chịu thuế TNDN. Tỷ lệ % để tính thuế TNDN áp dụng đối với thu nhập từ bản quyền là **10%**.\n\n**Lưu ý quan trọng:** Nếu hợp đồng là hợp đồng Net (giá thanh toán cho nhà thầu nước ngoài không bao gồm thuế), doanh nghiệp Việt Nam phải *Gross-up* (quy đổi) số tiền này lên để tính phần thuế TNDN 10% nộp vào ngân sách nhà nước, và khoản thuế nộp thay này được tính vào chi phí hợp lý của doanh nghiệp."
+    },
+    {
+        "q": "Tỷ lệ thuế nhà thầu đối với dịch vụ tư vấn quản lý là bao nhiêu?",
+        "tool_query": "Thông tư 103/2014/TT-BTC tỷ lệ thuế nhà thầu dịch vụ tư vấn",
+        "doc_title": "Thông tư 103/2014/TT-BTC",
+        "doc_snippet": "Thu nhập từ dịch vụ áp dụng tỷ lệ thuế GTGT 5% và tỷ lệ thuế TNDN 5%.",
+        "answer": "Theo **Điều 12 và Điều 13 Thông tư 103/2014/TT-BTC** quy định về tỷ lệ phần trăm để tính thuế GTGT và thuế TNDN trên doanh thu tính thuế đối với Nhà thầu nước ngoài:\n\nĐối với hoạt động cung cấp **Dịch vụ** (như dịch vụ tư vấn quản lý, dịch vụ kỹ thuật, dịch vụ marketing, đào tạo...) từ nước ngoài cung cấp vào Việt Nam hoặc tiêu dùng tại Việt Nam:\n\n1. **Tỷ lệ % để tính thuế Giá trị gia tăng (GTGT): 5%**\n2. **Tỷ lệ % để tính thuế Thu nhập doanh nghiệp (TNDN): 5%**\n\nTổng cộng, nếu tính gộp (trên hợp đồng Gross), tỷ lệ thuế nhà thầu ước tính khoảng **10%**.\n\n**Lưu ý về Hiệp định tránh đánh thuế hai lần:** \nNếu nhà thầu nước ngoài đến từ một quốc gia có ký Hiệp định tránh đánh thuế hai lần với Việt Nam, họ có thể nộp hồ sơ xin **miễn thuế TNDN (5%)** nếu chứng minh được họ không có Cơ sở thường trú (Permanent Establishment) tại Việt Nam. Tuy nhiên, phần thuế GTGT (5%) thì bắt buộc phải nộp và không được miễn theo Hiệp định."
+    },
+    {
+        "q": "Nhà thầu nước ngoài bán hàng hóa kèm dịch vụ lắp đặt thì tính thuế thế nào?",
+        "tool_query": "Thông tư 103/2014/TT-BTC thuế nhà thầu bán hàng hóa kèm dịch vụ",
+        "doc_title": "Thông tư 103/2014/TT-BTC",
+        "doc_snippet": "Trường hợp bán máy móc thiết bị kèm dịch vụ lắp đặt, nếu tách riêng được giá trị thì tính thuế theo từng phần, nếu không tách được thì áp dụng tỷ lệ tính thuế GTGT 3% và TNDN 2%.",
+        "answer": "Căn cứ **Thông tư 103/2014/TT-BTC**, việc tính thuế nhà thầu đối với hợp đồng cung cấp hàng hóa có kèm theo dịch vụ tiến hành tại Việt Nam (như lắp đặt, chạy thử, bảo hành) được xử lý theo 2 tình huống:\n\n**Tình huống 1: Hợp đồng tách riêng được giá trị hàng hóa và giá trị dịch vụ**\n- Khâu nhập khẩu hàng hóa: Nộp thuế GTGT khâu nhập khẩu tại Hải quan. Không thu thuế nhà thầu khâu hàng hóa.\n- Khâu dịch vụ lắp đặt: Tính thuế nhà thầu với tỷ lệ **GTGT 5%** và **TNDN 5%** trên phần giá trị dịch vụ.\n\n**Tình huống 2: Hợp đồng KHÔNG tách riêng được giá trị hàng hóa và dịch vụ**\nToàn bộ giá trị hợp đồng sẽ bị áp dụng tỷ lệ thuế nhà thầu tổng hợp cho hoạt động thương mại, phân phối, cung cấp hàng hóa có gắn với dịch vụ tại Việt Nam:\n- Tỷ lệ % tính thuế GTGT: **3%** (Chỉ tính trên phần giá trị chưa nộp thuế GTGT khâu nhập khẩu để tránh nộp trùng).\n- Tỷ lệ % tính thuế TNDN: **2%** tính trên toàn bộ giá trị hợp đồng.\n\n**Khuyến nghị:** Khi đàm phán hợp đồng nhập khẩu máy móc thiết bị, doanh nghiệp nên bóc tách rõ ràng giá trị máy móc và giá trị dịch vụ lắp đặt/đào tạo để tối ưu hóa nghĩa vụ thuế nhà thầu."
+    },
+
+    # 11. Trách nhiệm hình sự trốn thuế
+    {
+        "q": "Trốn thuế số tiền bao nhiêu thì bị khởi tố hình sự?",
+        "tool_query": "Bộ luật Hình sự Điều 200 tội trốn thuế",
+        "doc_title": "Bộ luật Hình sự 2015 (sửa đổi, bổ sung 2017)",
+        "doc_snippet": "Người nào thực hiện một trong các hành vi trốn thuế với số tiền từ 100.000.000 đồng đến dưới 300.000.000 đồng thì bị phạt tiền từ 100 triệu đến 500 triệu đồng hoặc phạt tù từ 03 tháng đến 01 năm.",
+        "answer": "Theo quy định tại **Điều 200 Bộ luật Hình sự 2015 (sửa đổi, bổ sung năm 2017)** về Tội trốn thuế:\n\n**1. Ngưỡng số tiền trốn thuế cấu thành tội phạm:**\n- Trốn thuế với số tiền từ **100.000.000 đồng** trở lên sẽ bị truy cứu trách nhiệm hình sự.\n- *Đặc biệt:* Trốn thuế dưới 100 triệu đồng nhưng đã bị xử phạt vi phạm hành chính về hành vi trốn thuế hoặc đã bị kết án về các tội liên quan đến kinh tế (chưa được xóa án tích) mà còn vi phạm, cũng sẽ bị khởi tố.\n\n**2. Khung hình phạt đối với Cá nhân (Giám đốc, Kế toán trưởng...):**\n- Phạt tiền từ 100.000.000 đồng đến 500.000.000 đồng hoặc phạt tù từ **03 tháng đến 01 năm**.\n- Tùy mức độ vi phạm, có thể bị phạt tù cao nhất lên đến **07 năm** (nếu trốn thuế từ 1 tỷ đồng trở lên).\n\n**3. Xử lý Pháp nhân thương mại (Công ty):**\n- Công ty phạm tội trốn thuế có thể bị phạt tiền từ **250 triệu đồng đến 10 tỷ đồng**; bị đình chỉ hoạt động có thời hạn từ 06 tháng đến 03 năm hoặc bị tước quyền sử dụng giấy phép vĩnh viễn.\n\n**Khuyến nghị:** Hành vi mua bán hóa đơn khống để bù trừ VAT và chi phí được cơ quan điều tra xem xét rất gắt gao. Giám đốc doanh nghiệp tuyệt đối không sử dụng hóa đơn bất hợp pháp vì rủi ro vướng vòng lao lý là cực kỳ cao."
+    },
+    {
+        "q": "Các hành vi nào bị coi là tội trốn thuế theo Bộ luật Hình sự?",
+        "tool_query": "Bộ luật Hình sự Điều 200 hành vi trốn thuế",
+        "doc_title": "Bộ luật Hình sự 2015 (sửa đổi, bổ sung 2017)",
+        "doc_snippet": "Các hành vi trốn thuế bao gồm: Không nộp hồ sơ khai thuế; Không ghi chép sổ kế toán các khoản thu; Sử dụng hóa đơn không hợp pháp...",
+        "answer": "Căn cứ **Khoản 1 Điều 200 Bộ luật Hình sự 2015 (sửa đổi 2017)**, có 9 nhóm hành vi sau đây nếu dẫn đến làm thất thu ngân sách nhà nước từ 100 triệu đồng trở lên sẽ bị khép vào tội trốn thuế:\n\n1. Không nộp hồ sơ đăng ký thuế; không nộp hồ sơ khai thuế; nộp hồ sơ khai thuế sau 90 ngày kể từ ngày hết thời hạn nộp.\n2. **Không ghi chép trong sổ kế toán** các khoản thu liên quan đến việc xác định số tiền thuế phải nộp (để ngoài sổ sách/ lập quỹ đen).\n3. **Không xuất hóa đơn** khi bán hàng hóa, dịch vụ hoặc ghi giá trị trên hóa đơn bán hàng thấp hơn giá trị thanh toán thực tế của hàng hóa, dịch vụ đã bán.\n4. **Sử dụng hóa đơn, chứng từ không hợp pháp** để hạch toán hàng hóa, nguyên liệu đầu vào nhằm làm giảm số tiền thuế phải nộp hoặc làm tăng số tiền thuế được miễn, giảm, hoàn.\n5. Sử dụng chứng từ, tài liệu không hợp pháp khác để xác định sai số tiền thuế phải nộp.\n6. Khai sai với thực tế hàng hóa xuất khẩu, nhập khẩu mà không khai bổ sung sau khi hàng hóa đã được thông quan.\n7. Cố ý không kê khai hoặc kê khai sai về thuế đối với hàng hóa xuất khẩu, nhập khẩu.\n8. Cấu kết với người gửi hàng để nhập khẩu hàng hóa nhằm mục đích trốn thuế.\n9. Sử dụng hàng hóa thuộc diện miễn thuế, không chịu thuế không đúng mục đích quy định mà không khai báo việc chuyển đổi mục đích sử dụng với cơ quan quản lý thuế."
+    },
+    {
+        "q": "Mua bán hóa đơn khống nhưng chưa khai báo thuế thì có phạm tội không?",
+        "tool_query": "Bộ luật Hình sự Điều 203 tội mua bán trái phép hóa đơn",
+        "doc_title": "Bộ luật Hình sự 2015 (sửa đổi, bổ sung 2017)",
+        "doc_snippet": "Người nào in, phát hành, mua bán trái phép hóa đơn, chứng từ thu nộp ngân sách nhà nước với số lượng từ 50 số trở lên hoặc thu lợi bất chính từ 30 triệu đồng trở lên...",
+        "answer": "Theo pháp luật hình sự Việt Nam, hành vi mua bán hóa đơn dù CHƯA kê khai thuế vẫn có thể bị truy cứu trách nhiệm hình sự độc lập theo một tội danh khác, cụ thể:\n\nCăn cứ **Điều 203 Bộ luật Hình sự 2015 (sửa đổi 2017)** về **Tội in, phát hành, mua bán trái phép hóa đơn, chứng từ** thu nộp ngân sách nhà nước:\n\n**1. Yếu tố cấu thành tội phạm:**\nHành vi mua bán trái phép hóa đơn khống (không có hàng hóa, dịch vụ thực tế kèm theo) sẽ bị truy cứu trách nhiệm hình sự nếu đáp ứng một trong các điều kiện:\n- Số lượng hóa đơn mua bán từ **50 số (tờ) đến dưới 100 số**.\n- Mua bán hóa đơn đã ghi nội dung mà tiền ghi trên hóa đơn từ 300 triệu đến dưới 1 tỷ đồng.\n- Thu lợi bất chính từ **30.000.000 đồng** đến dưới 100.000.000 đồng.\n\n**2. Khung hình phạt:**\n- Người phạm tội có thể bị phạt tiền từ 50 triệu đến 500 triệu đồng, phạt cải tạo không giam giữ đến 03 năm hoặc **phạt tù từ 01 năm đến 05 năm**.\n\n**Lưu ý:** Nếu doanh nghiệp mua hóa đơn khống và ĐÃ sử dụng để kê khai khấu trừ thuế VAT, làm giảm số thuế phải nộp từ 100 triệu đồng trở lên, thì hành vi này sẽ bị chuyển sang điều tra về **Tội trốn thuế (Điều 200)** với mức phạt nặng hơn rất nhiều."
+    },
+
+    # 12. Ưu đãi thuế TNDN
+    {
+        "q": "Doanh nghiệp mới thành lập có được miễn giảm thuế TNDN không?",
+        "tool_query": "Nghị định 218/2013/NĐ-CP ưu đãi thuế TNDN doanh nghiệp mới thành lập",
+        "doc_title": "Nghị định 218/2013/NĐ-CP",
+        "doc_snippet": "Miễn thuế 2-4 năm, giảm 50% số thuế phải nộp trong 4-9 năm tiếp theo đối với dự án đầu tư mới đáp ứng điều kiện về địa bàn hoặc lĩnh vực ưu đãi.",
+        "answer": "Căn cứ **Điều 15 và Điều 16 Nghị định 218/2013/NĐ-CP** quy định chi tiết thi hành Luật Thuế TNDN:\n\nPháp luật hiện hành **không** tự động miễn giảm thuế TNDN chỉ vì doanh nghiệp \"mới thành lập\". Việc miễn giảm thuế chỉ áp dụng nếu dự án đầu tư của doanh nghiệp đáp ứng một trong hai điều kiện:\n\n**1. Ưu đãi theo Địa bàn:**\n- Đầu tư vào địa bàn có điều kiện kinh tế - xã hội **đặc biệt khó khăn**, khu kinh tế, khu công nghệ cao: Miễn thuế 4 năm, giảm 50% số thuế phải nộp trong 9 năm tiếp theo.\n- Đầu tư vào địa bàn có điều kiện kinh tế - xã hội **khó khăn**: Miễn thuế 2 năm, giảm 50% số thuế phải nộp trong 4 năm tiếp theo.\n\n**2. Ưu đãi theo Lĩnh vực:**\n- Các lĩnh vực công nghệ cao, nghiên cứu khoa học, đầu tư phát triển cơ sở hạ tầng đặc biệt quan trọng, sản xuất phần mềm: Miễn thuế 4 năm, giảm 50% trong 9 năm tiếp theo.\n- Lĩnh vực xã hội hóa (giáo dục, y tế, văn hóa, thể thao, môi trường): Miễn 4 năm, giảm 50% trong 5 năm tiếp theo.\n\n**Lưu ý:** Thời gian miễn thuế, giảm thuế được tính liên tục từ năm đầu tiên doanh nghiệp có thu nhập chịu thuế từ dự án đầu tư. Nếu trong 3 năm đầu không có thu nhập chịu thuế, thời gian miễn giảm thuế được tính từ năm thứ 4."
+    },
+    {
+        "q": "Sản xuất phần mềm được hưởng ưu đãi thuế TNDN như thế nào?",
+        "tool_query": "Nghị định 218/2013/NĐ-CP ưu đãi thuế sản xuất phần mềm",
+        "doc_title": "Nghị định 218/2013/NĐ-CP",
+        "doc_snippet": "Áp dụng thuế suất ưu đãi 10% trong thời hạn 15 năm, miễn thuế 4 năm, giảm 50% số thuế phải nộp trong 9 năm tiếp theo đối với thu nhập từ dự án sản xuất sản phẩm phần mềm.",
+        "answer": "Theo quy định tại **Khoản 1 Điều 15 và Khoản 1 Điều 16 Nghị định 218/2013/NĐ-CP** (được hướng dẫn tại Thông tư 78/2014/TT-BTC), doanh nghiệp thực hiện dự án đầu tư mới trong lĩnh vực **Sản xuất phần mềm** được hưởng mức ưu đãi thuế TNDN ở khung cao nhất:\n\n**1. Ưu đãi về Thuế suất:**\nÁp dụng thuế suất ưu đãi **10% trong thời hạn 15 năm** kể từ năm đầu tiên dự án đầu tư có doanh thu.\n(Sau 15 năm, doanh nghiệp quay về nộp mức thuế suất phổ thông là 20%).\n\n**2. Miễn, giảm thuế có thời hạn (Tax Holiday):**\n- **Miễn thuế hoàn toàn trong 04 năm đầu**, tính từ năm đầu tiên có thu nhập chịu thuế.\n- **Giảm 50% số thuế phải nộp trong 09 năm tiếp theo**.\n\n**Điều kiện khắt khe để được hưởng:**\nĐể được ưu đãi, doanh nghiệp phải đáp ứng đầy đủ quy trình sản xuất phần mềm theo quy định của Bộ Thông tin và Truyền thông tại Thông tư 13/2020/TT-BTTTT (gồm 7 công đoạn: Xác định yêu cầu; Phân tích và thiết kế; Lập trình; Kiểm tra; Hoàn thiện đóng gói; Cài đặt chuyển giao; Bảo hành bảo trì).\n\n**Khuyến nghị:** Việc ưu đãi này chỉ áp dụng cho mảng *sản xuất* phần mềm. Nếu doanh nghiệp vừa sản xuất vừa kinh doanh phần cứng, mua bán máy tính thì phải hạch toán bóc tách riêng doanh thu, chi phí của từng mảng để tính thuế chính xác."
+    },
+    {
+        "q": "Các khoản thu nhập nào không được áp dụng ưu đãi thuế TNDN?",
+        "tool_query": "Thông tư 78/2014/TT-BTC thu nhập không được hưởng ưu đãi thuế",
+        "doc_title": "Thông tư 78/2014/TT-BTC",
+        "doc_snippet": "Ưu đãi thuế TNDN không áp dụng đối với thu nhập từ chuyển nhượng vốn, chuyển nhượng bất động sản, thu nhập từ khai thác khoáng sản...",
+        "answer": "Căn cứ **Khoản 4 Điều 18 Thông tư 78/2014/TT-BTC**, dù doanh nghiệp đang trong thời gian được hưởng ưu đãi thuế TNDN (miễn, giảm thuế hoặc áp dụng thuế suất thấp), nhưng các khoản thu nhập đặc thù sau đây **KHÔNG** được áp dụng ưu đãi thuế mà phải nộp thuế TNDN theo mức thuế suất phổ thông (20%):\n\n1. Thu nhập từ chuyển nhượng vốn, chuyển nhượng quyền góp vốn.\n2. Thu nhập từ chuyển nhượng bất động sản, chuyển nhượng dự án đầu tư, chuyển nhượng quyền thăm dò, khai thác khoáng sản.\n3. Thu nhập từ hoạt động tìm kiếm, thăm dò, khai thác dầu, khí, tài nguyên quý hiếm khác.\n4. Thu nhập từ kinh doanh dịch vụ thuộc diện chịu thuế tiêu thụ đặc biệt (ví dụ: kinh doanh vũ trường, karaoke, casino...).\n5. Thu nhập từ hoạt động khai thác khoáng sản.\n6. Thu nhập từ chênh lệch tỷ giá theo đánh giá lại các khoản nợ phải trả bằng ngoại tệ cuối năm tài chính.\n\n**Lưu ý:** Doanh nghiệp có dự án đầu tư được hưởng ưu đãi thuế TNDN phải hạch toán riêng thu nhập từ hoạt động được ưu đãi và hoạt động không được ưu đãi. Trường hợp không hạch toán riêng được thì phần thu nhập ưu đãi được xác định theo tỷ lệ doanh thu phân bổ."
+    },
+]

@@ -49,6 +49,7 @@ from ml_engine.tax_agent_mode_contracts import (
     AgentModeContractRegistry,
     canonical_run_state,
 )
+from ml_engine.tax_agent_text_normalization import normalize_vietnamese_text
 from ml_engine.tax_agent_turns import AgentTurnRepository
 
 logger = logging.getLogger(__name__)
@@ -302,6 +303,8 @@ class TaxAgentOrchestrator:
         # Enterprise v2: Debate + GraphRAG
         self._debate_engine = None
         self._graph_reasoner = None
+        # Enterprise v3: Agentic LLM (LoRA V4)
+        self._agentic_llm = None
         self._initialized = False
 
     def _ensure_initialized(self, db=None):
@@ -384,12 +387,25 @@ class TaxAgentOrchestrator:
         except Exception as exc:
             logger.warning("[Orchestrator] GraphRAG reasoner not available: %s", exc)
 
+        # Enterprise v3: Agentic LLM (LoRA V4)
+        try:
+            from ml_engine.tax_agent_agentic_llm import get_agentic_llm
+            self._agentic_llm = get_agentic_llm()
+            loaded = self._agentic_llm.load()
+            if loaded:
+                logger.info("[Orchestrator] ✓ Agentic LLM V4 loaded")
+            else:
+                logger.info("[Orchestrator] Agentic LLM V4 not available")
+        except Exception as exc:
+            logger.warning("[Orchestrator] Agentic LLM init failed: %s", exc)
+
         self._initialized = True
         logger.info(
             "[Orchestrator] ✓ Initialized all components "
-            "(tools=%d, embedding=%s, sub_agents=3)",
+            "(tools=%d, embedding=%s, sub_agents=3, agentic_llm=%s)",
             self._tool_registry.count(),
             self._embedding_engine.model_tier,
+            self._agentic_llm.is_available if self._agentic_llm else False,
         )
 
     def process(
@@ -1096,6 +1112,40 @@ class TaxAgentOrchestrator:
             yield {"event": "done", "data": payload}
             return
 
+        # ─── Step 2.8: Agentic LLM Advisory ──────────────────────────────
+        agentic_decision = None
+        if self._agentic_llm and self._agentic_llm.is_available:
+            try:
+                yield {"event": "thinking", "data": {"step": "agentic_llm", "detail": "🧠 Agent AI đang suy luận..."}}
+                t_agent = time.perf_counter()
+                agentic_decision = self._agentic_llm.infer(message)
+                latency_breakdown["agentic_llm"] = (time.perf_counter() - t_agent) * 1000.0
+                if agentic_decision:
+                    logger.info(
+                        "[Orchestrator] AgenticLLM chọn tool='%s' (intent_mapped='%s') — thought: %s",
+                        agentic_decision.tool_name,
+                        agentic_decision.mapped_intent,
+                        agentic_decision.thought[:80],
+                    )
+                    yield {"event": "agent_thinking", "data": {
+                        "thought": agentic_decision.thought,
+                        "tool": agentic_decision.tool_name,
+                        "confidence": agentic_decision.confidence,
+                    }}
+                    # Override intent nếu LLM V4 cho kết quả hợp lệ
+                    intent = agentic_decision.mapped_intent
+                    intent_conf = max(intent_conf, 0.92)
+                    # Re-route với intent mới từ LLM
+                    routing_decision = self._task_router.route(
+                        query=message,
+                        intent=intent,
+                        model_mode=model_mode,
+                        has_attachment=bool(attachment_analysis or csv_attachment),
+                        attachment_analysis=attachment_analysis,
+                    )
+            except Exception as exc:
+                logger.warning("[Orchestrator] AgenticLLM inference skipped: %s", exc)
+
         # ─── Step 3: Planning ───────────────────────────────────────────
         yield {"event": "thinking", "data": {"step": "planning", "detail": "Đang lập kế hoạch phân tích..."}}
         t0 = time.perf_counter()
@@ -1130,6 +1180,25 @@ class TaxAgentOrchestrator:
             plan.steps = [s for s in plan.steps if s.tool_name in routing_decision.allowed_tools]
         elif not routing_decision.allow_legal:
             plan.steps = [s for s in plan.steps if s.tool_name != "knowledge_search"]
+
+        # ─── Override bằng Agentic LLM ──────────────────────────────────
+        if agentic_decision:
+            from ml_engine.tax_agent_planner import SubTask, PlanStep
+            # Chỉ override nếu tool LLM V4 chọn nằm trong danh sách cho phép của mode
+            if allowed_tools is None or agentic_decision.tool_name in allowed_tools or agentic_decision.tool_name in allowed_optional:
+                plan.steps = [SubTask(
+                    step_id=1,
+                    step_type=PlanStep.SYNTHESIZE,
+                    tool_name=agentic_decision.tool_name,
+                    tool_inputs=agentic_decision.tool_args,
+                    description=f"Agentic LLM V4 Autonomous Call: {agentic_decision.tool_name}",
+                    optional=False,
+                )]
+                plan.reasoning = agentic_decision.thought
+                logger.info("[Orchestrator] Override plan.steps thành công với AgenticLLM V4")
+            else:
+                logger.warning("[Orchestrator] AgenticLLM chọn tool '%s' bị chặn bởi domain routing!", agentic_decision.tool_name)
+
         budget_ms = int(getattr(plan, "budget_ms", 30000) or 30000)
         latency_breakdown["planning"] = (time.perf_counter() - t0) * 1000.0
 
@@ -2885,13 +2954,7 @@ class TaxAgentOrchestrator:
     def _rule_based_intent(self, message: str) -> tuple[str, float]:
         """Keyword-based intent fallback."""
         normalized = message.lower()
-        try:
-            import unicodedata
-            plain = unicodedata.normalize("NFD", normalized)
-            plain = "".join(ch for ch in plain if unicodedata.category(ch) != "Mn")
-            plain = plain.replace("đ", "d").replace("Đ", "D")
-        except Exception:
-            plain = normalized
+        plain = normalize_vietnamese_text(message)
         if (
             "top" in plain
             or "danh sach" in plain
@@ -2902,7 +2965,7 @@ class TaxAgentOrchestrator:
             return "top_n_query", 0.9
         best = ("general_tax_query", 0.15)
         for intent, keywords in self.INTENT_RULES.items():
-            score = sum(1 for kw in keywords if kw in normalized)
+            score = sum(1 for kw in keywords if kw in normalized or normalize_vietnamese_text(kw) in plain)
             if score > best[1]:
                 best = (intent, float(score))
         conf = min(0.95, 0.25 + 0.15 * best[1])

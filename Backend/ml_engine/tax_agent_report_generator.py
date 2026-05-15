@@ -16,8 +16,35 @@ from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image as RLImage
 from reportlab.lib import colors
 from reportlab.lib.units import inch as rl_inch
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
 
 logger = logging.getLogger(__name__)
+
+# ── Register Unicode font for Vietnamese PDF support ──
+_VIET_FONT = "Helvetica"  # fallback
+_VIET_FONT_BOLD = "Helvetica-Bold"
+try:
+    import os
+    _font_candidates = [
+        os.path.join(os.environ.get("WINDIR", "C:\\Windows"), "Fonts", "arial.ttf"),
+        os.path.join(os.environ.get("WINDIR", "C:\\Windows"), "Fonts", "arialbd.ttf"),
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+    ]
+    _regular = next((f for f in _font_candidates if os.path.isfile(f) and "bold" not in f.lower() and "bd" not in f.lower()), None)
+    _bold = next((f for f in _font_candidates if os.path.isfile(f) and ("bold" in f.lower() or "bd" in f.lower())), None)
+    if _regular:
+        pdfmetrics.registerFont(TTFont("VietFont", _regular))
+        _VIET_FONT = "VietFont"
+        if _bold:
+            pdfmetrics.registerFont(TTFont("VietFontBold", _bold))
+            _VIET_FONT_BOLD = "VietFontBold"
+        else:
+            _VIET_FONT_BOLD = "VietFont"
+        logger.info("Registered Vietnamese PDF font: %s", _regular)
+except Exception as e:
+    logger.warning("Could not register Vietnamese font, PDF may have missing chars: %s", e)
 
 class TaxReportGenerator:
     """Generates official tax inspection reports from session context."""
@@ -348,9 +375,17 @@ class TaxReportGenerator:
         styles = getSampleStyleSheet()
         elements = []
 
+        # Override all styles to use Vietnamese-capable font
+        for style_name in styles.byName:
+            styles[style_name].fontName = _VIET_FONT
+        styles['Heading1'].fontName = _VIET_FONT_BOLD
+        styles['Heading2'].fontName = _VIET_FONT_BOLD
+        styles['Heading3'].fontName = _VIET_FONT_BOLD
+
         title_style = ParagraphStyle(
-            'Title',
+            'VietTitle',
             parent=styles['Heading1'],
+            fontName=_VIET_FONT_BOLD,
             alignment=1, # Center
             spaceAfter=20
         )

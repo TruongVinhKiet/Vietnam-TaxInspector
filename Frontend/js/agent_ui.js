@@ -1039,7 +1039,7 @@ document.addEventListener('DOMContentLoaded', () => {
                             <div class="text-emerald-800 font-semibold">Đã đủ dữ liệu phân tích</div>
                             <div class="text-emerald-600 text-xs">Bạn có muốn xuất toàn bộ báo cáo này không?</div>
                         </div>
-                    }
+                    </div>
                     </div>
                     <div class="flex items-center gap-2">
                         <button onclick="window.exportReport('${AGENT_SESSION_ID}', 'docx')" class="px-3 py-1.5 bg-white border border-emerald-200 text-emerald-700 rounded shadow-sm text-xs font-semibold hover:bg-emerald-50 transition-colors"><i class="fa-solid fa-file-word mr-1"></i> DOCX</button>
@@ -1249,6 +1249,35 @@ document.addEventListener('DOMContentLoaded', () => {
                 const vizHtml = buildVisualizationCards(data, {});
                 streamVizEl.innerHTML = vizHtml;
                 requestAnimationFrame(() => renderPendingCharts());
+                scrollToBottom();
+                break;
+            }
+
+            case 'agent_thinking': {
+                // Premium Agentic LLM V4 Reasoning Display
+                const thought = data.thought || '';
+                const tool = data.tool || '';
+                const conf = data.confidence || 0;
+                const stepEl = document.createElement('div');
+                stepEl.className = 'thinking-step special-step mt-2 mb-1 animate-fadeIn';
+                stepEl.innerHTML = `
+                    <div class="agent-reasoning-block rounded-xl p-3 border border-violet-200 bg-gradient-to-br from-violet-50 via-indigo-50 to-sky-50 shadow-sm">
+                        <div class="flex items-center gap-2 mb-2">
+                            <div class="w-6 h-6 rounded-full bg-gradient-to-br from-violet-500 to-indigo-600 flex items-center justify-center text-white text-[10px] shadow-md">
+                                <i class="fa-solid fa-brain"></i>
+                            </div>
+                            <span class="text-[11px] font-bold text-violet-700 uppercase tracking-wider">Agentic LLM V4 — Suy luận tự chủ</span>
+                            <span class="ml-auto text-[9px] font-mono px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700 border border-emerald-200">${(conf * 100).toFixed(0)}%</span>
+                        </div>
+                        ${thought ? `<div class="text-[11px] text-slate-600 italic leading-relaxed border-l-2 border-violet-300 pl-2 mb-2">"${escapeHtml(thought)}"</div>` : ''}
+                        <div class="flex items-center gap-1.5">
+                            <i class="fa-solid fa-arrow-right text-[9px] text-indigo-400"></i>
+                            <span class="text-[10px] font-bold text-indigo-600 font-mono bg-indigo-50 px-2 py-0.5 rounded border border-indigo-200">${escapeHtml(tool)}</span>
+                            <span class="text-[9px] text-slate-400">đã được chọn bởi AI Agent</span>
+                        </div>
+                    </div>
+                `;
+                stepsEl.appendChild(stepEl);
                 scrollToBottom();
                 break;
             }
@@ -2137,9 +2166,14 @@ document.addEventListener('DOMContentLoaded', () => {
                     <div class="mt-4 pt-3 border-t border-slate-200">
                         <div class="text-xs font-bold text-slate-400 mb-2 uppercase tracking-wide">Latency Breakdown</div>
                         <div class="flex flex-wrap gap-2 text-[10px]">
-                            ${Object.entries(typeof data.latency_breakdown === 'string' ? JSON.parse(data.latency_breakdown) : data.latency_breakdown).map(([k, v]) => `
-                                <span class="bg-white border border-slate-200 px-2 py-1 rounded text-slate-500"><span class="font-semibold text-slate-700">${k}:</span> ${(v*1000).toFixed(0)}ms</span>
-                            `).join('')}
+                            ${Object.entries(typeof data.latency_breakdown === 'string' ? JSON.parse(data.latency_breakdown) : data.latency_breakdown).map(([k, v]) => {
+                                const isAgent = k === 'agentic_llm';
+                                const cls = isAgent
+                                    ? 'bg-violet-50 border border-violet-200 px-2 py-1 rounded text-violet-600 font-semibold'
+                                    : 'bg-white border border-slate-200 px-2 py-1 rounded text-slate-500';
+                                const icon = isAgent ? '<i class="fa-solid fa-brain text-violet-400 mr-1"></i>' : '';
+                                return `<span class="${cls}">${icon}<span class="font-semibold ${isAgent ? 'text-violet-700' : 'text-slate-700'}">${k}:</span> ${Number(v).toFixed(0)}ms</span>`;
+                            }).join('')}
                         </div>
                     </div>` : ''}
                 </div>

@@ -109,7 +109,7 @@ class TaxAgentLLM:
         return LLMTier.TEMPLATE
 
     def _try_load_finetuned(self) -> Optional[LLMTier]:
-        adapter = self.config.adapter_path or str(Path(__file__).parent.parent / "data/models/tax_llm_lora")
+        adapter = self.config.adapter_path or str(Path(__file__).parent.parent / "tax_agent")
         if not Path(adapter).exists():
             return None
         try:
