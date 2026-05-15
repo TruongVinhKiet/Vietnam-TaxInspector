@@ -11,7 +11,7 @@
 [![Redis](https://img.shields.io/badge/Cache-Redis-DC382D?style=flat&logo=redis&logoColor=white)](https://redis.io/)
 [![Kafka](https://img.shields.io/badge/Stream-Kafka-231F20?style=flat&logo=apachekafka&logoColor=white)](https://kafka.apache.org/)
 [![Docker](https://img.shields.io/badge/Deploy-Docker-2496ED?style=flat&logo=docker&logoColor=white)](https://www.docker.com/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![License: Proprietary](https://img.shields.io/badge/License-Proprietary-red.svg)](#)
 
 ---
 
@@ -107,20 +107,20 @@ Gom toàn bộ lịch sử Tool (Bằng chứng), Debate Conclusion (Luận đi�
 
 Để tự động hóa việc nhập liệu hóa đơn chứng từ, hệ thống sở hữu module **DocumentOCREngine** hoàn toàn độc lập với các API đám mây bên thứ 3 (như Google Cloud Vision / AWS Textract), đảm bảo dữ liệu Thuế nhạy cảm không bao giờ bị rò rỉ ra khỏi biên giới hạ tầng quốc gia.
 
-### 3.1. Tiền Xử Lý Ảnh Chuyên Sâu (OpenCV Preprocessing)
+### 4.1. Tiền Xử Lý Ảnh Chuyên Sâu (OpenCV Preprocessing)
 Tài liệu thuế thực tế (nhất là hóa đơn scan) thường xuyên bị nhăn nheo, chụp nghiêng hoặc bị con dấu đỏ đè lên chữ ký và số tiền, gây nhầm lẫn trầm trọng cho các thuật toán OCR thông thường.
 - **Red Stamp Removal (Xóa mộc đỏ):** Hệ thống chuyển đổi ảnh sang hệ không gian màu HSV (Hue-Saturation-Value). Sử dụng `cv2.inRange` để tạo ra hai Mask bóc tách vùng màu đỏ/hồng (Hue 0-10 và 160-180). Sau đó dùng `cv2.bitwise_or` để gộp Mask và thay thế vùng màu đỏ bằng nền trắng (255,255,255). Điều này giúp OCR không bị nhiễu nét chữ.
 - **Deskewing (Sửa nghiêng):** Sử dụng bộ lọc làm xám (Grayscale) kết hợp thuật toán phát hiện biên (Canny Edge Detection). Tiếp tục đưa qua `cv2.HoughLinesP` để phát hiện các đường kẻ ngang dọc trong bảng biểu hóa đơn. Tính toán góc nghiêng trung vị (Median Angle) từ các đường kẻ này và dùng biến đổi affine `cv2.warpAffine` để xoay thẳng ảnh tự động với độ sai số cực thấp.
 - **Adaptive Binarization:** Đối với ảnh nhiễu, ánh sáng không đều hoặc tối mờ, dùng phương pháp Adaptive Gaussian Thresholding (ngưỡng thích nghi cục bộ) để làm nổi bật nét mực đen trên nền trắng nhám.
 
-### 3.2. Động Cơ Nhận Dạng Văn Bản (OCR Backend Priority Chain)
+### 4.2. Động Cơ Nhận Dạng Văn Bản (OCR Backend Priority Chain)
 Hệ thống sử dụng cơ chế Fallback an toàn (Graceful Degradation Chain):
 1. **PaddleOCR (Primary Engine):** Tối ưu hóa cực tốt cho hệ chữ tượng hình và Tiếng Việt có dấu. Chạy dựa trên mô hình Lightweight inference, cung cấp tốc độ cao ngay cả trên CPU thông thường.
 2. **EasyOCR (Secondary Engine):** Tích hợp sẵn `vi` (Vietnamese) language pack dựa trên mạng CRAFT (Character Region Awareness for Text detection). Cung cấp độ chính xác cao cho văn bản in chuẩn.
 3. **Tesseract (Fallback 1):** Công cụ OCR truyền thống mã nguồn mở dựa trên mô hình học sâu LSTM (Long Short-Term Memory).
 4. **Regex Only (Fallback 2):** Nếu server bị lỗi hoàn toàn các engine xử lý ảnh, pipeline hạ cấp xuống chế độ `regex_only` để bóc tách text nhúng sẵn trong file PDF thông minh (dùng `pdfplumber`).
 
-### 3.3. Trích Xuất Thực Thể & Cấu Trúc Lưới (Invoice Entity Extraction)
+### 4.3. Trích Xuất Thực Thể & Cấu Trúc Lưới (Invoice Entity Extraction)
 Sau khi có Dữ liệu văn bản thô (Raw OCR Text), module tiếp tục xử lý NLP và Heuristics:
 - **Thông tin doanh nghiệp:** Dò các chuỗi 10-13 chữ số làm Mã số thuế. Kết hợp Regex xử lý đa dòng (Multiline Parsing) để móc nối từ khóa "Người Bán/Đơn vị bán" với tên công ty nằm ở dòng kế tiếp.
 - **Tiền tệ:** Trích xuất toàn bộ các số liệu, chuẩn hóa dấu phân cách thập phân, sắp xếp mảng theo thứ tự giảm dần để nhận diện chính xác Đơn giá, Thành tiền, Thuế VAT (thường là 8% hoặc 10%) và Tổng thanh toán (Grand Total).
@@ -128,21 +128,21 @@ Sau khi có Dữ liệu văn bản thô (Raw OCR Text), module tiếp tục xử
 
 ---
 
-## 🕸️ 5. Phân Hệ Phân Tích Mạng Lưới Điêu Tra (Forensic Graph Analytics)
+## 🕸️ 5. Phân Hệ Phân Tích Mạng Lưới Điều Tra (Forensic Graph Analytics)
 
 Hành vi trốn thuế tinh vi nhất hiện nay là cấu kết thành lập mạng lưới mua bán hóa đơn xoay vòng qua hàng chục, thậm chí hàng trăm công ty trung gian (Shell company rings / Wash trading). Việc truy vấn bằng SQL truyền thống tỏ ra bất lực trước bài toán chuỗi liên kết sâu. Vietnam TaxInspector ứng dụng Graph AI để giải quyết triệt để vấn đề này.
 
-### 4.1. Kiến Trúc Mạng Lưới (The VAT Graph Architecture)
+### 5.1. Kiến Trúc Mạng Lưới (The VAT Graph Architecture)
 Dữ liệu hóa đơn từ bảng `tax_returns` được tải lên bộ nhớ và chuyển đổi thành Đồ thị có hướng (Directed Graph) sử dụng thư viện **NetworkX**:
 - **Nodes (Đỉnh):** Đại diện cho các Doanh nghiệp (định danh bằng Mã số thuế).
 - **Edges (Cạnh):** Đại diện cho dòng dịch chuyển của Hóa đơn GTGT và tiền tệ từ Người Bán sang Người Mua. Cạnh mang trọng số (Weight) là tổng giá trị giao dịch.
 
-### 4.2. Thuật Toán Cốt Lõi (Core Graph Algorithms)
+### 5.2. Thuật Toán Cốt Lõi (Core Graph Algorithms)
 - **Cycle Detection (Truy tìm chu trình khép kín):** Áp dụng thuật toán DFS (Depth-First Search) tùy chỉnh để tìm các chuỗi giao dịch đi một vòng rồi quay lại điểm xuất phát (Ví dụ: Công ty A bán cho B, B bán cho C, C lại bán ngược nguyên vật liệu cho A). Đây là dấu hiệu kinh điển của việc đảo tiền nhằm nâng khống doanh thu để lừa đảo vay vốn ngân hàng hoặc hoàn thuế.
 - **PageRank Algorithm (Đo lường tầm quan trọng):** Tính toán "độ tập trung" của dòng tiền. Một công ty "ma" (F0) thường có dòng tiền bán ra khổng lồ dồn vào nhiều công ty (F1, F2) nhưng lại không có hóa đơn mua nguyên vật liệu đầu vào tương xứng. Độ lệch PageRank In/Out giúp phát hiện chính xác các "Trạm phát hành hóa đơn khống".
 - **Connected Components (Các cụm cô lập):** Xác định các nhóm công ty (Sub-graphs) chỉ chuyên mua bán nội bộ với nhau nhằm thổi phồng chi phí mà không hề giao thương thực tế với thị trường bên ngoài.
 
-### 4.3. Kiến Trúc Xử Lý Lô Cường Độ Cao (High-Throughput Batch API)
+### 5.3. Kiến Trúc Xử Lý Lô Cường Độ Cao (High-Throughput Batch API)
 Do các thuật toán đồ thị có độ phức tạp thời gian O(V+E) hoặc O(V^3), việc xử lý hàng triệu node sẽ gây "đóng băng" (blocking) Server.
 Tính năng `POST /api/graph/batch-upload` được kiến trúc theo dạng **Async Background Tasks**. Frontend sẽ không bị treo mà liên tục Polling endpoint `/batch-status/{batch_id}` (chu kỳ 2 giây) để cập nhật thanh Tiến trình (Progress Bar) thời gian thực, đảm bảo UX/UI luôn mượt mà. Kết quả cuối cùng được lưu trữ vĩnh viễn vào bảng `vat_graph_analysis_batches`.
 
@@ -152,7 +152,7 @@ Tính năng `POST /api/graph/batch-upload` được kiến trúc theo dạng **A
 
 Học máy truyền thống (Tabular Machine Learning) được tận dụng tối đa để chấm điểm rủi ro hàng loạt (Bulk Scoring) và đưa ra các dự báo định lượng trên quy mô toàn quốc.
 
-### 5.1. Mô Hình Dự Báo Nợ Đọng (Delinquency Prediction Pipeline)
+### 6.1. Mô Hình Dự Báo Nợ Đọng (Delinquency Prediction Pipeline)
 Mục tiêu là tính toán xác suất (0.0 đến 1.0) một công ty sẽ mất thanh khoản và không nộp thuế trong quý kế tiếp.
 - **Thuật toán:** Triển khai **XGBoost (Extreme Gradient Boosting)** và Random Forest Classifier. Thuật toán này vượt trội trong xử lý dữ liệu dạng bảng chứa nhiều nhiễu và missing values.
 - **Feature Engineering (Trích xuất đặc trưng):** Mô hình được huấn luyện dựa trên các tính năng chuyên ngành thuế:
@@ -162,21 +162,21 @@ Mục tiêu là tính toán xác suất (0.0 đến 1.0) một công ty sẽ m�
   - `tax_payment_delay_days` (Độ trễ dòng tiền thanh toán trung bình).
 - **Hệ thống Caching & Sức khỏe (Cache Health Monitoring):** Vì việc thực thi `predict()` cho hàng vạn công ty tốn thời gian, kết quả được lưu đệm (Caching). Hệ thống có Endpoint riêng `/api/delinquency/health/cache` để giám sát độ phủ (Coverage) và độ cũ của dữ liệu (Stale Ratio). Khi Stale Ratio vượt quá 30%, Event hook cảnh báo `delinquency_cache_health_threshold_breach` sẽ được kích hoạt để quản trị viên chạy lại Batch Predict.
 
-### 5.2. Chấm Điểm Gian Lận (Fraud Risk Scoring)
+### 6.2. Chấm Điểm Gian Lận (Fraud Risk Scoring)
 Module phân tích hành vi và gán nhãn rủi ro tổng hợp cho Doanh nghiệp:
 - Thấp (Low Risk) - Xanh lá.
 - Trung bình (Medium Risk) - Vàng.
 - Cao (High Risk) - Đỏ (Báo động đưa vào diện Thanh tra toàn diện).
 Thuật toán là sự kết hợp giữa Machine Learning phi giám sát (Unsupervised Anomaly Detection như Isolation Forest) và Hệ chuyên gia (Rule-based Expert System).
 
-### 5.3. Luồng MLOps Chuyên Biệt (Specialized Training Pipelines)
+### 6.3. Luồng MLOps Chuyên Biệt (Specialized Training Pipelines)
 Đối với các nghiệp vụ có rủi ro tài chính khổng lồ như *Hoàn Thuế GTGT (VAT Refund)* hay *Thanh tra sau thông quan (Audit Value)*, quy trình cập nhật model là cực kỳ khắt khe:
 - **Quality Gates:** Mô hình sau khi Train sẽ được kiểm tra chéo Precision/Recall. Chỉ khi `overall_pass=true` hệ thống mới cấp phép đi tiếp.
 - **Pilot Phase:** Chạy thử nghiệm (A/B Testing dạng hẹp) trên một tập dữ liệu biên. Thu thập sự sai lệch (Delta).
 - **Go/No-Go Decision Automation:** Một Agent kiểm định độc lập sẽ tự động sinh báo cáo `specialized_go_no_go_report.json` và ra quyết định có Release Model ra Production hay không dựa trên các luật (Hard Gates) về False Positive Rate (Tránh thanh tra oan doanh nghiệp làm ăn chân chính).
 - **Model Lineage:** Lưu vết toàn bộ lịch sử sử dụng Model version nào để đưa ra quyết định cho công ty nào, hỗ trợ Audit nghiệp vụ về sau.
 
-### 5.4. Vòng Lặp Học Tăng Cường (RLHF & DPO Framework)
+### 6.4. Vòng Lặp Học Tăng Cường (RLHF & DPO Framework)
 Nhằm liên tục tinh chỉnh văn phong và logic của Trợ lý AI, giao diện Chatbot được trang bị nút phản hồi (Thumbs Up / Thumbs Down).
 - Phản hồi của cán bộ thuế (Human Feedback) sẽ được lưu vào Database cùng với toàn bộ nội dung Debate và Prompt.
 - Dữ liệu này được làm giàu để tạo thành tập huấn luyện cho phương pháp **DPO (Direct Preference Optimization)**, liên tục "uốn nắn" AI Agent để nó học được "trực giác điều tra" của cán bộ thuế thực thụ.
@@ -187,12 +187,12 @@ Nhằm liên tục tinh chỉnh văn phong và logic của Trợ lý AI, giao di
 
 Để Agent không bao giờ mắc lỗi "bịa" luật (Hallucination) - điều cấm kỵ trong hành chính công, hệ thống được trang bị bộ não RAG (Retrieval-Augmented Generation) đồ sộ.
 
-### 6.1. Kiến Trúc Cơ Sở Dữ Liệu Vector (pgvector)
+### 7.1. Kiến Trúc Cơ Sở Dữ Liệu Vector (pgvector)
 Hệ thống sử dụng cơ sở dữ liệu **PostgreSQL** kết hợp chặt chẽ với extension **pgvector**.
 - **Sovereign Security:** Lựa chọn `pgvector` thay vì Pinecone/Milvus SaaS đảm bảo toàn bộ dữ liệu Vector nhúng (Embeddings) của các văn bản mật, thông tư, nghị định nội bộ không bao giờ rời khỏi Server On-Premise của cơ quan nhà nước.
 - **Indexing Strategy:** Triển khai thuật toán **HNSW** (Hierarchical Navigable Small World) để query không gian vector nhiều chiều cực nhanh với độ trễ (Latency) dưới 10ms, hỗ trợ fallback sang IVFFlat nếu bộ nhớ RAM vật lý bị giới hạn.
 
-### 6.2. Thuật Toán Tìm Kiếm Lai Đa Lớp (Hybrid Search & Cross-Encoder Reranking)
+### 7.2. Thuật Toán Tìm Kiếm Lai Đa Lớp (Hybrid Search & Cross-Encoder Reranking)
 Hệ thống RAG sử dụng phương pháp tìm kiếm ba tầng (3-Tier Search) phức tạp:
 - **Tầng 1 - Keyword Lexical Search (BM25):** Truy vấn dựa trên tần suất xuất hiện từ khóa. Rất mạnh khi người dùng tra cứu chính xác số hiệu luật (Ví dụ: "Điểm a Khoản 1 Điều 15 Thông tư 219/2013/TT-BTC").
 - **Tầng 2 - Dense Semantic Retrieval:** Tìm kiếm theo ngữ nghĩa dựa trên Embeddings 384-chiều. Rất mạnh khi người dùng hỏi các câu mơ hồ (Ví dụ: "Điều kiện để được khấu trừ thuế hàng xuất khẩu là gì?").
@@ -202,13 +202,13 @@ Hệ thống RAG sử dụng phương pháp tìm kiếm ba tầng (3-Tier Search
 
 ## 🏢 8. Kiến Trúc Phần Mềm & Công Nghệ (Software Architecture & Tech Stack)
 
-### 7.1. Backend (Python & FastAPI)
+### 8.1. Backend (Python & FastAPI)
 - **Framework:** FastAPI mang lại hiệu suất Asynchronous vượt trội, được thiết kế theo chuẩn Micro-routers phân tách rõ ràng các miền nghiệp vụ (Domain-Driven Design): `/api/ml`, `/api/graph`, `/api/tax-agent`, `/api/delinquency`, `/api/simulation`.
 - **ORM & Database Interactor:** Sử dụng **SQLAlchemy 2.0** cho toàn bộ thao tác CSDL.
 - **Security Validation:** Áp dụng Pydantic models để validate chặt chẽ Payload đầu vào, chống SQL Injection và XSS.
 - **Resource Management:** Dependency Injection (`Depends(get_db)`) được sử dụng triệt để nhằm đảm bảo Connection Pooling luôn sạch sẽ và tối ưu bộ nhớ.
 
-### 7.2. Frontend (Modern Vanilla JS & TailwindCSS)
+### 8.2. Frontend (Modern Vanilla JS & TailwindCSS)
 - **Triết lý Zero-Bloat:** Hệ thống loại bỏ hoàn toàn các thư viện cồng kềnh (React/Vue/Angular/Webpack) để tối giản hóa việc triển khai (Deployment) trên các máy chủ đóng của Nhà nước (Không cần cài Node.js hay NPM). Mọi thứ chạy trên **ES6 Vanilla JavaScript** thuần túy và cực nhanh.
 - **Design System:** Dùng **TailwindCSS** tạo giao diện theo phong cách "Office White" thanh lịch, màu chủ đạo là xanh dương đậm (Trust Blue) thể hiện sự uy tín, font chữ rõ ràng, độ tương phản cao phù hợp cho môi trường văn phòng.
 - **Dynamic Interactions & Animations:**
@@ -217,7 +217,7 @@ Hệ thống RAG sử dụng phương pháp tìm kiếm ba tầng (3-Tier Search
   - Fetch API kết hợp cơ chế Polling mượt mà cho các luồng xử lý bất đồng bộ, Modal Overlays chuyên nghiệp cho các hộp thoại chức năng.
   - Tích hợp tính năng "Tủ Đồ" (Wardrobe) thay đổi giao diện Avatar AI với chủ đề Lụa tơ tằm (Silk-themed variants) nhằm tăng tính tương tác và cá nhân hóa.
 
-### 7.3. Cấu Trúc Cơ Sở Dữ Liệu Cực Đại (Database Schema Details)
+### 8.3. Cấu Trúc Cơ Sở Dữ Liệu Cực Đại (Database Schema Details)
 Quản trị toàn bộ bởi file lược đồ `Database/init_db.sql` và hệ thống migrate:
 - **Core Entities:** `users` (Cán bộ), `companies` (Hồ sơ pháp nhân doanh nghiệp).
 - **Financial Data:** `tax_returns` (Tờ khai thuế định kỳ), `tax_payments` (Lịch sử nộp tiền vào ngân sách).
@@ -242,14 +242,14 @@ An ninh thông tin là yếu tố sống còn, quyết định sự thành bại
 
 Đây là tài liệu hướng dẫn nhanh để đưa toàn bộ cụm hệ thống lên và chạy ổn định trong vòng 10 phút.
 
-### 9.1. Chuẩn Bị Hệ Sinh Thái Hạ Tầng (Prerequisite Setup)
+### 10.1. Chuẩn Bị Hệ Sinh Thái Hạ Tầng (Prerequisite Setup)
 Đảm bảo máy chủ (Windows Server / Linux Ubuntu) đã cài đặt:
 - Python phiên bản `3.9` đến `3.11`.
 - Cơ sở dữ liệu PostgreSQL phiên bản `14` trở lên.
 - Cài đặt extension `pgvector` cho PostgreSQL (Bắt buộc để chạy tính năng Semantic Search).
 Tạo một cơ sở dữ liệu trống mang tên `TaxInspector`. Sử dụng công cụ `psql` hoặc pgAdmin để chạy toàn bộ script DDL từ file `Database/init_db.sql` nhằm tạo móng cho hệ thống bảng biểu.
 
-### 9.2. Triển Khai Máy Chủ Backend API
+### 10.2. Triển Khai Máy Chủ Backend API
 Mở cửa sổ Command Prompt/Terminal, di chuyển vào thư mục gốc của dự án:
 ```bash
 cd Backend
@@ -274,7 +274,7 @@ uvicorn app.main:app --reload --port 8000
 ```
 Khi thấy dòng log `Application startup complete.`, Backend đã sẵn sàng ở port `8000`.
 
-### 9.3. Triển Khai Máy Chủ Frontend Web Server
+### 10.3. Triển Khai Máy Chủ Frontend Web Server
 Do sử dụng ES6 Modules, trình duyệt sẽ chặn việc mở file HTML trực tiếp (lỗi CORS `file://`). Cần chạy một Web Server tĩnh nhẹ nhàng. Mở một Terminal mới:
 ```bash
 cd Frontend
@@ -282,7 +282,7 @@ python -m http.server 3000
 ```
 Sử dụng trình duyệt Chrome/Edge truy cập vào địa chỉ: **http://localhost:3000** để chiêm ngưỡng giao diện.
 
-### 9.4. Sinh Dữ Liệu Giả Lập & Khởi Tạo Bộ Đệm (Mock Data & Seeding)
+### 10.4. Sinh Dữ Liệu Giả Lập & Khởi Tạo Bộ Đệm (Mock Data & Seeding)
 Một hệ thống BI Dashboard trống rỗng sẽ không thể hiện được sức mạnh. Cần sinh bộ dữ liệu (Mock Data) giả lập 5,000 công ty để hệ thống hoạt động:
 ```bash
 # Trở về thư mục gốc của dự án
@@ -297,14 +297,14 @@ python Backend/data/seed_tax_payments.py --reset --companies 5000 --seed 42
 python -m app.scripts.refresh_delinquency_cache --base-url http://127.0.0.1:8000 --chunk-size 500 --refresh-existing
 ```
 
-### 9.5. Chạy Kiểm Tra Sức Khỏe Tự Động (Smoke-Test Automation)
+### 10.5. Chạy Kiểm Tra Sức Khỏe Tự Động (Smoke-Test Automation)
 Xác minh toàn bộ các Endpoints, kết nối CSDL và các Mô hình đã thực sự online hay chưa trước khi bàn giao:
 ```bash
 python -m app.scripts.run_local_readiness_smoke --base-url http://127.0.0.1:8000
 ```
 Màn hình console xuất hiện dòng chữ xanh `ALL SYSTEMS GO` nghĩa là hệ thống đã hoàn hảo.
 
-### 9.6. Vận Hành Đường Ống MLOps Chuyên Biệt (Specialized Models)
+### 10.6. Vận Hành Đường Ống MLOps Chuyên Biệt (Specialized Models)
 Đây là quy trình huấn luyện định kỳ (thường là hàng tháng) dành cho cán bộ Data Scientist để đưa mô hình mới vào Pilot:
 ```bash
 # 1) Khởi chạy Train Pipeline (Skip-seed để giữ nguyên dữ liệu gốc)
