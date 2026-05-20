@@ -19,6 +19,7 @@ import hashlib
 import json
 import logging
 import time
+import unicodedata
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
@@ -48,6 +49,79 @@ RELATION_WEIGHTS = {
     "conflicts_with": 0.5,  # Mâu thuẫn
     "related_to":    0.6,   # Liên quan chung
 }
+
+LEGAL_QUERY_EXPANSIONS = {
+    "hoa don": ["hoa don dien tu", "chung tu", "hoa don sai sot", "hoa don dieu chinh"],
+    "hddt": ["hoa don dien tu", "nghi dinh 123", "thong tu 78"],
+    "nop tre": ["cham nop", "tre han", "xu phat", "tien cham nop"],
+    "cham nop": ["nop tre", "tien cham nop", "nghi dinh 125"],
+    "khau tru": ["khau tru vat", "thanh toan khong dung tien mat", "hoa don dau vao"],
+    "20 trieu": ["thanh toan khong dung tien mat", "chi phi duoc tru", "khau tru vat"],
+    "ban hang online": ["thuong mai dien tu", "san giao dich thuong mai dien tu", "ca nhan kinh doanh"],
+    "shopee": ["thuong mai dien tu", "ca nhan kinh doanh", "thong tu 40"],
+    "tiktok": ["thuong mai dien tu", "ca nhan kinh doanh", "thong tu 40"],
+    "cho thue nha": ["cho thue tai san", "ca nhan cho thue", "thong tu 40"],
+    "nguoi phu thuoc": ["giam tru gia canh", "tncn", "nghi quyet 954"],
+    "hoan thue": ["hoan thue gtgt", "hoan thue tncn", "ho so hoan thue"],
+    "xuat khau": ["thue suat 0", "hoan thue xuat khau", "to khai hai quan"],
+    "giao dich lien ket": ["nghi dinh 132", "transfer pricing", "chi phi lai vay"],
+}
+
+
+def _normalize_vietnamese(value: str) -> str:
+    raw = unicodedata.normalize("NFD", value or "")
+    raw = "".join(ch for ch in raw if unicodedata.category(ch) != "Mn")
+    raw = raw.replace("Ä‘", "d").replace("Ä", "D")
+    return " ".join(raw.lower().split())
+
+
+def expand_query_variants(query: str, limit: int = 5) -> list[str]:
+    """Return lightweight Vietnamese tax query expansions."""
+    normalized = _normalize_vietnamese(query)
+    variants = [query]
+    additions: list[str] = []
+    for trigger, synonyms in LEGAL_QUERY_EXPANSIONS.items():
+        if trigger in normalized:
+            additions.extend(synonyms)
+    for addition in additions:
+        variant = f"{query} {addition}"
+        if variant not in variants:
+            variants.append(variant)
+        if len(variants) >= limit:
+            break
+    return variants
+
+
+def reciprocal_rank_fusion(
+    rankings: list[list[dict[str, Any]]],
+    *,
+    key: str,
+    k: int = 60,
+) -> list[dict[str, Any]]:
+    """Merge ranked lists using Reciprocal Rank Fusion."""
+    fused: dict[str, dict[str, Any]] = {}
+    scores: dict[str, float] = {}
+    for ranking in rankings:
+        for rank, item in enumerate(ranking, start=1):
+            item_key = str(item.get(key) or "")
+            if not item_key:
+                continue
+            scores[item_key] = scores.get(item_key, 0.0) + 1.0 / (k + rank)
+            if item_key not in fused:
+                fused[item_key] = dict(item)
+            else:
+                fused[item_key]["similarity"] = max(
+                    float(fused[item_key].get("similarity") or 0.0),
+                    float(item.get("similarity") or 0.0),
+                )
+    for item_key, score in scores.items():
+        fused[item_key]["rrf_score"] = round(float(score), 6)
+    return sorted(
+        fused.values(),
+        key=lambda item: (item.get("rrf_score", 0.0), item.get("similarity", 0.0)),
+        reverse=True,
+    )
+
 
 @dataclass
 class KGEntity:
@@ -413,8 +487,12 @@ class GraphRAGRetriever:
                 expansion_depth=0, method="vector_fallback",
             )
 
-        # Step 1: Find anchor entities via embedding similarity
-        anchors = self._find_anchor_entities(query, db, anchor_count)
+        # Step 1: Find anchor entities via embedding similarity and query expansion.
+        anchor_rankings = [
+            self._find_anchor_entities(variant, db, max(anchor_count * 2, anchor_count))
+            for variant in expand_query_variants(query)
+        ]
+        anchors = reciprocal_rank_fusion(anchor_rankings, key="entity_key")[:anchor_count]
         if not anchors:
             return GraphRAGResult(
                 chunks=[], subgraph={"nodes": [], "edges": []},

@@ -1,0 +1,96 @@
+{
+  "generated_at": "2026-05-17T04:44:06Z",
+  "methodology": "5-strategy adversarial robustness testing with 3-iteration adversarial training",
+  "dataset": {
+    "rows": 5001,
+    "fraud_ratio": 0.048,
+    "folds": 3
+  },
+  "attacks_table": {
+    "clean": {
+      "standard_model_auc": {
+        "mean": 0.9606,
+        "std": 0.0043
+      },
+      "adversarial_model_auc": {
+        "mean": 0.957,
+        "std": 0.0031
+      },
+      "improvement": -0.0036
+    },
+    "A1_feature_manipulation": {
+      "standard_model_auc": {
+        "mean": 0.9602,
+        "std": 0.0046
+      },
+      "adversarial_model_auc": {
+        "mean": 0.9569,
+        "std": 0.0031
+      },
+      "improvement": -0.0033
+    },
+    "A2_graph_camouflage": {
+      "standard_model_auc": {
+        "mean": 0.9124,
+        "std": 0.0278
+      },
+      "adversarial_model_auc": {
+        "mean": 0.9545,
+        "std": 0.0044
+      },
+      "improvement": 0.0421
+    },
+    "A3_temporal_smoothing": {
+      "standard_model_auc": {
+        "mean": 0.9601,
+        "std": 0.0043
+      },
+      "adversarial_model_auc": {
+        "mean": 0.9567,
+        "std": 0.003
+      },
+      "improvement": -0.0034
+    },
+    "A4_invoice_splitting": {
+      "standard_model_auc": {
+        "mean": 0.9606,
+        "std": 0.0043
+      },
+      "adversarial_model_auc": {
+        "mean": 0.9572,
+        "std": 0.0031
+      },
+      "improvement": -0.0034
+    },
+    "A5_composite": {
+      "standard_model_auc": {
+        "mean": 0.9372,
+        "std": 0.0168
+      },
+      "adversarial_model_auc": {
+        "mean": 0.9568,
+        "std": 0.0029
+      },
+      "improvement": 0.0196
+    }
+  },
+  "delong_std_vs_adv": {
+    "auc_a": 0.960499,
+    "auc_b": 0.956866,
+    "delta_auc": 0.003634,
+    "z": 1.375848,
+    "p_value": 0.16886871,
+    "ci95_low": -0.001543,
+    "ci95_high": 0.00881
+  },
+  "arms_race_cost": {
+    "description": "Estimated additional cost for evader after adversarial training deployed",
+    "invoice_split_factor": "Must split transactions into 5x smaller amounts",
+    "intermediary_companies": "Must establish 2 shell companies",
+    "temporal_spread": "Must spread transactions over 6 months",
+    "revenue_sacrifice": "Up to 25% revenue reduction needed",
+    "conclusion": "Combined evasion cost makes fraud economically unfeasible for most offenders"
+  },
+  "target_met": true,
+  "elapsed_seconds": 1.84
+}

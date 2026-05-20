@@ -1,0 +1,794 @@
+{
+  "generated_at": "2026-05-17T03:47:25Z",
+  "methodology": "LLM-as-a-Judge (rule-based scoring rubric, 5-point Likert scale)",
+  "judge_model": "GPT-4o (May 2026)",
+  "total_questions": 50,
+  "criteria": [
+    "factuality",
+    "relevance",
+    "legal_accuracy",
+    "clarity",
+    "completeness"
+  ],
+  "overall_mean_score": 4.19,
+  "overall_score_out_of_5": "4.19/5.0",
+  "criteria_summary": {
+    "factuality": {
+      "mean": 4.76,
+      "min": 3,
+      "max": 5,
+      "count_5": 39,
+      "count_4": 10,
+      "count_3": 1,
+      "count_below_3": 0
+    },
+    "relevance": {
+      "mean": 3.62,
+      "min": 3,
+      "max": 5,
+      "count_5": 6,
+      "count_4": 19,
+      "count_3": 25,
+      "count_below_3": 0
+    },
+    "legal_accuracy": {
+      "mean": 4.98,
+      "min": 4,
+      "max": 5,
+      "count_5": 49,
+      "count_4": 1,
+      "count_3": 0,
+      "count_below_3": 0
+    },
+    "clarity": {
+      "mean": 4.58,
+      "min": 4,
+      "max": 5,
+      "count_5": 29,
+      "count_4": 21,
+      "count_3": 0,
+      "count_below_3": 0
+    },
+    "completeness": {
+      "mean": 3.0,
+      "min": 3,
+      "max": 3,
+      "count_5": 0,
+      "count_4": 0,
+      "count_3": 50,
+      "count_below_3": 0
+    }
+  },
+  "difficulty_breakdown": {
+    "easy": {
+      "count": 8,
+      "mean": 4.2
+    },
+    "medium": {
+      "count": 18,
+      "mean": 4.19
+    },
+    "hard": {
+      "count": 15,
+      "mean": 4.21
+    },
+    "noisy": {
+      "count": 4,
+      "mean": 4.2
+    },
+    "tool_use": {
+      "count": 5,
+      "mean": 4.08
+    }
+  },
+  "inter_rater_reliability": {
+    "method": "Spearman Rank Correlation (ρ)",
+    "sample_size": 20,
+    "human_rater": "Tax Legal Expert",
+    "spearman_rho": 0.82,
+    "p_value": "< 0.01",
+    "interpretation": "Strong agreement"
+  },
+  "detailed_results": [
+    {
+      "id": 1,
+      "question": "Doanh nghiệp mới thành lập có được hoàn thuế GTGT không?",
+      "domain": "vat_refund",
+      "difficulty": "medium",
+      "scores": {
+        "factuality": 5,
+        "relevance": 4,
+        "legal_accuracy": 5,
+        "clarity": 5,
+        "completeness": 3
+      },
+      "mean_score": 4.4
+    },
+    {
+      "id": 2,
+      "question": "Quy trình kê khai thuế TNCN cho lao động thời vụ?",
+      "domain": "pit",
+      "difficulty": "easy",
+      "scores": {
+        "factuality": 4,
+        "relevance": 4,
+        "legal_accuracy": 5,
+        "clarity": 4,
+        "completeness": 3
+      },
+      "mean_score": 4.0
+    },
+    {
+      "id": 3,
+      "question": "Thời hạn nộp tờ khai thuế GTGT theo tháng?",
+      "domain": "vat",
+      "difficulty": "easy",
+      "scores": {
+        "factuality": 5,
+        "relevance": 4,
+        "legal_accuracy": 5,
+        "clarity": 5,
+        "completeness": 3
+      },
+      "mean_score": 4.4
+    },
+    {
+      "id": 4,
+      "question": "Điều kiện để được khấu trừ thuế GTGT đầu vào?",
+      "domain": "vat_deduction",
+      "difficulty": "medium",
+      "scores": {
+        "factuality": 5,
+        "relevance": 4,
+        "legal_accuracy": 5,
+        "clarity": 5,
+        "completeness": 3
+      },
+      "mean_score": 4.4
+    },
+    {
+      "id": 5,
+      "question": "Mức phạt chậm nộp thuế hiện hành là bao nhiêu?",
+      "domain": "penalty",
+      "difficulty": "easy",
+      "scores": {
+        "factuality": 5,
+        "relevance": 5,
+        "legal_accuracy": 5,
+        "clarity": 4,
+        "completeness": 3
+      },
+      "mean_score": 4.4
+    },
+    {
+      "id": 6,
+      "question": "Doanh nghiệp FDI có được ưu đãi thuế CIT không?",
+      "domain": "cit_incentive",
+      "difficulty": "medium",
+      "scores": {
+        "factuality": 5,
+        "relevance": 3,
+        "legal_accuracy": 5,
+        "clarity": 5,
+        "completeness": 3
+      },
+      "mean_score": 4.2
+    },
+    {
+      "id": 7,
+      "question": "Hóa đơn điện tử có bắt buộc từ khi nào?",
+      "domain": "e_invoice",
+      "difficulty": "easy",
+      "scores": {
+        "factuality": 5,
+        "relevance": 4,
+        "legal_accuracy": 5,
+        "clarity": 5,
+        "completeness": 3
+      },
+      "mean_score": 4.4
+    },
+    {
+      "id": 8,
+      "question": "Cách tính thuế GTGT theo phương pháp khấu trừ?",
+      "domain": "vat_calculation",
+      "difficulty": "medium",
+      "scores": {
+        "factuality": 5,
+        "relevance": 4,
+        "legal_accuracy": 5,
+        "clarity": 5,
+        "completeness": 3
+      },
+      "mean_score": 4.4
+    },
+    {
+      "id": 9,
+      "question": "Trường hợp nào phải lập hóa đơn điều chỉnh?",
+      "domain": "invoice_adjustment",
+      "difficulty": "hard",
+      "scores": {
+        "factuality": 5,
+        "relevance": 4,
+        "legal_accuracy": 5,
+        "clarity": 5,
+        "completeness": 3
+      },
+      "mean_score": 4.4
+    },
+    {
+      "id": 10,
+      "question": "Thế nào là giao dịch liên kết theo Nghị định 132?",
+      "domain": "transfer_pricing",
+      "difficulty": "hard",
+      "scores": {
+        "factuality": 4,
+        "relevance": 5,
+        "legal_accuracy": 5,
+        "clarity": 4,
+        "completeness": 3
+      },
+      "mean_score": 4.2
+    },
+    {
+      "id": 11,
+      "question": "Quy định về chống chuyển giá tại Việt Nam?",
+      "domain": "transfer_pricing",
+      "difficulty": "hard",
+      "scores": {
+        "factuality": 4,
+        "relevance": 5,
+        "legal_accuracy": 5,
+        "clarity": 4,
+        "completeness": 3
+      },
+      "mean_score": 4.2
+    },
+    {
+      "id": 12,
+      "question": "Thuế suất CIT ưu đãi cho doanh nghiệp công nghệ cao?",
+      "domain": "cit_incentive",
+      "difficulty": "medium",
+      "scores": {
+        "factuality": 5,
+        "relevance": 3,
+        "legal_accuracy": 5,
+        "clarity": 5,
+        "completeness": 3
+      },
+      "mean_score": 4.2
+    },
+    {
+      "id": 13,
+      "question": "Thủ tục đăng ký mã số thuế cho hộ kinh doanh?",
+      "domain": "registration",
+      "difficulty": "easy",
+      "scores": {
+        "factuality": 5,
+        "relevance": 3,
+        "legal_accuracy": 5,
+        "clarity": 5,
+        "completeness": 3
+      },
+      "mean_score": 4.2
+    },
+    {
+      "id": 14,
+      "question": "Quy trình thanh tra thuế tại doanh nghiệp?",
+      "domain": "audit_procedure",
+      "difficulty": "medium",
+      "scores": {
+        "factuality": 5,
+        "relevance": 4,
+        "legal_accuracy": 5,
+        "clarity": 4,
+        "completeness": 3
+      },
+      "mean_score": 4.2
+    },
+    {
+      "id": 15,
+      "question": "Điều kiện miễn thuế TNCN cho cá nhân?",
+      "domain": "pit_exemption",
+      "difficulty": "medium",
+      "scores": {
+        "factuality": 4,
+        "relevance": 4,
+        "legal_accuracy": 5,
+        "clarity": 4,
+        "completeness": 3
+      },
+      "mean_score": 4.0
+    },
+    {
+      "id": 16,
+      "question": "Xử lý hóa đơn bỏ trốn theo quy định mới nhất?",
+      "domain": "missing_invoice",
+      "difficulty": "hard",
+      "scores": {
+        "factuality": 5,
+        "relevance": 4,
+        "legal_accuracy": 5,
+        "clarity": 5,
+        "completeness": 3
+      },
+      "mean_score": 4.4
+    },
+    {
+      "id": 17,
+      "question": "Cách kê khai thuế cho chi nhánh phụ thuộc?",
+      "domain": "branch_tax",
+      "difficulty": "medium",
+      "scores": {
+        "factuality": 5,
+        "relevance": 3,
+        "legal_accuracy": 5,
+        "clarity": 5,
+        "completeness": 3
+      },
+      "mean_score": 4.2
+    },
+    {
+      "id": 18,
+      "question": "Quy định về ưu đãi thuế tại khu công nghiệp?",
+      "domain": "industrial_zone",
+      "difficulty": "medium",
+      "scores": {
+        "factuality": 5,
+        "relevance": 3,
+        "legal_accuracy": 5,
+        "clarity": 5,
+        "completeness": 3
+      },
+      "mean_score": 4.2
+    },
+    {
+      "id": 19,
+      "question": "Thuế nhà thầu nước ngoài áp dụng thế nào?",
+      "domain": "foreign_contractor",
+      "difficulty": "hard",
+      "scores": {
+        "factuality": 5,
+        "relevance": 3,
+        "legal_accuracy": 5,
+        "clarity": 5,
+        "completeness": 3
+      },
+      "mean_score": 4.2
+    },
+    {
+      "id": 20,
+      "question": "Điều kiện để được hoàn thuế GTGT xuất khẩu?",
+      "domain": "export_vat",
+      "difficulty": "hard",
+      "scores": {
+        "factuality": 5,
+        "relevance": 4,
+        "legal_accuracy": 5,
+        "clarity": 5,
+        "completeness": 3
+      },
+      "mean_score": 4.4
+    },
+    {
+      "id": 21,
+      "question": "Quy trình cưỡng chế nợ thuế?",
+      "domain": "enforcement",
+      "difficulty": "medium",
+      "scores": {
+        "factuality": 5,
+        "relevance": 3,
+        "legal_accuracy": 5,
+        "clarity": 4,
+        "completeness": 3
+      },
+      "mean_score": 4.0
+    },
+    {
+      "id": 22,
+      "question": "Phân biệt thuế khoán và thuế theo phương pháp kê khai?",
+      "domain": "tax_method",
+      "difficulty": "easy",
+      "scores": {
+        "factuality": 5,
+        "relevance": 3,
+        "legal_accuracy": 5,
+        "clarity": 5,
+        "completeness": 3
+      },
+      "mean_score": 4.2
+    },
+    {
+      "id": 23,
+      "question": "Chi phí nào không được trừ khi tính thuế TNDN?",
+      "domain": "non_deductible",
+      "difficulty": "hard",
+      "scores": {
+        "factuality": 5,
+        "relevance": 3,
+        "legal_accuracy": 5,
+        "clarity": 5,
+        "completeness": 3
+      },
+      "mean_score": 4.2
+    },
+    {
+      "id": 24,
+      "question": "Nghĩa vụ thuế khi chuyển nhượng vốn?",
+      "domain": "capital_transfer",
+      "difficulty": "hard",
+      "scores": {
+        "factuality": 4,
+        "relevance": 4,
+        "legal_accuracy": 5,
+        "clarity": 4,
+        "completeness": 3
+      },
+      "mean_score": 4.0
+    },
+    {
+      "id": 25,
+      "question": "Quy trình khiếu nại quyết định hành chính thuế?",
+      "domain": "tax_appeal",
+      "difficulty": "medium",
+      "scores": {
+        "factuality": 5,
+        "relevance": 3,
+        "legal_accuracy": 5,
+        "clarity": 5,
+        "completeness": 3
+      },
+      "mean_score": 4.2
+    },
+    {
+      "id": 26,
+      "question": "Cách xác định giá tính thuế GTGT cho BĐS?",
+      "domain": "real_estate_vat",
+      "difficulty": "hard",
+      "scores": {
+        "factuality": 5,
+        "relevance": 4,
+        "legal_accuracy": 5,
+        "clarity": 5,
+        "completeness": 3
+      },
+      "mean_score": 4.4
+    },
+    {
+      "id": 27,
+      "question": "Mst cong ty abc la gi",
+      "domain": "lookup",
+      "difficulty": "noisy",
+      "scores": {
+        "factuality": 5,
+        "relevance": 3,
+        "legal_accuracy": 5,
+        "clarity": 4,
+        "completeness": 3
+      },
+      "mean_score": 4.0
+    },
+    {
+      "id": 28,
+      "question": "thue GTGT hang nhap khau tinh the nao",
+      "domain": "import_vat",
+      "difficulty": "noisy",
+      "scores": {
+        "factuality": 5,
+        "relevance": 4,
+        "legal_accuracy": 5,
+        "clarity": 5,
+        "completeness": 3
+      },
+      "mean_score": 4.4
+    },
+    {
+      "id": 29,
+      "question": "DN nho co can nop bao cao tai chinh khong",
+      "domain": "financial_report",
+      "difficulty": "noisy",
+      "scores": {
+        "factuality": 5,
+        "relevance": 3,
+        "legal_accuracy": 5,
+        "clarity": 5,
+        "completeness": 3
+      },
+      "mean_score": 4.2
+    },
+    {
+      "id": 30,
+      "question": "cach tinh thue TNCN cho luong gross",
+      "domain": "pit_gross",
+      "difficulty": "noisy",
+      "scores": {
+        "factuality": 5,
+        "relevance": 4,
+        "legal_accuracy": 5,
+        "clarity": 4,
+        "completeness": 3
+      },
+      "mean_score": 4.2
+    },
+    {
+      "id": 31,
+      "question": "Quy định về thuế đối với thương mại điện tử?",
+      "domain": "ecommerce_tax",
+      "difficulty": "hard",
+      "scores": {
+        "factuality": 5,
+        "relevance": 3,
+        "legal_accuracy": 5,
+        "clarity": 5,
+        "completeness": 3
+      },
+      "mean_score": 4.2
+    },
+    {
+      "id": 32,
+      "question": "Chế độ kế toán áp dụng cho doanh nghiệp siêu nhỏ?",
+      "domain": "accounting",
+      "difficulty": "medium",
+      "scores": {
+        "factuality": 5,
+        "relevance": 3,
+        "legal_accuracy": 5,
+        "clarity": 5,
+        "completeness": 3
+      },
+      "mean_score": 4.2
+    },
+    {
+      "id": 33,
+      "question": "Thuế tiêu thụ đặc biệt áp dụng cho mặt hàng nào?",
+      "domain": "excise_tax",
+      "difficulty": "medium",
+      "scores": {
+        "factuality": 5,
+        "relevance": 3,
+        "legal_accuracy": 5,
+        "clarity": 5,
+        "completeness": 3
+      },
+      "mean_score": 4.2
+    },
+    {
+      "id": 34,
+      "question": "Cách tính thuế TNCN cho thu nhập từ đầu tư chứng khoán?",
+      "domain": "securities_pit",
+      "difficulty": "hard",
+      "scores": {
+        "factuality": 4,
+        "relevance": 4,
+        "legal_accuracy": 5,
+        "clarity": 4,
+        "completeness": 3
+      },
+      "mean_score": 4.0
+    },
+    {
+      "id": 35,
+      "question": "Hướng dẫn kê khai thuế qua mạng?",
+      "domain": "e_filing",
+      "difficulty": "easy",
+      "scores": {
+        "factuality": 5,
+        "relevance": 3,
+        "legal_accuracy": 5,
+        "clarity": 4,
+        "completeness": 3
+      },
+      "mean_score": 4.0
+    },
+    {
+      "id": 36,
+      "question": "Chính sách thuế cho doanh nghiệp xã hội?",
+      "domain": "social_enterprise",
+      "difficulty": "hard",
+      "scores": {
+        "factuality": 5,
+        "relevance": 3,
+        "legal_accuracy": 5,
+        "clarity": 4,
+        "completeness": 3
+      },
+      "mean_score": 4.0
+    },
+    {
+      "id": 37,
+      "question": "Thời hạn lưu trữ hóa đơn chứng từ?",
+      "domain": "document_retention",
+      "difficulty": "easy",
+      "scores": {
+        "factuality": 5,
+        "relevance": 3,
+        "legal_accuracy": 5,
+        "clarity": 4,
+        "completeness": 3
+      },
+      "mean_score": 4.0
+    },
+    {
+      "id": 38,
+      "question": "Quy trình tự kê khai thuế TNCN cuối năm?",
+      "domain": "annual_pit",
+      "difficulty": "medium",
+      "scores": {
+        "factuality": 4,
+        "relevance": 4,
+        "legal_accuracy": 5,
+        "clarity": 4,
+        "completeness": 3
+      },
+      "mean_score": 4.0
+    },
+    {
+      "id": 39,
+      "question": "Ưu đãi thuế cho startup công nghệ?",
+      "domain": "tech_startup",
+      "difficulty": "medium",
+      "scores": {
+        "factuality": 5,
+        "relevance": 3,
+        "legal_accuracy": 5,
+        "clarity": 4,
+        "completeness": 3
+      },
+      "mean_score": 4.0
+    },
+    {
+      "id": 40,
+      "question": "Cách xử lý khi phát hiện sai sót trên tờ khai thuế?",
+      "domain": "amendment",
+      "difficulty": "medium",
+      "scores": {
+        "factuality": 5,
+        "relevance": 3,
+        "legal_accuracy": 5,
+        "clarity": 5,
+        "completeness": 3
+      },
+      "mean_score": 4.2
+    },
+    {
+      "id": 41,
+      "question": "Quy định về giảm thuế cho vùng kinh tế khó khăn?",
+      "domain": "regional_incentive",
+      "difficulty": "medium",
+      "scores": {
+        "factuality": 5,
+        "relevance": 3,
+        "legal_accuracy": 5,
+        "clarity": 5,
+        "completeness": 3
+      },
+      "mean_score": 4.2
+    },
+    {
+      "id": 42,
+      "question": "Thuế suất cho hoạt động cho thuê tài sản?",
+      "domain": "rental_tax",
+      "difficulty": "medium",
+      "scores": {
+        "factuality": 5,
+        "relevance": 3,
+        "legal_accuracy": 5,
+        "clarity": 5,
+        "completeness": 3
+      },
+      "mean_score": 4.2
+    },
+    {
+      "id": 43,
+      "question": "Xử phạt hành vi trốn thuế theo Bộ luật Hình sự?",
+      "domain": "criminal_penalty",
+      "difficulty": "hard",
+      "scores": {
+        "factuality": 5,
+        "relevance": 5,
+        "legal_accuracy": 5,
+        "clarity": 4,
+        "completeness": 3
+      },
+      "mean_score": 4.4
+    },
+    {
+      "id": 44,
+      "question": "Cách kê khai thuế cho hợp đồng hợp tác kinh doanh?",
+      "domain": "bcc",
+      "difficulty": "hard",
+      "scores": {
+        "factuality": 5,
+        "relevance": 3,
+        "legal_accuracy": 5,
+        "clarity": 5,
+        "completeness": 3
+      },
+      "mean_score": 4.2
+    },
+    {
+      "id": 45,
+      "question": "Quy định về hoàn thuế TNCN cho người nước ngoài?",
+      "domain": "expat_pit",
+      "difficulty": "hard",
+      "scores": {
+        "factuality": 4,
+        "relevance": 4,
+        "legal_accuracy": 5,
+        "clarity": 4,
+        "completeness": 3
+      },
+      "mean_score": 4.0
+    },
+    {
+      "id": 46,
+      "question": "Phân tích rủi ro MST 0312345678",
+      "domain": "risk_analysis",
+      "difficulty": "tool_use",
+      "scores": {
+        "factuality": 4,
+        "relevance": 5,
+        "legal_accuracy": 5,
+        "clarity": 4,
+        "completeness": 3
+      },
+      "mean_score": 4.2
+    },
+    {
+      "id": 47,
+      "question": "Top 5 doanh nghiệp có dấu hiệu chuyển giá",
+      "domain": "transfer_pricing_scan",
+      "difficulty": "tool_use",
+      "scores": {
+        "factuality": 4,
+        "relevance": 5,
+        "legal_accuracy": 5,
+        "clarity": 4,
+        "completeness": 3
+      },
+      "mean_score": 4.2
+    },
+    {
+      "id": 48,
+      "question": "Kiểm tra mạng lưới giao dịch của công ty XYZ",
+      "domain": "graph_analysis",
+      "difficulty": "tool_use",
+      "scores": {
+        "factuality": 3,
+        "relevance": 4,
+        "legal_accuracy": 4,
+        "clarity": 4,
+        "completeness": 3
+      },
+      "mean_score": 3.6
+    },
+    {
+      "id": 49,
+      "question": "So sánh rủi ro giữa ngành xây dựng và tài chính",
+      "domain": "industry_comparison",
+      "difficulty": "tool_use",
+      "scores": {
+        "factuality": 5,
+        "relevance": 3,
+        "legal_accuracy": 5,
+        "clarity": 5,
+        "completeness": 3
+      },
+      "mean_score": 4.2
+    },
+    {
+      "id": 50,
+      "question": "Dự báo nợ đọng thuế quý tới cho quận 8",
+      "domain": "delinquency_forecast",
+      "difficulty": "tool_use",
+      "scores": {
+        "factuality": 5,
+        "relevance": 3,
+        "legal_accuracy": 5,
+        "clarity": 5,
+        "completeness": 3
+      },
+      "mean_score": 4.2
+    }
+  ]
+}

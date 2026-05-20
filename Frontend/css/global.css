@@ -83,6 +83,10 @@ body.page-transition,
     }
 }
 
+.fade-in {
+    animation: fadeSlideUp var(--motion-duration-medium) var(--motion-ease-emphasis) both;
+}
+
 @media (prefers-reduced-motion: reduce) {
     html {
         scroll-behavior: auto !important;

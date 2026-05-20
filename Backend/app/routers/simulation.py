@@ -19,10 +19,21 @@ import math
 import uuid
 import hashlib
 import re
+import asyncio
+import warnings
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
-from fastapi import APIRouter, Depends, HTTPException
+# ── Suppress cosmetic sklearn warning when LGBMRegressor.predict()
+#    receives a numpy array instead of a named DataFrame.
+warnings.filterwarnings(
+    "ignore",
+    message="X does not have valid feature names",
+    category=UserWarning,
+    module="sklearn",
+)
+
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy import text
 from sqlalchemy.orm import Session
@@ -34,10 +45,30 @@ from sklearn.metrics import mean_absolute_error, r2_score
 
 from ..database import get_db
 from ml_engine.model_registry import ModelRegistryService
+from ml_engine.macro_scenario_engine import (
+    load_provinces, load_events, compute_scenario,
+    ScenarioParams, generate_narrative_sync, generate_narrative_llm,
+    get_events_for_province, build_vietnam_geojson, get_province_by_code,
+)
+from ml_engine.admin_boundary_manager import audit_boundary_readiness, load_boundary_geojson
+from ml_engine.macro_event_ingest import build_ingest_status
+from ml_engine.macro_scenario_llm import (
+    interpret_text_scenario,
+    memory_status as text_scenario_memory_status,
+    remember_scenario_feedback,
+)
+from ml_engine.macro_retrain_pipeline import (
+    EVENT_MODEL_PATH,
+    PROVINCE_MODEL_PATH,
+    REPORT_PATH as MACRO_RETRAIN_REPORT_PATH,
+)
 
 router = APIRouter(prefix="/api/simulation", tags=["Digital Twin Simulation"])
 
 MODEL_PATH = Path(__file__).resolve().parent.parent.parent / "data" / "models" / "simulation_lgbm.joblib"
+DATA_DIR = Path(__file__).resolve().parent.parent.parent / "data" / "data"
+MACRO_TIMESERIES_PATH = DATA_DIR / "macro_timeseries_vietnam.json"
+DEFAULT_BOUNDARY_VERSION = "vn_34_2025"
 _simulation_model = None
 
 def get_simulation_model():
@@ -130,7 +161,6 @@ class PresetScenario(BaseModel):
     description: str
     parameters: ScenarioInput
 
-
 # ────────────────────────────────────────────────────────────
 #  Real DB baseline query
 # ────────────────────────────────────────────────────────────
@@ -165,101 +195,116 @@ def _quarter_sort_key(quarter_label: str) -> tuple[int, int]:
         return (0, 0)
 
 
+_tables_ensured = False
+
 def _ensure_hypothesis_tables(db: Session) -> None:
-    db.execute(text("""
-        CREATE TABLE IF NOT EXISTS macro_external_signals (
-            id BIGSERIAL PRIMARY KEY,
-            quarter TEXT UNIQUE NOT NULL,
-            gold_price_index DOUBLE PRECISION NOT NULL,
-            birth_rate_index DOUBLE PRECISION NOT NULL,
-            disaster_risk_index DOUBLE PRECISION NOT NULL,
-            demographic_pressure_index DOUBLE PRECISION NOT NULL,
-            signal_confidence DOUBLE PRECISION NOT NULL DEFAULT 0.7,
-            is_observed BOOLEAN NOT NULL DEFAULT TRUE,
-            is_synthetic BOOLEAN NOT NULL DEFAULT FALSE,
-            source TEXT NOT NULL DEFAULT 'hybrid_external_seed',
-            recorded_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW()
-        )
-    """))
-    db.execute(text("""
-        CREATE TABLE IF NOT EXISTS macro_hypothesis_runs (
-            run_id TEXT PRIMARY KEY,
-            model_name TEXT NOT NULL,
-            train_samples INTEGER NOT NULL DEFAULT 0,
-            status TEXT NOT NULL DEFAULT 'ok',
-            horizons JSONB NOT NULL DEFAULT '[]'::jsonb,
-            baseline_spec JSONB NOT NULL DEFAULT '{}'::jsonb,
-            training_window JSONB NOT NULL DEFAULT '{}'::jsonb,
-            data_fingerprint VARCHAR(64),
-            feature_signature VARCHAR(64),
-            generated_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW()
-        )
-    """))
-    db.execute(text("""
-        CREATE TABLE IF NOT EXISTS macro_hypothesis_outputs (
-            id BIGSERIAL PRIMARY KEY,
-            run_id TEXT NOT NULL REFERENCES macro_hypothesis_runs(run_id) ON DELETE CASCADE,
-            horizon_years INTEGER NOT NULL,
-            summary TEXT NOT NULL,
-            downside TEXT NOT NULL,
-            upside TEXT NOT NULL,
-            recommendations TEXT NOT NULL,
-            confidence DOUBLE PRECISION NOT NULL DEFAULT 0.6,
-            drivers JSONB NOT NULL DEFAULT '[]'::jsonb,
-            predicted_growth_pct DOUBLE PRECISION,
-            calibration_json JSONB NOT NULL DEFAULT '{}'::jsonb,
-            constraint_bounds JSONB NOT NULL DEFAULT '{}'::jsonb,
-            longform_analysis JSONB NOT NULL DEFAULT '[]'::jsonb,
-            created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW()
-        )
-    """))
-    db.execute(text("""
-        CREATE TABLE IF NOT EXISTS macro_constraint_audit_logs (
-            id BIGSERIAL PRIMARY KEY,
-            run_id TEXT NOT NULL REFERENCES macro_hypothesis_runs(run_id) ON DELETE CASCADE,
-            horizon_years INTEGER,
-            constraint_type VARCHAR(60) NOT NULL,
-            constraint_payload JSONB NOT NULL DEFAULT '{}'::jsonb,
-            status VARCHAR(20) NOT NULL DEFAULT 'pass',
-            message TEXT,
-            created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW()
-        )
-    """))
-    db.execute(text("""
-        CREATE TABLE IF NOT EXISTS macro_policy_knobs (
-            id BIGSERIAL PRIMARY KEY,
-            knob_key VARCHAR(80) UNIQUE NOT NULL,
-            knob_value DOUBLE PRECISION NOT NULL,
-            min_value DOUBLE PRECISION,
-            max_value DOUBLE PRECISION,
-            description TEXT,
-            updated_by VARCHAR(80),
-            updated_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW()
-        )
-    """))
-    db.execute(text("ALTER TABLE macro_hypothesis_runs ADD COLUMN IF NOT EXISTS baseline_spec JSONB NOT NULL DEFAULT '{}'::jsonb"))
-    db.execute(text("ALTER TABLE macro_hypothesis_runs ADD COLUMN IF NOT EXISTS training_window JSONB NOT NULL DEFAULT '{}'::jsonb"))
-    db.execute(text("ALTER TABLE macro_hypothesis_runs ADD COLUMN IF NOT EXISTS data_fingerprint VARCHAR(64)"))
-    db.execute(text("ALTER TABLE macro_hypothesis_runs ADD COLUMN IF NOT EXISTS feature_signature VARCHAR(64)"))
-    db.execute(text("ALTER TABLE macro_external_signals ADD COLUMN IF NOT EXISTS is_observed BOOLEAN NOT NULL DEFAULT TRUE"))
-    db.execute(text("ALTER TABLE macro_external_signals ADD COLUMN IF NOT EXISTS is_synthetic BOOLEAN NOT NULL DEFAULT FALSE"))
-    db.execute(text("ALTER TABLE macro_hypothesis_outputs ADD COLUMN IF NOT EXISTS predicted_growth_pct DOUBLE PRECISION"))
-    db.execute(text("ALTER TABLE macro_hypothesis_outputs ADD COLUMN IF NOT EXISTS calibration_json JSONB NOT NULL DEFAULT '{}'::jsonb"))
-    db.execute(text("ALTER TABLE macro_hypothesis_outputs ADD COLUMN IF NOT EXISTS constraint_bounds JSONB NOT NULL DEFAULT '{}'::jsonb"))
-    db.execute(text("ALTER TABLE macro_hypothesis_outputs ADD COLUMN IF NOT EXISTS longform_analysis JSONB NOT NULL DEFAULT '[]'::jsonb"))
-    db.execute(text("CREATE INDEX IF NOT EXISTS idx_macro_constraint_audit_run_ts ON macro_constraint_audit_logs (run_id, created_at DESC)"))
-    db.execute(text("CREATE INDEX IF NOT EXISTS idx_macro_constraint_audit_type_ts ON macro_constraint_audit_logs (constraint_type, created_at DESC)"))
-    db.execute(text("""
-        INSERT INTO macro_policy_knobs (knob_key, knob_value, min_value, max_value, description, updated_by)
-        VALUES
-            ('max_jump_1y_pct', 20, 5, 40, 'Gioi han do nhay du bao 1 nam', 'system_default'),
-            ('max_jump_long_pct', 35, 10, 70, 'Gioi han do nhay du bao 5-10 nam', 'system_default'),
-            ('high_risk_prob_threshold', 0.45, 0.2, 0.9, 'Nguong xac suat no dong cao', 'system_default'),
-            ('risk_positive_cap_1y_pct', 18, 5, 50, 'Tran tang truong duong khi risk cao cho 1 nam', 'system_default'),
-            ('risk_positive_cap_long_pct', 28, 5, 80, 'Tran tang truong duong khi risk cao cho 5-10 nam', 'system_default')
-        ON CONFLICT (knob_key) DO NOTHING
-    """))
-    db.commit()
+    global _tables_ensured
+    if _tables_ensured:
+        return
+    try:
+        dialect = getattr(getattr(db, "bind", None), "dialect", None)
+        if getattr(dialect, "name", "postgresql") not in ("postgresql", "postgres"):
+            _tables_ensured = True
+            return
+
+        db.execute(text("""
+            CREATE TABLE IF NOT EXISTS macro_external_signals (
+                id BIGSERIAL PRIMARY KEY,
+                quarter TEXT UNIQUE NOT NULL,
+                gold_price_index DOUBLE PRECISION NOT NULL,
+                birth_rate_index DOUBLE PRECISION NOT NULL,
+                disaster_risk_index DOUBLE PRECISION NOT NULL,
+                demographic_pressure_index DOUBLE PRECISION NOT NULL,
+                signal_confidence DOUBLE PRECISION NOT NULL DEFAULT 0.7,
+                is_observed BOOLEAN NOT NULL DEFAULT TRUE,
+                is_synthetic BOOLEAN NOT NULL DEFAULT FALSE,
+                source TEXT NOT NULL DEFAULT 'hybrid_external_seed',
+                recorded_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW()
+            )
+        """))
+        db.execute(text("""
+            CREATE TABLE IF NOT EXISTS macro_hypothesis_runs (
+                run_id TEXT PRIMARY KEY,
+                model_name TEXT NOT NULL,
+                train_samples INTEGER NOT NULL DEFAULT 0,
+                status TEXT NOT NULL DEFAULT 'ok',
+                horizons JSONB NOT NULL DEFAULT '[]'::jsonb,
+                baseline_spec JSONB NOT NULL DEFAULT '{}'::jsonb,
+                training_window JSONB NOT NULL DEFAULT '{}'::jsonb,
+                data_fingerprint VARCHAR(64),
+                feature_signature VARCHAR(64),
+                generated_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW()
+            )
+        """))
+        db.execute(text("""
+            CREATE TABLE IF NOT EXISTS macro_hypothesis_outputs (
+                id BIGSERIAL PRIMARY KEY,
+                run_id TEXT NOT NULL REFERENCES macro_hypothesis_runs(run_id) ON DELETE CASCADE,
+                horizon_years INTEGER NOT NULL,
+                summary TEXT NOT NULL,
+                downside TEXT NOT NULL,
+                upside TEXT NOT NULL,
+                recommendations TEXT NOT NULL,
+                confidence DOUBLE PRECISION NOT NULL DEFAULT 0.6,
+                drivers JSONB NOT NULL DEFAULT '[]'::jsonb,
+                predicted_growth_pct DOUBLE PRECISION,
+                calibration_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+                constraint_bounds JSONB NOT NULL DEFAULT '{}'::jsonb,
+                longform_analysis JSONB NOT NULL DEFAULT '[]'::jsonb,
+                created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW()
+            )
+        """))
+        db.execute(text("""
+            CREATE TABLE IF NOT EXISTS macro_constraint_audit_logs (
+                id BIGSERIAL PRIMARY KEY,
+                run_id TEXT NOT NULL REFERENCES macro_hypothesis_runs(run_id) ON DELETE CASCADE,
+                horizon_years INTEGER,
+                constraint_type VARCHAR(60) NOT NULL,
+                constraint_payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+                status VARCHAR(20) NOT NULL DEFAULT 'pass',
+                message TEXT,
+                created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW()
+            )
+        """))
+        db.execute(text("""
+            CREATE TABLE IF NOT EXISTS macro_policy_knobs (
+                id BIGSERIAL PRIMARY KEY,
+                knob_key VARCHAR(80) UNIQUE NOT NULL,
+                knob_value DOUBLE PRECISION NOT NULL,
+                min_value DOUBLE PRECISION,
+                max_value DOUBLE PRECISION,
+                description TEXT,
+                updated_by VARCHAR(80),
+                updated_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW()
+            )
+        """))
+        db.execute(text("ALTER TABLE macro_hypothesis_runs ADD COLUMN IF NOT EXISTS baseline_spec JSONB NOT NULL DEFAULT '{}'::jsonb"))
+        db.execute(text("ALTER TABLE macro_hypothesis_runs ADD COLUMN IF NOT EXISTS training_window JSONB NOT NULL DEFAULT '{}'::jsonb"))
+        db.execute(text("ALTER TABLE macro_hypothesis_runs ADD COLUMN IF NOT EXISTS data_fingerprint VARCHAR(64)"))
+        db.execute(text("ALTER TABLE macro_hypothesis_runs ADD COLUMN IF NOT EXISTS feature_signature VARCHAR(64)"))
+        db.execute(text("ALTER TABLE macro_external_signals ADD COLUMN IF NOT EXISTS is_observed BOOLEAN NOT NULL DEFAULT TRUE"))
+        db.execute(text("ALTER TABLE macro_external_signals ADD COLUMN IF NOT EXISTS is_synthetic BOOLEAN NOT NULL DEFAULT FALSE"))
+        db.execute(text("ALTER TABLE macro_hypothesis_outputs ADD COLUMN IF NOT EXISTS predicted_growth_pct DOUBLE PRECISION"))
+        db.execute(text("ALTER TABLE macro_hypothesis_outputs ADD COLUMN IF NOT EXISTS calibration_json JSONB NOT NULL DEFAULT '{}'::jsonb"))
+        db.execute(text("ALTER TABLE macro_hypothesis_outputs ADD COLUMN IF NOT EXISTS constraint_bounds JSONB NOT NULL DEFAULT '{}'::jsonb"))
+        db.execute(text("ALTER TABLE macro_hypothesis_outputs ADD COLUMN IF NOT EXISTS longform_analysis JSONB NOT NULL DEFAULT '[]'::jsonb"))
+        db.execute(text("CREATE INDEX IF NOT EXISTS idx_macro_constraint_audit_run_ts ON macro_constraint_audit_logs (run_id, created_at DESC)"))
+        db.execute(text("CREATE INDEX IF NOT EXISTS idx_macro_constraint_audit_type_ts ON macro_constraint_audit_logs (constraint_type, created_at DESC)"))
+        db.execute(text("""
+            INSERT INTO macro_policy_knobs (knob_key, knob_value, min_value, max_value, description, updated_by)
+            VALUES
+                ('max_jump_1y_pct', 20, 5, 40, 'Gioi han do nhay du bao 1 nam', 'system_default'),
+                ('max_jump_long_pct', 35, 10, 70, 'Gioi han do nhay du bao 5-10 nam', 'system_default'),
+                ('high_risk_prob_threshold', 0.45, 0.2, 0.9, 'Nguong xac suat no dong cao', 'system_default'),
+                ('risk_positive_cap_1y_pct', 18, 5, 50, 'Tran tang truong duong khi risk cao cho 1 nam', 'system_default'),
+                ('risk_positive_cap_long_pct', 28, 5, 80, 'Tran tang truong duong khi risk cao cho 5-10 nam', 'system_default'),
+                ('fdi_shock_multiplier', 2.5, 1.0, 5.0, 'He so nhan FDI cho kich ban bat ngo', 'system_default')
+            ON CONFLICT (knob_key) DO NOTHING
+        """))
+        db.commit()
+        _tables_ensured = True
+    except Exception:
+        db.rollback()
 
 
 def _seed_external_signals_if_needed(db: Session) -> None:
@@ -808,6 +853,640 @@ def _build_hypothesis_text(pack: Dict[str, Any]) -> Dict[str, str]:
         "upside": upside,
         "recommendations": recommendations,
     }
+
+
+# ────────────────────────────────────────────────────────────
+#  Province-Level Macro Scenario Endpoints (Digital Twin)
+# ────────────────────────────────────────────────────────────
+
+class ProvinceScenarioInput(BaseModel):
+    """Pydantic schema for province-level macro scenario requests."""
+    province_code: str = Field(..., description="Mã tỉnh GSO (VD: '01' = Hà Nội)")
+    boundary_version: str = Field(default=DEFAULT_BOUNDARY_VERSION, description="Administrative boundary version")
+    event_key: Optional[str] = Field(None, description="Mã sự kiện kinh tế lịch sử")
+    gdp_delta_pct: float = Field(default=0.0, ge=-50.0, le=50.0, description="Biến động GDP (%)")
+    tax_rate_delta: float = Field(default=0.0, ge=-0.1, le=0.1, description="Thay đổi thuế suất (tuyệt đối)")
+    compliance_delta: float = Field(default=0.0, ge=-0.5, le=0.5, description="Thay đổi tỷ lệ tuân thủ (tuyệt đối)")
+    unemployment_delta: float = Field(default=0.0, ge=-10.0, le=10.0, description="Absolute unemployment delta in percentage points")
+    fdi_delta_pct: float = Field(default=0.0, ge=-100.0, le=100.0, description="FDI delta (%)")
+    projection_years: int = Field(default=5, ge=1, le=20, description="Projection horizon for map/story views")
+    use_llm: bool = Field(default=True, description="Generate long-form narrative with LLM when configured")
+
+
+class TextScenarioInput(BaseModel):
+    text: str = Field(..., min_length=3, max_length=5000)
+    province_code: Optional[str] = None
+    horizon_years: int = Field(default=5, ge=1, le=20)
+    force_llm: bool = False
+
+
+class TextScenarioFeedbackInput(BaseModel):
+    scenario_text: str = Field(..., min_length=3, max_length=5000)
+    parsed_payload: Dict[str, Any]
+    rating: float = Field(default=4.0, ge=0.0, le=5.0)
+    approved: bool = True
+    notes: str = ""
+    reviewer: str = "user"
+
+
+def _normalize_boundary_version(boundary_version: Optional[str]) -> str:
+    if not isinstance(boundary_version, str):
+        return DEFAULT_BOUNDARY_VERSION
+    return (boundary_version or DEFAULT_BOUNDARY_VERSION).strip() or DEFAULT_BOUNDARY_VERSION
+
+
+def _risk_value(risk_level: Any) -> float:
+    level = str(risk_level or "").lower()
+    if level == "high":
+        return 80.0
+    if level == "medium":
+        return 45.0
+    if level == "low":
+        return 15.0
+    return 5.0
+
+
+def _load_macro_timeseries() -> Dict[str, Any]:
+    if not MACRO_TIMESERIES_PATH.exists():
+        return {
+            "national": [],
+            "province_panel": [],
+            "quality": {"status": "missing", "path": str(MACRO_TIMESERIES_PATH)},
+            "sources": [],
+        }
+    try:
+        return json.loads(MACRO_TIMESERIES_PATH.read_text(encoding="utf-8"))
+    except Exception as exc:
+        return {
+            "national": [],
+            "province_panel": [],
+            "quality": {"status": "unreadable", "error": str(exc), "path": str(MACRO_TIMESERIES_PATH)},
+            "sources": [],
+        }
+
+
+def _province_timeseries(province: Dict[str, Any], *, limit: Optional[int] = None) -> Dict[str, Any]:
+    data = _load_macro_timeseries()
+    panel = list(data.get("province_panel") or [])
+    national = list(data.get("national") or [])
+    code = str(province.get("province_code") or "")
+    member_codes = [str(item) for item in (province.get("member_codes") or []) if item]
+    direct_rows = [row for row in panel if str(row.get("province_code") or "") == code]
+    method = "direct_province_series"
+    rows: List[Dict[str, Any]] = []
+
+    if direct_rows:
+        rows = direct_rows
+    elif member_codes:
+        by_year: Dict[int, List[Dict[str, Any]]] = {}
+        for row in panel:
+            row_code = str(row.get("province_code") or "")
+            if row_code in member_codes:
+                try:
+                    year = int(row.get("year"))
+                except Exception:
+                    continue
+                by_year.setdefault(year, []).append(row)
+        for year in sorted(by_year):
+            parts = by_year[year]
+            if not parts:
+                continue
+            cpi_values = [float(x.get("cpi_inflation_pct")) for x in parts if x.get("cpi_inflation_pct") is not None]
+            unemp_values = [float(x.get("unemployment_pct_est")) for x in parts if x.get("unemployment_pct_est") is not None]
+            rows.append({
+                "province_code": code,
+                "province_name": province.get("province_name"),
+                "year": year,
+                "population": int(round(sum(float(x.get("population") or 0.0) for x in parts))),
+                "grdp_billion_vnd_est": round(sum(float(x.get("grdp_billion_vnd_est") or 0.0) for x in parts), 2),
+                "cpi_inflation_pct": round(sum(cpi_values) / max(1, len(cpi_values)), 3) if cpi_values else None,
+                "unemployment_pct_est": round(sum(unemp_values) / max(1, len(unemp_values)), 3) if unemp_values else None,
+                "fdi_billion_usd_est": round(sum(float(x.get("fdi_billion_usd_est") or 0.0) for x in parts), 3),
+                "source": "aggregated_from_legacy_member_province_estimates",
+            })
+        method = "aggregated_member_series"
+
+    if limit and rows:
+        rows = rows[-max(1, int(limit)):]
+
+    return {
+        "rows": rows,
+        "source_quality": {
+            "method": method if rows else "missing",
+            "row_count": len(rows),
+            "national_row_count": len(national),
+            "observed_level": "national_observed_province_estimated",
+            "quality_note": (
+                "World Bank/IMF national series are observed; province series are baseline-anchored estimates "
+                "until reviewed GSO provincial tables are ingested."
+            ),
+            "sources": data.get("sources") or [],
+        },
+    }
+
+
+def _province_map_record(province: Dict[str, Any], *, event_limit: int = 5) -> Dict[str, Any]:
+    code = str(province.get("province_code") or "")
+    events = get_events_for_province(code, limit=max(1, min(int(event_limit), 20))) if code else []
+    ts = _province_timeseries(province, limit=3)
+    return {
+        **province,
+        "risk_score": _risk_value(province.get("risk_level")),
+        "event_count": len(get_events_for_province(code, limit=250)) if code else 0,
+        "top_events": events,
+        "time_series_preview": ts["rows"],
+        "source_quality": ts["source_quality"],
+    }
+
+
+def _macro_model_status() -> Dict[str, Any]:
+    report = None
+    if MACRO_RETRAIN_REPORT_PATH.exists():
+        try:
+            report = json.loads(MACRO_RETRAIN_REPORT_PATH.read_text(encoding="utf-8"))
+        except Exception:
+            report = {"status": "report_unreadable", "path": str(MACRO_RETRAIN_REPORT_PATH)}
+    return {
+        "status": "ready" if EVENT_MODEL_PATH.exists() and PROVINCE_MODEL_PATH.exists() else "not_trained",
+        "event_impact_model_exists": EVENT_MODEL_PATH.exists(),
+        "province_response_model_exists": PROVINCE_MODEL_PATH.exists(),
+        "latest_report": report,
+    }
+
+
+def _impact_record(result: Any) -> Dict[str, Any]:
+    return {
+        "province_code": result.province_code,
+        "province_name": result.province_name,
+        "projected_risk": result.projected_risk,
+        "risk_score": _risk_value(result.projected_risk),
+        "delta_revenue_pct": result.delta_revenue_pct,
+        "delta_gdp_pct": result.delta_gdp_pct,
+        "projected_revenue": result.projected_revenue,
+        "projected_gdp": result.projected_gdp,
+        "projected_compliance": result.projected_compliance,
+        "projected_unemployment": result.projected_unemployment,
+        "confidence_score": result.confidence_score,
+    }
+
+
+def _scenario_params_from_payload(payload: ProvinceScenarioInput) -> ScenarioParams:
+    return ScenarioParams(
+        gdp_delta_pct=payload.gdp_delta_pct,
+        tax_rate_delta=payload.tax_rate_delta,
+        compliance_delta=payload.compliance_delta,
+        unemployment_delta=payload.unemployment_delta,
+        fdi_delta_pct=payload.fdi_delta_pct,
+        event_key=payload.event_key,
+    )
+
+
+def _build_boundary_impacts(params: ScenarioParams, boundary_version: str) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
+    impacts: List[Dict[str, Any]] = []
+    baseline_revenue = 0.0
+    projected_revenue = 0.0
+    baseline_gdp = 0.0
+    projected_gdp = 0.0
+    weighted_confidence = 0.0
+
+    for province in load_provinces(boundary_version=boundary_version):
+        code = str(province.get("province_code") or "")
+        if not code:
+            continue
+        try:
+            result = compute_scenario(code, params)
+        except Exception:
+            continue
+        impacts.append(_impact_record(result))
+        baseline_revenue += float(result.baseline_revenue or 0.0)
+        projected_revenue += float(result.projected_revenue or 0.0)
+        baseline_gdp += float(result.baseline_gdp or 0.0)
+        projected_gdp += float(result.projected_gdp or 0.0)
+        weighted_confidence += float(result.confidence_score or 0.0)
+
+    national = {
+        "boundary_version": boundary_version,
+        "province_count": len(impacts),
+        "baseline_revenue": round(baseline_revenue, 2),
+        "projected_revenue": round(projected_revenue, 2),
+        "delta_revenue_pct": round(((projected_revenue - baseline_revenue) / max(baseline_revenue, 0.01)) * 100.0, 3),
+        "baseline_gdp": round(baseline_gdp, 2),
+        "projected_gdp": round(projected_gdp, 2),
+        "delta_gdp_pct": round(((projected_gdp - baseline_gdp) / max(baseline_gdp, 0.01)) * 100.0, 3),
+        "avg_confidence_score": round(weighted_confidence / max(1, len(impacts)), 4),
+    }
+    return impacts, national
+
+
+@router.get("/provinces")
+def get_provinces(boundary_version: Optional[str] = Query(default=None)):
+    """Return province-level economic profiles for legacy 63 or 2025 34-unit views."""
+    requested_boundary = _normalize_boundary_version(boundary_version)
+    provinces = sorted(load_provinces(boundary_version=requested_boundary), key=lambda p: str(p.get("province_code") or ""))
+    event_count = len(load_events())
+    boundary_audit = audit_boundary_readiness()
+    expected = 34 if requested_boundary == "vn_34_2025" else 63
+    return {
+        "provinces": provinces,
+        "total": len(provinces),
+        "data_quality": {
+            "economic_profile_count": len(provinces),
+            "expected_provinces": expected,
+            "profile_coverage_ok": len(provinces) == expected,
+            "requested_boundary_version": requested_boundary,
+            "active_boundary_version": boundary_audit.get("active_version"),
+            "production_target_boundary_version": boundary_audit.get("production_target_version"),
+            "boundary_warnings": boundary_audit.get("warnings", []),
+            "historical_event_count": event_count,
+            "event_coverage_ok": event_count >= 100,
+        },
+    }
+
+
+@router.get("/map-state")
+def get_map_state(
+    boundary_version: Optional[str] = Query(default=DEFAULT_BOUNDARY_VERSION),
+    include_geojson: bool = Query(default=True),
+    event_limit: int = Query(default=5, ge=0, le=20),
+):
+    """Return the canonical map payload used by all frontend renderers."""
+    requested_boundary = _normalize_boundary_version(boundary_version)
+    include_geojson_flag = include_geojson if isinstance(include_geojson, bool) else True
+    event_limit_value = event_limit if isinstance(event_limit, int) else 5
+    provinces = sorted(load_provinces(boundary_version=requested_boundary), key=lambda p: str(p.get("province_code") or ""))
+    geojson = load_boundary_geojson(boundary_version=requested_boundary)
+    feature_codes = {
+        str((feature.get("properties") or {}).get("province_code") or "")
+        for feature in geojson.get("features", [])
+    }
+    feature_codes.discard("")
+    province_codes = {str(p.get("province_code") or "") for p in provinces if p.get("province_code")}
+    missing_profiles = sorted(feature_codes - province_codes)
+    missing_polygons = sorted(province_codes - feature_codes)
+    event_count = len(load_events())
+    boundary_audit = audit_boundary_readiness()
+    state_rows = [_province_map_record(province, event_limit=event_limit_value) for province in provinces]
+    return {
+        "boundary_version": requested_boundary,
+        "geojson": geojson if include_geojson_flag else None,
+        "geojson_metadata": geojson.get("metadata", {}),
+        "provinces": state_rows,
+        "total": len(state_rows),
+        "data_quality": {
+            "expected_provinces": 34 if requested_boundary == "vn_34_2025" else 63,
+            "profile_count": len(provinces),
+            "feature_count": len(geojson.get("features") or []),
+            "profile_polygon_coverage_ok": not missing_profiles and not missing_polygons,
+            "missing_profiles_for_features": missing_profiles,
+            "missing_polygons_for_profiles": missing_polygons,
+            "historical_event_count": event_count,
+            "event_coverage_ok": event_count >= 100,
+            "boundary_warnings": boundary_audit.get("warnings", []),
+        },
+        "model_status": _macro_model_status(),
+        "generated_at": datetime.utcnow().isoformat() + "Z",
+    }
+
+
+@router.get("/economic-events")
+def get_economic_events(
+    province_code: Optional[str] = Query(default=None),
+    event_type: Optional[str] = Query(default=None),
+    limit: int = Query(default=250, ge=1, le=500),
+):
+    """Trả về danh sách sự kiện kinh tế lịch sử."""
+    if province_code:
+        events = get_events_for_province(province_code, event_type=event_type, limit=limit)
+    else:
+        events = load_events()
+        if event_type:
+            events = [e for e in events if str(e.get("event_type")) == str(event_type)]
+        events = events[:limit]
+    return {
+        "events": events,
+        "total": len(events),
+        "filtered_by_province": province_code,
+        "filtered_by_event_type": event_type,
+    }
+
+
+@router.get("/geojson-vietnam")
+def get_vietnam_geojson(boundary_version: Optional[str] = Query(default=None)):
+    """Offline GeoJSON fallback for the interactive Vietnam map."""
+    try:
+        return load_boundary_geojson(boundary_version=_normalize_boundary_version(boundary_version))
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+
+
+@router.get("/boundary-versions")
+def get_boundary_versions(production: bool = Query(default=False)):
+    """Return boundary version readiness and provenance metadata."""
+    return audit_boundary_readiness(production=production)
+
+
+@router.get("/event-ingest/status")
+def get_event_ingest_status():
+    """Return macro event review queue status."""
+    return build_ingest_status()
+
+
+@router.get("/province-context/{province_code}")
+def get_province_context(
+    province_code: str,
+    horizon_years: int = Query(default=10, ge=1, le=20),
+    boundary_version: Optional[str] = Query(default=DEFAULT_BOUNDARY_VERSION),
+):
+    """Return province economic and demographic context for map side panel."""
+    province = get_province_by_code(province_code)
+    if not province:
+        raise HTTPException(status_code=404, detail=f"Province not found: {province_code}")
+    requested_boundary = _normalize_boundary_version(boundary_version)
+    population = float(province.get("population") or 0.0)
+    region = str(province.get("region") or "")
+    birth_rate, death_rate, migration_rate = _regional_demographic_rates(region)
+    annual_growth = (birth_rate - death_rate + migration_rate) / 1000.0
+    projections = []
+    for years in [5, 10, 20]:
+        projected = population * ((1.0 + annual_growth) ** years)
+        projections.append({
+            "horizon_years": years,
+            "population": int(round(projected)),
+            "growth_pct": round(((projected - population) / max(population, 1.0)) * 100.0, 2),
+        })
+    selected_projection = next((p for p in projections if p["horizon_years"] == horizon_years), projections[1])
+    gdp = float(province.get("gdp_billion_vnd") or 0.0)
+    tax = float(province.get("tax_revenue_billion_vnd") or 0.0)
+    timeseries = _province_timeseries(province)
+    return {
+        "boundary_version": requested_boundary,
+        "province": province,
+        "demographics": {
+            "population_current": int(population),
+            "birth_rate_per_1000": birth_rate,
+            "death_rate_per_1000": death_rate,
+            "net_migration_rate_per_1000": migration_rate,
+            "annual_population_growth_pct": round(annual_growth * 100.0, 3),
+            "selected_projection": selected_projection,
+            "projections": projections,
+        },
+        "economic_ratios": {
+            "gdp_per_capita_million_vnd": round(gdp * 1000.0 / max(population, 1.0), 2),
+            "tax_revenue_per_capita_million_vnd": round(tax * 1000.0 / max(population, 1.0), 2),
+            "effective_tax_take_pct": round((tax / max(gdp, 1.0)) * 100.0, 2),
+            "enterprise_density_per_1000": round(float(province.get("num_enterprises") or 0) * 1000.0 / max(population, 1.0), 3),
+        },
+        "time_series": timeseries["rows"],
+        "source_quality": timeseries["source_quality"],
+        "events": get_events_for_province(province_code, limit=12),
+    }
+
+
+@router.post("/text-scenario/interpret")
+async def interpret_macro_text_scenario(payload: TextScenarioInput):
+    """Interpret a free-form future macro scenario into model-ready coefficients."""
+    try:
+        result = await asyncio.to_thread(
+            interpret_text_scenario,
+            payload.text,
+            province_code=payload.province_code,
+            horizon_years=payload.horizon_years,
+            force_llm=payload.force_llm,
+        )
+        params = result.get("macro_parameters") or {}
+        if payload.province_code:
+            scenario_result = compute_scenario(
+                payload.province_code,
+                ScenarioParams(
+                    gdp_delta_pct=float(params.get("gdp_delta_pct") or 0.0),
+                    tax_rate_delta=float(params.get("tax_rate_delta") or 0.0),
+                    compliance_delta=float(params.get("compliance_delta") or 0.0),
+                    unemployment_delta=float(params.get("unemployment_delta") or 0.0),
+                    fdi_delta_pct=float(params.get("fdi_delta_pct") or 0.0),
+                ),
+            )
+            scenario_result.narrative_text = generate_narrative_sync(scenario_result)
+            result["province_projection"] = scenario_result.to_dict()
+        result["memory_status"] = text_scenario_memory_status()
+        return result
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@router.post("/text-scenario/feedback")
+def record_macro_text_scenario_feedback(payload: TextScenarioFeedbackInput):
+    """Human-in-the-loop approval/rating before a text scenario becomes memory."""
+    row = remember_scenario_feedback(
+        text=payload.scenario_text,
+        payload=payload.parsed_payload,
+        rating=payload.rating,
+        approved=payload.approved,
+        notes=payload.notes,
+        reviewer=payload.reviewer,
+    )
+    return {
+        "status": "saved",
+        "memory_id": row["memory_id"],
+        "review_status": row["review_status"],
+        "memory_status": text_scenario_memory_status(),
+    }
+
+
+@router.get("/text-scenario/memory/status")
+def get_text_scenario_memory_status():
+    """Return approved/rejected memory count for scenario interpreter."""
+    return text_scenario_memory_status()
+
+
+@router.get("/macro-retrain/status")
+def get_macro_retrain_status():
+    """Return reviewed-data retrain artifact status for the macro digital twin."""
+    report = None
+    if MACRO_RETRAIN_REPORT_PATH.exists():
+        try:
+            report = json.loads(MACRO_RETRAIN_REPORT_PATH.read_text(encoding="utf-8"))
+        except Exception:
+            report = {"status": "report_unreadable", "path": str(MACRO_RETRAIN_REPORT_PATH)}
+    return {
+        "status": "ready" if EVENT_MODEL_PATH.exists() and PROVINCE_MODEL_PATH.exists() else "not_trained",
+        "artifacts": {
+            "event_impact_model": {
+                "path": str(EVENT_MODEL_PATH),
+                "exists": EVENT_MODEL_PATH.exists(),
+            },
+            "province_response_model": {
+                "path": str(PROVINCE_MODEL_PATH),
+                "exists": PROVINCE_MODEL_PATH.exists(),
+            },
+            "report": {
+                "path": str(MACRO_RETRAIN_REPORT_PATH),
+                "exists": MACRO_RETRAIN_REPORT_PATH.exists(),
+            },
+        },
+        "latest_report": report,
+        "retrain_command": "python Backend/scripts/retrain_macro_from_reviewed_data.py --min-samples 5000",
+    }
+
+
+def _regional_demographic_rates(region: str) -> Tuple[float, float, float]:
+    region_lower = region.lower()
+    if "đông nam" in region_lower or "Ä‘Ã´ng nam" in region_lower:
+        return 13.2, 6.0, 4.5
+    if "đồng bằng sông cửu long" in region_lower or "cá»­u long" in region_lower:
+        return 11.4, 7.2, -2.0
+    if "tây nguyên" in region_lower or "tÃ¢y nguy" in region_lower:
+        return 17.8, 5.8, 1.6
+    if "trung du" in region_lower or "miền núi" in region_lower or "miá»n nÃºi" in region_lower:
+        return 16.4, 6.4, -0.5
+    if "bắc trung" in region_lower or "duyên hải" in region_lower or "duyÃªn háº£i" in region_lower:
+        return 13.9, 6.8, -0.8
+    return 12.8, 6.6, 0.2
+
+
+def _persist_province_scenario_run(
+    db: Session,
+    *,
+    result: Any,
+    payload: ProvinceScenarioInput,
+    narrative_model: str,
+    province_impacts: Optional[List[Dict[str, Any]]] = None,
+    national_impacts: Optional[Dict[str, Any]] = None,
+) -> None:
+    """Best-effort persistence for province Digital Twin scenario runs."""
+    if not hasattr(db, "execute"):
+        return
+    try:
+        dialect = getattr(getattr(db, "bind", None), "dialect", None)
+        if getattr(dialect, "name", "postgresql") not in ("postgresql", "postgres"):
+            return
+        db.execute(text("""
+            CREATE TABLE IF NOT EXISTS province_scenario_runs (
+                id BIGSERIAL PRIMARY KEY,
+                province_code VARCHAR(10) NOT NULL,
+                event_key VARCHAR(80),
+                gdp_delta_pct DOUBLE PRECISION DEFAULT 0.0,
+                tax_rate_delta DOUBLE PRECISION DEFAULT 0.0,
+                compliance_delta DOUBLE PRECISION DEFAULT 0.0,
+                unemployment_delta DOUBLE PRECISION DEFAULT 0.0,
+                fdi_delta_pct DOUBLE PRECISION DEFAULT 0.0,
+                projection_years INTEGER DEFAULT 5,
+                boundary_version VARCHAR(80) DEFAULT 'vn_34_2025',
+                custom_params JSONB DEFAULT '{}'::jsonb,
+                scenario_title TEXT,
+                narrative_text TEXT,
+                projected_revenue_billion DOUBLE PRECISION,
+                projected_risk_level VARCHAR(20),
+                metrics_json JSONB DEFAULT '{}'::jsonb,
+                national_impacts JSONB NOT NULL DEFAULT '{}'::jsonb,
+                province_impacts JSONB NOT NULL DEFAULT '[]'::jsonb,
+                model_version VARCHAR(80) DEFAULT 'macro_scenario_v1',
+                narrative_model VARCHAR(80),
+                generated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        """))
+        db.execute(text("""
+            CREATE INDEX IF NOT EXISTS idx_province_scenario_province
+            ON province_scenario_runs (province_code, generated_at DESC)
+        """))
+        db.execute(text("""
+            CREATE INDEX IF NOT EXISTS idx_province_scenario_event
+            ON province_scenario_runs (event_key, generated_at DESC)
+        """))
+        db.execute(text("ALTER TABLE province_scenario_runs ADD COLUMN IF NOT EXISTS unemployment_delta DOUBLE PRECISION DEFAULT 0.0"))
+        db.execute(text("ALTER TABLE province_scenario_runs ADD COLUMN IF NOT EXISTS fdi_delta_pct DOUBLE PRECISION DEFAULT 0.0"))
+        db.execute(text("ALTER TABLE province_scenario_runs ADD COLUMN IF NOT EXISTS projection_years INTEGER DEFAULT 5"))
+        db.execute(text("ALTER TABLE province_scenario_runs ADD COLUMN IF NOT EXISTS boundary_version VARCHAR(80) DEFAULT 'vn_34_2025'"))
+        db.execute(text("ALTER TABLE province_scenario_runs ADD COLUMN IF NOT EXISTS national_impacts JSONB NOT NULL DEFAULT '{}'::jsonb"))
+        db.execute(text("ALTER TABLE province_scenario_runs ADD COLUMN IF NOT EXISTS province_impacts JSONB NOT NULL DEFAULT '[]'::jsonb"))
+        run_id = f"province-{uuid.uuid4().hex[:16]}"
+        db.execute(text("""
+            INSERT INTO province_scenario_runs (
+                province_code, event_key,
+                gdp_delta_pct, tax_rate_delta, compliance_delta,
+                unemployment_delta, fdi_delta_pct, projection_years, boundary_version,
+                custom_params,
+                scenario_title, narrative_text, projected_revenue_billion,
+                projected_risk_level, metrics_json, national_impacts, province_impacts, model_version,
+                narrative_model, generated_at
+            )
+            VALUES (
+                :province_code, :event_key,
+                :gdp_delta_pct, :tax_rate_delta, :compliance_delta,
+                :unemployment_delta, :fdi_delta_pct, :projection_years, :boundary_version,
+                CAST(:custom_params AS JSONB),
+                :scenario_title, :narrative_text, :projected_revenue_billion,
+                :projected_risk_level, CAST(:metrics_json AS JSONB),
+                CAST(:national_impacts AS JSONB), CAST(:province_impacts AS JSONB), :model_version,
+                :narrative_model, NOW()
+            )
+        """), {
+            "run_id": run_id,
+            "province_code": result.province_code,
+            "event_key": payload.event_key,
+            "gdp_delta_pct": payload.gdp_delta_pct,
+            "tax_rate_delta": payload.tax_rate_delta,
+            "compliance_delta": payload.compliance_delta,
+            "unemployment_delta": payload.unemployment_delta,
+            "fdi_delta_pct": payload.fdi_delta_pct,
+            "projection_years": payload.projection_years,
+            "boundary_version": _normalize_boundary_version(payload.boundary_version),
+            "custom_params": json.dumps({"run_id": run_id, "use_llm": payload.use_llm}, ensure_ascii=False),
+            "scenario_title": result.scenario_title,
+            "projected_revenue_billion": result.projected_revenue,
+            "projected_risk_level": result.projected_risk,
+            "metrics_json": json.dumps(result.to_dict(), ensure_ascii=False),
+            "national_impacts": json.dumps(national_impacts or {}, ensure_ascii=False),
+            "province_impacts": json.dumps(province_impacts or [], ensure_ascii=False),
+            "model_version": result.model_version,
+            "narrative_text": result.narrative_text,
+            "narrative_model": narrative_model,
+        })
+        db.commit()
+    except Exception:
+        if hasattr(db, "rollback"):
+            db.rollback()
+
+
+@router.post("/province-scenario")
+async def run_province_scenario(payload: ProvinceScenarioInput, db: Session = Depends(get_db)):
+    """Chạy kịch bản kinh tế cho 1 tỉnh."""
+    try:
+        requested_boundary = _normalize_boundary_version(payload.boundary_version)
+        params = _scenario_params_from_payload(payload)
+        result = compute_scenario(payload.province_code, params)
+        narrative_model = "template"
+        if payload.use_llm:
+            try:
+                result.narrative_text = await asyncio.wait_for(generate_narrative_llm(result), timeout=8.0)
+                narrative_model = "llm_or_template"
+            except Exception:
+                result.narrative_text = generate_narrative_sync(result)
+        else:
+            result.narrative_text = generate_narrative_sync(result)
+
+        province_impacts, national_impacts = _build_boundary_impacts(params, requested_boundary)
+        _persist_province_scenario_run(
+            db,
+            result=result,
+            payload=payload,
+            narrative_model=narrative_model,
+            province_impacts=province_impacts,
+            national_impacts=national_impacts,
+        )
+        response = result.to_dict()
+        response["boundary_version"] = requested_boundary
+        response["projection_years"] = payload.projection_years
+        response["province_impacts"] = province_impacts
+        response["national_impacts"] = national_impacts
+        response["narrative_model"] = narrative_model
+        response["run_state"] = "finalized"
+        return response
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 def _try_local_llm_expand(prompt: str) -> Optional[str]:
@@ -2085,7 +2764,31 @@ def simulation_hypotheses(
     _ensure_hypothesis_tables(db)
     _seed_external_signals_if_needed(db)
 
-    generated = _generate_hypothesis_outputs(db) if refresh else None
+    from sqlalchemy.exc import OperationalError
+    import time
+    
+    run_id = None
+    
+    def try_generate():
+        try:
+            gen = _generate_hypothesis_outputs(db)
+            db.commit()
+            return gen
+        except OperationalError as e:
+            db.rollback()
+            if "DeadlockDetected" in str(e) or "deadlock" in str(e).lower():
+                time.sleep(0.5)
+                return None
+            raise e
+
+    if refresh:
+        generated = try_generate()
+        if not generated:
+            # Retry once on deadlock
+            generated = try_generate()
+    else:
+        generated = None
+
     if generated:
         run_id = generated["run_id"]
     else:
@@ -2096,8 +2799,22 @@ def simulation_hypotheses(
             LIMIT 1
         """)).fetchone()
         if not run_row:
-            generated = _generate_hypothesis_outputs(db)
-            run_id = generated["run_id"]
+            generated = try_generate()
+            if not generated:
+                # If still deadlock, wait a bit longer and fetch
+                time.sleep(1)
+                run_row = db.execute(text("""
+                    SELECT run_id
+                    FROM macro_hypothesis_runs
+                    ORDER BY generated_at DESC
+                    LIMIT 1
+                """)).fetchone()
+                if run_row:
+                    run_id = run_row[0]
+                else:
+                    raise HTTPException(status_code=500, detail="Could not generate hypotheses due to database lock.")
+            else:
+                run_id = generated["run_id"]
         else:
             run_id = run_row[0]
 
@@ -2183,3 +2900,24 @@ def rank_scenarios(req: CompareRequest, db: Session = Depends(get_db)):
         "worst_scenario": results[-1].scenario_name if results else None
     }
 
+
+@router.post("/crawl-news")
+async def trigger_news_crawl(
+    dry_run: bool = Query(False),
+    max_per_feed: int = Query(10),
+):
+    """Trigger real-time news crawl and ingest into review queue."""
+    import os
+    from ml_engine.news_crawler import crawl_all_feeds
+    from ml_engine.macro_event_ingest import ingest_macro_event_candidates
+
+    api_key = os.environ.get("GEMINI_API_KEY", "")
+    candidates = crawl_all_feeds(api_key=api_key, max_per_feed=max_per_feed)
+    stats = ingest_macro_event_candidates(candidates, dry_run=dry_run)
+    return {
+        "status": "ok",
+        "batch_id": stats["batch_id"],
+        "received": stats["received"],
+        "queued": stats["queued"],
+        "duplicates": stats["duplicates"],
+    }

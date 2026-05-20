@@ -1,0 +1,128 @@
+{
+  "generated_at": "2026-05-16T13:49:13Z",
+  "rounds": 10,
+  "rows": 2000,
+  "epsilon": 1.0,
+  "delta": 1e-05,
+  "centralized_auc": 0.925461,
+  "federated_auc": 0.916241,
+  "federated_gap": 0.00922,
+  "node_results": [
+    {
+      "node_id": "office_hcm",
+      "display_name": "Cuc Thue TP.HCM (finance-heavy)",
+      "n_samples": 668,
+      "local_auc": 0.900284,
+      "industry_mix": {
+        "finance": 362,
+        "construction": 108,
+        "services": 106,
+        "retail": 92
+      },
+      "province_mix": {
+        "HCM": 399,
+        "CT": 102,
+        "HN": 88,
+        "DN": 79
+      }
+    },
+    {
+      "node_id": "office_hanoi",
+      "display_name": "Cuc Thue Ha Noi (construction-heavy)",
+      "n_samples": 661,
+      "local_auc": 0.899858,
+      "industry_mix": {
+        "construction": 379,
+        "services": 97,
+        "retail": 97,
+        "finance": 88
+      },
+      "province_mix": {
+        "HN": 373,
+        "HCM": 108,
+        "DN": 97,
+        "CT": 83
+      }
+    },
+    {
+      "node_id": "office_danang",
+      "display_name": "Cuc Thue Da Nang (services)",
+      "n_samples": 645,
+      "local_auc": 0.917447,
+      "industry_mix": {
+        "services": 382,
+        "construction": 97,
+        "retail": 87,
+        "finance": 79
+      },
+      "province_mix": {
+        "DN": 363,
+        "HCM": 106,
+        "HN": 97,
+        "CT": 79
+      }
+    },
+    {
+      "node_id": "office_cantho",
+      "display_name": "Cuc Thue Can Tho (retail/agriculture)",
+      "n_samples": 101,
+      "local_auc": 0.910355,
+      "industry_mix": {
+        "retail": 101
+      },
+      "province_mix": {
+        "CT": 101
+      }
+    }
+  ],
+  "communication_bytes_per_round": 768,
+  "total_communication_bytes": 7680,
+  "convergence_curve": [
+    {
+      "round": 1.0,
+      "auc": 0.896809
+    },
+    {
+      "round": 2.0,
+      "auc": 0.908652
+    },
+    {
+      "round": 3.0,
+      "auc": 0.920709
+    },
+    {
+      "round": 4.0,
+      "auc": 0.912199
+    },
+    {
+      "round": 5.0,
+      "auc": 0.903972
+    },
+    {
+      "round": 6.0,
+      "auc": 0.907376
+    },
+    {
+      "round": 7.0,
+      "auc": 0.904255
+    },
+    {
+      "round": 8.0,
+      "auc": 0.918936
+    },
+    {
+      "round": 9.0,
+      "auc": 0.917376
+    },
+    {
+      "round": 10.0,
+      "auc": 0.916241
+    }
+  ],
+  "privacy": {
+    "mechanism": "Gaussian coefficient noise for PoC",
+    "epsilon": 1.0,
+    "delta": 1e-05,
+    "noise_std": 0.002
+  }
+}

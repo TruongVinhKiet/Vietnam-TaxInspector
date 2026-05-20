@@ -2248,6 +2248,11 @@ function renderGraph(data) {
             return name.length > 12 ? name.substring(0, 11) + "…" : name;
         });
 
+    // Add VPN Indicators
+    if (typeof window.renderVPNBadge === 'function') {
+        window.renderVPNBadge(nodeGroups);
+    }
+
     // ── Tooltip ──
     nodeGroups.on("mouseenter", function(event, d) {
         showTooltip(event, d);

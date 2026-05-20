@@ -1,4 +1,13 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
+<html class="light" lang="vi">
+
+<head>
+    <meta charset="utf-8" />
+    <meta content="width=device-width, initial-scale=1.0" name="viewport" />
+    <title>Mô phỏng Kịch bản - Tax Inspectorate</title>
+    <meta name="description"
+        content="Digital Twin Simulation Engine – Mô phỏng tác động chính sách thuế lên hệ thống kinh tế Việt Nam">
+<!DOCTYPE html>
 <html class="light" lang="vi">
 
 <head>
@@ -13,6 +22,8 @@
     <link
         href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap"
         rel="stylesheet" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="" />
+    <script src="https://cdn.jsdelivr.net/npm/echarts/dist/echarts.min.js"></script>
     <script id="tailwind-config">
         tailwind.config = {
             darkMode: "class",
@@ -51,9 +62,9 @@
         .sim-slider {
             -webkit-appearance: none;
             appearance: none;
-            height: 6px;
+            height: 5px;
             border-radius: 3px;
-            background: linear-gradient(90deg, #0284c7, #7c3aed);
+            background: #cbd5e1;
             outline: none;
             cursor: pointer;
         }
@@ -61,27 +72,28 @@
         .sim-slider::-webkit-slider-thumb {
             -webkit-appearance: none;
             appearance: none;
-            width: 20px;
-            height: 20px;
+            width: 16px;
+            height: 16px;
             border-radius: 50%;
-            background: #fff;
-            border: 3px solid #0284c7;
+            background: #002147;
+            border: 2px solid #fff;
             cursor: pointer;
-            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
-            transition: transform 0.2s;
+            box-shadow: 0 1px 4px rgba(0, 33, 71, 0.25);
+            transition: transform 0.15s ease;
         }
 
         .sim-slider::-webkit-slider-thumb:hover {
-            transform: scale(1.2);
+            transform: scale(1.15);
         }
 
         .sim-slider::-moz-range-thumb {
-            width: 20px;
-            height: 20px;
+            width: 16px;
+            height: 16px;
             border-radius: 50%;
-            background: #fff;
-            border: 3px solid #0284c7;
+            background: #002147;
+            border: 2px solid #fff;
             cursor: pointer;
+            box-shadow: 0 1px 4px rgba(0, 33, 71, 0.25);
         }
 
         .stagger-1 {
@@ -136,7 +148,8 @@
                 href="fraud.html" data-page="fraud.html" data-title="Chấm điểm Rủi ro Thuế">
                 <span class="material-symbols-outlined">security</span><span class="text-sm">Chấm điểm Rủi ro</span>
             </a>
-            <a class="nav-item text-slate-400 hover:text-white transition-colors hover:bg-white/5 flex items-center gap-3 px-4 py-3 scale-95 active:scale-90 transition-transform rounded-lg" href="legal_library.html" data-page="legal_library.html" data-title="Thư viện Pháp luật">
+            <a class="nav-item text-slate-400 hover:text-white transition-colors hover:bg-white/5 flex items-center gap-3 px-4 py-3 scale-95 active:scale-90 transition-transform rounded-lg"
+                href="legal_library.html" data-page="legal_library.html" data-title="Thư viện Pháp luật">
                 <span class="material-symbols-outlined">local_library</span>
                 <span class="text-sm">Thư viện Pháp luật</span>
             </a>
@@ -144,9 +157,15 @@
                 href="graph.html" data-page="graph.html" data-title="Phân tích Mạng lưới VAT">
                 <span class="material-symbols-outlined">hub</span><span class="text-sm">Mạng lưới VAT</span>
             </a>
-            <a class="nav-item text-slate-400 hover:text-white transition-colors hover:bg-white/5 flex items-center gap-3 px-4 py-3 rounded-lg"
+            <a class="nav-item text-slate-400 hover:text-white transition-colors hover:bg-white/5 flex items-center gap-3 px-4 py-3 scale-95 active:scale-90 transition-transform rounded-lg"
                 href="delinquency.html" data-page="delinquency.html" data-title="Dự báo Nợ đọng">
-                <span class="material-symbols-outlined">trending_down</span><span class="text-sm">Dự báo Nợ đọng</span>
+                <span class="material-symbols-outlined">trending_down</span>
+                <span class="text-sm">Dự báo Nợ đọng</span>
+            </a>
+            <a class="nav-item text-slate-400 hover:text-white transition-colors hover:bg-white/5 flex items-center gap-3 px-4 py-3 scale-95 active:scale-90 transition-transform rounded-lg"
+                href="simulation.html" data-page="simulation.html" data-title="Mô phỏng Vĩ mô">
+                <span class="material-symbols-outlined">public</span>
+                <span class="text-sm">Mô phỏng Vĩ mô</span>
             </a>
             <a class="nav-item text-slate-400 hover:text-white transition-colors hover:bg-white/5 flex items-center gap-3 px-4 py-3 rounded-lg"
                 href="intervention.html" data-page="intervention.html" data-title="Hiệu quả Can thiệp">
@@ -161,7 +180,8 @@
                 href="profile.html" data-page="profile.html" data-title="Tài khoản Cán bộ">
                 <span class="material-symbols-outlined">account_circle</span><span class="text-sm">Tài khoản</span>
             </a>
-            <a class="nav-item text-slate-400 hover:text-white transition-colors hover:bg-white/5 flex items-center gap-3 px-4 py-3 rounded-lg" href="ml_workspace.html" style="display:none" data-page="ml_workspace.html" data-title="ML Models Hub">
+            <a class="nav-item text-slate-400 hover:text-white transition-colors hover:bg-white/5 flex items-center gap-3 px-4 py-3 rounded-lg"
+                href="ml_workspace.html" style="display:none" data-page="ml_workspace.html" data-title="ML Models Hub">
                 <span class="material-symbols-outlined">memory</span><span class="text-sm">ML Models Hub</span>
             </a>
         </nav>
@@ -402,12 +422,151 @@
 
             <!-- Preset Scenarios -->
             <div class="mb-10 fade-in" style="animation-delay:0.4s">
-                <h3 class="text-sm font-black text-primary-container tracking-tight mb-4 flex items-center gap-2">
-                    <span class="material-symbols-outlined text-[18px]">bookmark</span> Kịch bản Có sẵn
-                </h3>
+                <div class="flex items-center justify-between mb-4">
+                    <h3 class="text-sm font-black text-primary-container tracking-tight flex items-center gap-2">
+                        <span class="material-symbols-outlined text-[18px]">bookmark</span> Kịch bản Có sẵn
+                    </h3>
+                    <button id="preset-reset-btn" class="text-xs font-bold text-slate-500 hover:text-primary-container border border-slate-200 rounded-lg px-3 py-1.5 hover:bg-slate-50 transition-colors">
+                        <span class="material-symbols-outlined text-[14px] align-middle mr-0.5">restart_alt</span> Đặt lại mặc định
+                    </button>
+                </div>
                 <div id="sim-presets" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
                     <div class="text-xs text-slate-400 py-4">Đang tải...</div>
                 </div>
+
+
+        <!-- ═══ Section: Bản đồ Kịch bản Kinh tế Việt Nam ═══ -->
+        <div class="mt-8 bg-white rounded-xl shadow-[0_20px_40px_rgba(0,33,71,0.06)] p-6" id="province-map-section">
+            <div class="flex items-center gap-3 mb-6">
+                <span class="material-symbols-outlined text-primary-container text-2xl">map</span>
+                <h2 class="text-lg font-black text-primary-container tracking-tight">
+                    Bản đồ Kịch bản Kinh tế 34 Đơn vị Hành chính 2025
+                </h2>
+                <span class="ml-auto px-3 py-1 bg-blue-50 text-blue-600 text-xs font-bold rounded-full">DIGITAL
+                    TWIN</span>
+            </div>
+
+            <div class="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_420px] gap-6">
+                <!-- Bản đồ (3/5 width) -->
+                <div>
+                    <div
+                        class="mb-3 inline-flex rounded-lg border border-slate-200 bg-slate-50 p-1 text-xs font-bold text-slate-600 relative z-50">
+                        <button id="map-tab-leaflet" type="button"
+                            class="px-3 py-2 rounded-md bg-white text-primary-container border border-slate-200 shadow-sm">Leaflet
+                            2D</button>
+                        <button id="map-tab-3d" type="button" class="px-3 py-2 rounded-md">Three.js 3D</button>
+                        <button id="map-tab-echarts" type="button" class="px-3 py-2 rounded-md">ECharts Nhiệt</button>
+                    </div>
+                    <div id="vietnam-map" class="w-full rounded-lg border border-slate-200 overflow-hidden relative z-0"
+                        style="height: 550px;"></div>
+                    <div id="vietnam-3d-map" class="w-full rounded-lg border border-slate-200 bg-slate-950 overflow-hidden relative z-0 hidden"
+                        style="height: 550px;"></div>
+                    <div id="vietnam-echarts-map" class="w-full rounded-lg border border-slate-200 overflow-hidden relative z-0 hidden"
+                        style="height: 550px;"></div>
+                    <p class="text-xs text-slate-400 mt-2 text-center">Click vào tỉnh để xem kịch bản kinh tế</p>
+                </div>
+
+                <!-- Panel kịch bản (2/5 width) -->
+                <div id="province-scenario-panel" class="rounded-xl border border-slate-200 bg-white p-4">
+                    <div class="mb-4">
+                        <label class="text-xs font-bold text-slate-600 uppercase tracking-wider">Nhập kịch bản tương
+                            lai</label>
+                        <textarea id="scenario-text-input" rows="4"
+                            class="mt-1 w-full rounded-lg border-slate-300 text-sm"
+                            placeholder="Ví dụ: Mỹ đánh thuế hàng hóa Việt Nam 30%, hoặc Đại dịch X làm đứt gãy chuỗi cung ứng..."></textarea>
+                        <div class="mt-2 flex gap-2">
+                            <button id="interpret-text-scenario-btn" type="button"
+                                class="flex-1 rounded-lg bg-primary-container px-3 py-2 text-sm font-bold text-white">Phân
+                                tích bằng AI</button>
+                            <button id="remember-text-scenario-btn" type="button"
+                                class="rounded-lg border border-slate-300 px-3 py-2 text-sm font-bold text-slate-600"
+                                disabled>Lưu sau duyệt</button>
+                        </div>
+                        <div id="text-scenario-status" class="mt-2 text-xs text-slate-500"></div>
+                        <div id="text-scenario-cards" class="mt-3 space-y-2"></div>
+                    </div>
+                    <!-- Event selector -->
+                    <div class="mb-4">
+                        <label class="text-xs font-bold text-slate-600 uppercase tracking-wider">Sự kiện kinh tế</label>
+                        <select id="event-selector" class="mt-1 w-full rounded-lg border-slate-300 text-sm">
+                            <option value="">-- Không áp dụng sự kiện --</option>
+                        </select>
+                    </div>
+                    <div class="mb-4">
+                        <label class="text-xs font-bold text-slate-600 uppercase tracking-wider">Kỳ hạn dân số/GDP</label>
+                        <select id="province-horizon-years" class="mt-1 w-full rounded-lg border-slate-300 text-sm">
+                            <option value="5">5 năm</option>
+                            <option value="10" selected>10 năm</option>
+                            <option value="20">20 năm</option>
+                        </select>
+                    </div>
+
+                    <!-- Sliders -->
+                    <div class="space-y-3 mb-4">
+                        <div>
+                            <label class="text-xs text-slate-500">GDP Delta: <span id="gdp-delta-val">0%</span></label>
+                            <input type="range" id="gdp-delta-slider" min="-20" max="20" value="0" step="0.5"
+                                class="w-full h-1.5 bg-slate-200 rounded-lg appearance-none">
+                        </div>
+                        <div>
+                            <label class="text-xs text-slate-500">Tax Rate Delta: <span
+                                    id="tax-delta-val">0%</span></label>
+                            <input type="range" id="tax-delta-slider" min="-5" max="5" value="0" step="0.1"
+                                class="w-full h-1.5 bg-slate-200 rounded-lg appearance-none">
+                        </div>
+                        <div>
+                            <label class="text-xs text-slate-500">Compliance Delta: <span
+                                    id="compliance-delta-val">0%</span></label>
+                            <input type="range" id="compliance-delta-slider" min="-20" max="20" value="0" step="1"
+                                class="w-full h-1.5 bg-slate-200 rounded-lg appearance-none">
+                        </div>
+                    </div>
+
+                    <button id="run-province-scenario-btn"
+                        class="w-full py-2.5 bg-primary-container text-white text-sm font-bold rounded-lg hover:opacity-90 transition mb-4"
+                        disabled>
+                        <span class="material-symbols-outlined text-sm align-middle mr-1">play_arrow</span>
+                        Chạy Kịch bản
+                    </button>
+
+                    <!-- Metrics cards -->
+                    <div id="province-metrics" class="grid grid-cols-2 gap-2 mb-4" style="display:none;">
+                        <div class="bg-slate-50 rounded-lg p-3 text-center">
+                            <p class="text-[10px] text-slate-400 uppercase">Δ GDP</p>
+                            <p id="metric-gdp" class="text-lg font-black text-primary-container">--</p>
+                        </div>
+                        <div class="bg-slate-50 rounded-lg p-3 text-center">
+                            <p class="text-[10px] text-slate-400 uppercase">Δ Thu thuế</p>
+                            <p id="metric-revenue" class="text-lg font-black text-primary-container">--</p>
+                        </div>
+                        <div class="bg-slate-50 rounded-lg p-3 text-center">
+                            <p class="text-[10px] text-slate-400 uppercase">Rủi ro</p>
+                            <p id="metric-risk" class="text-lg font-black">--</p>
+                        </div>
+                        <div class="bg-slate-50 rounded-lg p-3 text-center">
+                            <p class="text-[10px] text-slate-400 uppercase">Tuân thủ</p>
+                            <p id="metric-compliance" class="text-lg font-black text-primary-container">--</p>
+                        </div>
+                    </div>
+
+                    <!-- Narrative output -->
+                    <div id="province-narrative"
+                        class="bg-slate-50 rounded-lg p-4 text-sm text-slate-700 leading-relaxed max-h-[300px] overflow-y-auto"
+                        style="display:none;">
+                        <p class="text-xs text-slate-400 mb-2 uppercase font-bold">📝 Phân tích kịch bản</p>
+                        <div id="narrative-content"></div>
+                    </div>
+                    <div id="province-context-cards" class="mt-4 space-y-2"></div>
+                    <div id="province-event-cards" class="mt-4 space-y-2"></div>
+
+                    <!-- Empty state -->
+                    <div id="province-empty-state" class="text-center py-12 text-slate-400">
+                        <span class="material-symbols-outlined text-4xl mb-2">touch_app</span>
+                        <p class="text-sm">Chọn một tỉnh trên bản đồ để bắt đầu</p>
+                    </div>
+                </div>
+            </div>
+        </div>
             </div>
 
             <div class="mb-10">
@@ -430,7 +589,8 @@
                             class="sim-hyp-tab px-3 py-1.5 rounded text-xs font-bold text-slate-600">10 năm</button>
                     </div>
                     <div id="sim-hypothesis-content" class="fade-in transition-all duration-500">
-                        <div class="rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600">Đang tổng hợp giả thuyết...</div>
+                        <div class="rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600">Đang tổng
+                            hợp giả thuyết...</div>
                     </div>
                 </div>
             </div>
@@ -442,7 +602,7 @@
                     <h3 class="text-sm font-black text-primary-container tracking-tight mb-4 flex items-center gap-2">
                         <span class="material-symbols-outlined text-[18px]">donut_large</span> Phân bổ Rủi ro Mô phỏng
                     </h3>
-                    <div class="flex items-center justify-center h-full min-h-[250px]">
+                    <div class="flex items-center justify-center min-h-[250px]">
                         <canvas id="sim-risk-chart" class="w-full" style="height: 250px;"></canvas>
                     </div>
                     <div id="sim-risk-dist" class="mt-4 grid grid-cols-2 gap-4">
@@ -486,8 +646,8 @@
                 <div class="bg-white rounded-xl shadow-[0_20px_40px_rgba(0,33,71,0.06)] p-6">
                     <h3 class="text-sm font-black text-primary-container tracking-tight mb-4">Chỉ số Rủi ro Tổng thể
                     </h3>
-                    <div class="overflow-hidden" style="height:160px"><canvas id="sim-gauge-chart"
-                            class="w-full"></canvas></div>
+                    <div class="overflow-hidden" style="height:220px"><canvas id="sim-gauge-chart" class="w-full"
+                            style="height:200px"></canvas></div>
                 </div>
                 <div class="bg-white rounded-xl shadow-[0_20px_40px_rgba(0,33,71,0.06)] p-6">
                     <h3 class="text-sm font-black text-primary-container tracking-tight mb-4">Đóng góp Tham số
@@ -516,6 +676,7 @@
                             class="w-full"></canvas></div>
                 </div>
             </div>
+
 
             <div class="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-10">
                 <div class="bg-white rounded-xl shadow-[0_20px_40px_rgba(0,33,71,0.06)] p-6">
@@ -574,6 +735,10 @@
             </div>
 
         </div>
+
+        </div>
+
+
     </main>
 
     <!-- Footer -->
@@ -591,7 +756,17 @@
 
     <script src="../js/api.js?v=3.2"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+    <script src="https://unpkg.com/three@0.128.0/build/three.min.js"></script>
+    <script src="https://unpkg.com/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    <script>window.MACRO_BOUNDARY_VERSION = window.MACRO_BOUNDARY_VERSION || 'vn_34_2025';</script>
     <script src="../js/simulation.js?v=5.2"></script>
+    <script src="../js/macro_map_data.js?v=1.0"></script>
+    <script src="../js/vietnam_map.js?v=1.3"></script>
+    <script src="../js/vietnam_3d_map.js?v=1.1"></script>
+    <script src="../js/vietnam_echarts_map.js?v=1.1"></script>
+    <script src="../js/province_scenario.js?v=1.2"></script>
+    <script src="../js/macro_text_scenario.js?v=1.1"></script>
     <script>
         document.addEventListener("DOMContentLoaded", function () {
             const currentPage = window.location.pathname.split("/").pop() || 'dashboard.html';
@@ -603,9 +778,75 @@
                 }
             });
             if (typeof hydrateSidebarIdentity === 'function') hydrateSidebarIdentity({ forceRefresh: true });
+
+            // ── Integration: Sync Macro Panel → Province Map Sliders ──
+            const BASELINE = { gdp: 6.5, cit: 20.0, audit: 5.0, unemp: 2.3 };
+            const macroGdp = document.getElementById('sim-gdp-growth');
+            const macroCit = document.getElementById('sim-cit-rate');
+            const macroAudit = document.getElementById('sim-audit-coverage');
+            const macroUnemp = document.getElementById('sim-unemployment');
+
+            const provGdp = document.getElementById('gdp-delta-slider');
+            const provTax = document.getElementById('tax-delta-slider');
+            const provComp = document.getElementById('compliance-delta-slider');
+
+            function syncMacroToProvince() {
+                let gdpDelta = 0, taxDelta = 0, compDelta = 0, unempDelta = 0;
+
+                if (macroGdp) gdpDelta = parseFloat(macroGdp.value) - BASELINE.gdp;
+                if (macroCit) taxDelta = (parseFloat(macroCit.value) - BASELINE.cit) / 10;
+                if (macroAudit) compDelta = parseFloat(macroAudit.value) - BASELINE.audit;
+                if (macroUnemp) unempDelta = parseFloat(macroUnemp.value) - BASELINE.unemp;
+
+                if (provGdp) {
+                    provGdp.value = Math.max(-20, Math.min(20, gdpDelta)).toFixed(1);
+                    const ev = document.getElementById('gdp-delta-val');
+                    if (ev) ev.textContent = provGdp.value + '%';
+                    provGdp.dispatchEvent(new Event('input'));
+                }
+                if (provTax) {
+                    provTax.value = Math.max(-5, Math.min(5, taxDelta)).toFixed(1);
+                    const ev = document.getElementById('tax-delta-val');
+                    if (ev) ev.textContent = (taxDelta >= 0 ? '+' : '') + provTax.value + '%';
+                    provTax.dispatchEvent(new Event('input'));
+                }
+                if (provComp) {
+                    provComp.value = Math.max(-20, Math.min(20, compDelta)).toFixed(0);
+                    const ev = document.getElementById('compliance-delta-val');
+                    if (ev) ev.textContent = provComp.value + '%';
+                    provComp.dispatchEvent(new Event('input'));
+                }
+
+                if (window.VietnamEChartsMap && typeof window.VietnamEChartsMap.simulateNationalRisk === 'function') {
+                    window.VietnamEChartsMap.simulateNationalRisk({
+                        gdp_delta_pct: gdpDelta,
+                        compliance_delta: compDelta,
+                        unemployment_delta: unempDelta
+                    });
+                }
+                if (window.VietnamMap && typeof window.VietnamMap.simulateNationalRisk === 'function') {
+                    window.VietnamMap.simulateNationalRisk({
+                        gdp_delta_pct: gdpDelta,
+                        compliance_delta: compDelta,
+                        unemployment_delta: unempDelta
+                    });
+                }
+            }
+
+            [macroGdp, macroCit, macroAudit, macroUnemp].forEach(el => {
+                if (el) el.addEventListener('input', syncMacroToProvince);
+            });
+
+            // Auto-sync on simulation run
+            const simRunBtn = document.getElementById('sim-run-btn');
+            if (simRunBtn) {
+                simRunBtn.addEventListener('click', () => {
+                    setTimeout(syncMacroToProvince, 100);
+                });
+            }
         });
     </script>
-<script type="module" src="../js/agent_widget.js"></script>
+    <script type="module" src="../js/agent_widget.js"></script>
 </body>
 
 </html>

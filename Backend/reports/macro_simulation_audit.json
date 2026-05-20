@@ -1,0 +1,151 @@
+{
+  "generated_at": "2026-05-20T04:19:41.173557+00:00",
+  "status": "pass",
+  "hard_failures": [],
+  "warnings": [],
+  "province_count": 34,
+  "event_count": 168,
+  "event_types": {
+    "growth": 81,
+    "financial_crisis": 19,
+    "natural_disaster": 17,
+    "policy": 17,
+    "geopolitics": 11,
+    "trade_agreement": 9,
+    "pandemic": 7,
+    "trade_war": 5,
+    "infrastructure_shock": 2
+  },
+  "province_missing_fields": [],
+  "event_missing_fields": [],
+  "event_coverage": {
+    "min_events_per_province": 26,
+    "max_events_per_province": 64,
+    "avg_events_per_province": 35.0,
+    "weak_coverage": []
+  },
+  "frontend_map_findings": {
+    "legacy_geojson_reads": [],
+    "random_mock_risk": [],
+    "required_adapter": "Frontend/js/macro_map_data.js",
+    "adapter_exists": true
+  },
+  "geojson": {
+    "feature_count": 34,
+    "source": null,
+    "boundary_precision": null,
+    "boundary_version": "vn_34_2025",
+    "boundary_status": "official_or_reviewed_geojson"
+  },
+  "boundary_readiness": {
+    "status": "pass",
+    "active_version": "vn_34_2025",
+    "production_target_version": "vn_34_2025",
+    "warnings": [],
+    "failures": [],
+    "versions": {
+      "vn_63_legacy": {
+        "label": "Vietnam 63 provincial-level units - legacy analytical baseline",
+        "expected_unit_count": 63,
+        "effective_from": "2008-08-01",
+        "effective_to": "2025-06-11",
+        "geojson_path": "vietnam_admin_boundaries_63_official.geojson",
+        "fallback": "centroid_tile",
+        "status": "fallback_only",
+        "source_name": "TaxInspector synthetic province baseline",
+        "source_url": null,
+        "notes": "Kept for backward-compatible experiments, dashboards, and historical synthetic data.",
+        "geojson_exists": false,
+        "geojson_feature_count": 0,
+        "geojson_sha256": null,
+        "readiness": "fallback_available"
+      },
+      "vn_34_2025": {
+        "label": "Vietnam 34 provincial-level units after 2025 administrative reorganization",
+        "expected_unit_count": 34,
+        "effective_from": "2025-06-12",
+        "effective_to": null,
+        "geojson_path": "vietnam_admin_boundaries_34_2025_official.geojson",
+        "fallback": "none",
+        "status": "reviewed_derived_geojson_loaded",
+        "source_name": "National Assembly Resolution on 2025 provincial-level reorganization",
+        "source_url": "https://english.vtv.vn/news/vietnam-now-has-34-provincial-level-administrative-units-20250612122748074.htm",
+        "notes": "Reviewed analytical GeoJSON is loaded by dissolving the legacy 63-province polygon source using the 2025 merger mapping. Replace with government-published survey-grade GeoJSON when available.",
+        "geojson_exists": true,
+        "geojson_feature_count": 34,
+        "geojson_sha256": "081aef9e79160f07f7f93a2f37d82a09b45ff38f6a941e6cf0a654758b5425e6",
+        "readiness": "ready"
+      }
+    },
+    "source_refs": [
+      {
+        "name": "VTV/VNA - Vietnam now has 34 provincial-level administrative units",
+        "url": "https://english.vtv.vn/news/vietnam-now-has-34-provincial-level-administrative-units-20250612122748074.htm",
+        "observed_claim": "The National Assembly passed a Resolution on June 12, 2025 under which Vietnam has 34 provincial-level administrative units."
+      },
+      {
+        "name": "Vietnam.vn - National Assembly officially passed resolution covering 34 provinces and cities",
+        "url": "https://www.vietnam.vn/en/quoc-hoi-chinh-thuc-thong-qua-nghi-quyet-ca-nuoc-co-34-tinh-thanh-pho",
+        "observed_claim": "The whole country has 34 provincial-level administrative units after the 2025 reorganization."
+      },
+      {
+        "name": "Vietnam National Authority of Tourism - Vietnam's New Provincial System",
+        "url": "https://vietnam.travel/things-to-do/vietnam%E2%80%99s-new-provincial-system-34-names-you-should-know",
+        "observed_claim": "Lists 23 newly formed units, 11 unchanged units, and predecessor provinces for the 34-unit 2025 system."
+      }
+    ]
+  },
+  "event_ingest_status": {
+    "queue_path": "E:\\TaxInspector\\Backend\\data\\data\\macro_event_review_queue.jsonl",
+    "total": 19,
+    "counts": {
+      "approved": 19
+    },
+    "pending_review": 0,
+    "last_created_at": "2026-05-19T03:43:38.828791+00:00"
+  },
+  "scenario_smoke_tests": [
+    {
+      "province_code": "VN34-HN",
+      "ok": true,
+      "projected_risk": "low",
+      "delta_revenue_pct": 5.99,
+      "confidence_score": 0.791,
+      "uncertainty_pct": 9.89,
+      "related_event_count": 6
+    },
+    {
+      "province_code": "VN34-HCM",
+      "ok": true,
+      "projected_risk": "low",
+      "delta_revenue_pct": -9.45,
+      "confidence_score": 0.7876,
+      "uncertainty_pct": 10.27,
+      "related_event_count": 6
+    },
+    {
+      "province_code": "VN34-DN",
+      "ok": true,
+      "projected_risk": "medium",
+      "delta_revenue_pct": -10.39,
+      "confidence_score": 0.7882,
+      "uncertainty_pct": 10.2,
+      "related_event_count": 6
+    },
+    {
+      "province_code": "VN34-CT",
+      "ok": true,
+      "projected_risk": "low",
+      "delta_revenue_pct": 10.58,
+      "confidence_score": 0.7898,
+      "uncertainty_pct": 10.03,
+      "related_event_count": 6
+    }
+  ],
+  "recommendations": [
+    "Current offline Digital Twin assets are sufficient for demo and deterministic scenario simulation.",
+    "Load reviewed official GeoJSON for `vn_34_2025` before production map/legal-boundary use.",
+    "Attach real-time crawlers through `macro_event_ingest`; keep new events in review queue before model use.",
+    "Retrain macro models only after event provenance and label quality pass this audit."
+  ]
+}

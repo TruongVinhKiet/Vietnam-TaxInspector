@@ -756,6 +756,112 @@ def _run_agent_session_resilience_migration(conn) -> None:
     ensure_agent_resilience_schema(conn)
 
 
+def _run_macro_map_state_migration(conn) -> None:
+    conn.execute(text("""
+        CREATE TABLE IF NOT EXISTS macro_data_sources (
+            id BIGSERIAL PRIMARY KEY,
+            source_key VARCHAR(120) NOT NULL UNIQUE,
+            source_name TEXT NOT NULL,
+            source_url TEXT,
+            source_type VARCHAR(60) NOT NULL DEFAULT 'official',
+            observed_level VARCHAR(40) NOT NULL DEFAULT 'national',
+            review_status VARCHAR(30) NOT NULL DEFAULT 'approved',
+            metadata_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+    """))
+    conn.execute(text("""
+        CREATE TABLE IF NOT EXISTS macro_timeseries_observations (
+            id BIGSERIAL PRIMARY KEY,
+            boundary_version VARCHAR(80) NOT NULL DEFAULT 'vn_34_2025',
+            province_code VARCHAR(20),
+            indicator_key VARCHAR(100) NOT NULL,
+            indicator_label TEXT,
+            year INTEGER NOT NULL,
+            quarter INTEGER NOT NULL DEFAULT 0,
+            value_num DOUBLE PRECISION NOT NULL,
+            unit VARCHAR(80),
+            is_observed BOOLEAN NOT NULL DEFAULT TRUE,
+            source_key VARCHAR(120) REFERENCES macro_data_sources(source_key) ON DELETE SET NULL,
+            source_quality VARCHAR(40) NOT NULL DEFAULT 'official',
+            provenance_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+            observed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            UNIQUE (boundary_version, province_code, indicator_key, year, quarter, source_key)
+        );
+    """))
+    conn.execute(text("""
+        CREATE INDEX IF NOT EXISTS idx_macro_timeseries_province_year_indicator
+        ON macro_timeseries_observations (province_code, year, indicator_key);
+    """))
+    conn.execute(text("""
+        CREATE INDEX IF NOT EXISTS idx_macro_timeseries_source_observed
+        ON macro_timeseries_observations (source_key, observed_at DESC);
+    """))
+    conn.execute(text("ALTER TABLE macro_timeseries_observations ALTER COLUMN quarter SET DEFAULT 0;"))
+    conn.execute(text("UPDATE macro_timeseries_observations SET quarter = 0 WHERE quarter IS NULL;"))
+    conn.execute(text("ALTER TABLE macro_timeseries_observations ALTER COLUMN quarter SET NOT NULL;"))
+    conn.execute(text("""
+        CREATE TABLE IF NOT EXISTS macro_policy_scenarios (
+            id BIGSERIAL PRIMARY KEY,
+            scenario_key VARCHAR(120) NOT NULL UNIQUE,
+            scenario_name TEXT NOT NULL,
+            scenario_type VARCHAR(60) NOT NULL DEFAULT 'tax_policy',
+            parameters_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+            impact_hints JSONB NOT NULL DEFAULT '{}'::jsonb,
+            review_status VARCHAR(30) NOT NULL DEFAULT 'approved',
+            source_key VARCHAR(120) REFERENCES macro_data_sources(source_key) ON DELETE SET NULL,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+    """))
+    conn.execute(text("""
+        CREATE TABLE IF NOT EXISTS macro_model_training_runs (
+            run_id VARCHAR(100) PRIMARY KEY,
+            model_key VARCHAR(120) NOT NULL,
+            boundary_version VARCHAR(80) NOT NULL DEFAULT 'vn_34_2025',
+            data_fingerprint VARCHAR(64),
+            source_counts JSONB NOT NULL DEFAULT '{}'::jsonb,
+            metrics_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+            artifacts_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+            review_policy TEXT NOT NULL DEFAULT 'approved_sources_only',
+            status VARCHAR(30) NOT NULL DEFAULT 'completed',
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+    """))
+    conn.execute(text("""
+        CREATE TABLE IF NOT EXISTS province_scenario_runs (
+            id BIGSERIAL PRIMARY KEY,
+            province_code VARCHAR(20) NOT NULL,
+            event_key VARCHAR(80),
+            gdp_delta_pct DOUBLE PRECISION DEFAULT 0.0,
+            tax_rate_delta DOUBLE PRECISION DEFAULT 0.0,
+            compliance_delta DOUBLE PRECISION DEFAULT 0.0,
+            custom_params JSONB DEFAULT '{}'::jsonb,
+            scenario_title TEXT,
+            narrative_text TEXT,
+            projected_revenue_billion DOUBLE PRECISION,
+            projected_risk_level VARCHAR(20),
+            metrics_json JSONB DEFAULT '{}'::jsonb,
+            model_version VARCHAR(80) DEFAULT 'macro_scenario_v1',
+            narrative_model VARCHAR(80),
+            generated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+    """))
+    conn.execute(text("ALTER TABLE province_scenario_runs DROP CONSTRAINT IF EXISTS province_scenario_runs_province_code_fkey;"))
+    conn.execute(text("ALTER TABLE province_scenario_runs ADD COLUMN IF NOT EXISTS boundary_version VARCHAR(80) DEFAULT 'vn_34_2025';"))
+    conn.execute(text("ALTER TABLE province_scenario_runs ADD COLUMN IF NOT EXISTS unemployment_delta DOUBLE PRECISION DEFAULT 0.0;"))
+    conn.execute(text("ALTER TABLE province_scenario_runs ADD COLUMN IF NOT EXISTS fdi_delta_pct DOUBLE PRECISION DEFAULT 0.0;"))
+    conn.execute(text("ALTER TABLE province_scenario_runs ADD COLUMN IF NOT EXISTS projection_years INTEGER DEFAULT 5;"))
+    conn.execute(text("ALTER TABLE province_scenario_runs ADD COLUMN IF NOT EXISTS national_impacts JSONB NOT NULL DEFAULT '{}'::jsonb;"))
+    conn.execute(text("ALTER TABLE province_scenario_runs ADD COLUMN IF NOT EXISTS province_impacts JSONB NOT NULL DEFAULT '[]'::jsonb;"))
+    conn.execute(text("""
+        CREATE INDEX IF NOT EXISTS idx_province_scenario_boundary_ts
+        ON province_scenario_runs (boundary_version, generated_at DESC);
+    """))
+
+
 def run_migration() -> None:
     with engine.begin() as conn:
         _run_safe_user_profile_migration(conn)
@@ -771,6 +877,7 @@ def run_migration() -> None:
         _run_legal_agent_v2_migration(conn)
         _run_agent_routing_telemetry_migration(conn)
         _run_agent_session_resilience_migration(conn)
+        _run_macro_map_state_migration(conn)
 
     print("[OK] Completed migration: user profile columns + offshore proxy mapping + numeric tax_code contract + multimodal uploads + legal agent v2 + agent routing telemetry.")
 

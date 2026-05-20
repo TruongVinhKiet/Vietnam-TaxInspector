@@ -1,0 +1,52 @@
+{
+  "delong": {
+    "auc_a": 0.958111,
+    "auc_b": 0.880195,
+    "delta_auc": 0.077916,
+    "z": 4.985984,
+    "p_value": 6.2e-07,
+    "ci95_low": 0.047287,
+    "ci95_high": 0.108546
+  },
+  "mcnemar": {
+    "both_correct": 413,
+    "a_correct_b_wrong": 137,
+    "a_wrong_b_correct": 154,
+    "both_wrong": 96,
+    "chi2": 0.879725,
+    "p_value": 0.34827699,
+    "odds_ratio": 0.889968
+  },
+  "ci": {
+    "auc_roc": {
+      "estimate": 0.958111,
+      "low": 0.943086,
+      "high": 0.973006,
+      "method": "bca"
+    },
+    "average_precision": {
+      "estimate": 0.908065,
+      "low": 0.87467,
+      "high": 0.929798,
+      "method": "bca"
+    },
+    "precision": {
+      "estimate": 0.446429,
+      "low": 0.403722,
+      "high": 0.48159,
+      "method": "bca"
+    },
+    "recall": {
+      "estimate": 0.990099,
+      "low": 0.977336,
+      "high": 1.0,
+      "method": "bca"
+    },
+    "f1": {
+      "estimate": 0.615385,
+      "low": 0.570544,
+      "high": 0.650575,
+      "method": "bca"
+    }
+  }
+}

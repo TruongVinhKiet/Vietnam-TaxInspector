@@ -59,6 +59,8 @@ from typing import Any, Callable, Optional
 
 import numpy as np
 
+from ml_engine.concept_drift_detector import DriftMonitor
+
 logger = logging.getLogger(__name__)
 
 
@@ -72,6 +74,7 @@ REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 TOPIC_INVOICE_CREATED = os.getenv("KAFKA_TOPIC_INVOICE_CREATED", "invoice.created")
 TOPIC_INVOICE_ANOMALY = os.getenv("KAFKA_TOPIC_INVOICE_ANOMALY", "invoice.anomaly")
 TOPIC_FEATURE_UPDATED = os.getenv("KAFKA_TOPIC_FEATURE_UPDATED", "feature.updated")
+TOPIC_MODEL_DRIFT_DETECTED = os.getenv("KAFKA_TOPIC_MODEL_DRIFT_DETECTED", "model.drift.detected")
 
 ANOMALY_THRESHOLD = float(os.getenv("STREAMING_ANOMALY_THRESHOLD", "0.65"))
 CRITICAL_ANOMALY_THRESHOLD = float(os.getenv("STREAMING_CRITICAL_THRESHOLD", "0.85"))
@@ -375,6 +378,7 @@ class StreamingFeaturePipeline:
         self._consumer_thread: threading.Thread | None = None
         self._consumer_running = False
         self._vae_model = None
+        self._drift_monitor = DriftMonitor(model_key="vae_invoice_stream")
         self._processing_count = 0
         self._anomaly_count = 0
         self._start_time = time.time()
@@ -434,6 +438,15 @@ class StreamingFeaturePipeline:
         anomaly_result = self._run_anomaly_scoring(
             invoice.seller_tax_code, seller_features, invoice,
         )
+        drift_status = self._drift_monitor.update(
+            prediction_confidence=1.0 - min(1.0, max(0.0, float(anomaly_result.get("score", 0.0)))),
+            features=seller_features.to_dict(),
+            metadata={
+                "tax_code": invoice.seller_tax_code,
+                "invoice_number": invoice.invoice_number,
+                "source": "streaming_feature_pipeline",
+            },
+        )
 
         # Step 4: Publish feature update event to Kafka
         if self._kafka.is_available:
@@ -447,6 +460,12 @@ class StreamingFeaturePipeline:
                     "timestamp": time.time(),
                 },
             )
+            if drift_status.get("drift_detected"):
+                self._kafka.publish(
+                    TOPIC_MODEL_DRIFT_DETECTED,
+                    key=invoice.seller_tax_code,
+                    value=drift_status,
+                )
 
         latency_ms = (time.perf_counter() - t0) * 1000.0
 
@@ -460,6 +479,7 @@ class StreamingFeaturePipeline:
             "anomaly_score": anomaly_result.get("score", 0),
             "is_anomaly": anomaly_result.get("is_anomaly", False),
             "alert": anomaly_result.get("alert"),
+            "drift_status": drift_status,
             "latency_ms": round(latency_ms, 1),
         }
 
@@ -723,9 +743,11 @@ class StreamingFeaturePipeline:
                 "invoice_created": TOPIC_INVOICE_CREATED,
                 "invoice_anomaly": TOPIC_INVOICE_ANOMALY,
                 "feature_updated": TOPIC_FEATURE_UPDATED,
+                "model_drift_detected": TOPIC_MODEL_DRIFT_DETECTED,
             },
             "redis_stats": redis_stats,
             "recent_alerts": pending_alerts,
+            "drift_status": self._drift_monitor.get_status(),
             "consumer_running": self._consumer_running,
         }
 

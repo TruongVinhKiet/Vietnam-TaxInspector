@@ -84,6 +84,42 @@ document.addEventListener("DOMContentLoaded", async () => {
     initSliders();
     await loadPresets();
     await loadBaseline();
+    
+    const resetBtn = document.getElementById('preset-reset-btn');
+    if (resetBtn) {
+        resetBtn.addEventListener('click', () => {
+            const defaults = {
+                vat_rate: 10,
+                cit_rate: 20,
+                audit_coverage_pct: 5,
+                penalty_multiplier: 1,
+                interest_rate: 6,
+                economic_growth_pct: 6.5,
+                cpi_pct: 3.5,
+                unemployment_pct: 2.3,
+                exchange_rate_delta_pct: 0,
+                projection_years: 5
+            };
+            applyPresetToSliders(defaults);
+            runSimulation('Mặc định');
+            
+            // Also reset province scenario parameters if they exist
+            if (document.getElementById('gdp-delta-slider')) document.getElementById('gdp-delta-slider').value = 0;
+            if (document.getElementById('tax-delta-slider')) document.getElementById('tax-delta-slider').value = 0;
+            if (document.getElementById('compliance-delta-slider')) document.getElementById('compliance-delta-slider').value = 0;
+            
+            // dispatch input event to update displays
+            ['gdp-delta-slider', 'tax-delta-slider', 'compliance-delta-slider'].forEach(id => {
+                const el = document.getElementById(id);
+                if (el) el.dispatchEvent(new Event('input'));
+            });
+            
+            if (window.VietnamMap && typeof window.VietnamMap.applyMacroParams === 'function') {
+                window.VietnamMap.applyMacroParams({ gdp_delta_pct: 0, compliance_delta: 0, unemployment_delta: 0 });
+            }
+        });
+    }
+
     bindEvents();
 });
 

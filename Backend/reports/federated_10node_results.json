@@ -1,0 +1,405 @@
+{
+  "generated_at": "2026-05-17T04:52:19Z",
+  "rounds": 30,
+  "rows": 8000,
+  "epsilon": 1.0,
+  "delta": 1e-05,
+  "centralized_auc": 0.911631,
+  "federated_auc": 0.873865,
+  "federated_gap": 0.037766,
+  "node_results": [
+    {
+      "node_id": "ha_noi",
+      "display_name": "Cuc Thue Ha Noi (construction)",
+      "n_samples": 500,
+      "local_auc": 0.89574,
+      "industry_mix": {
+        "construction": 500
+      },
+      "province_mix": {
+        "CT": 134,
+        "HN": 132,
+        "DN": 124,
+        "HCM": 110
+      }
+    },
+    {
+      "node_id": "hai_phong",
+      "display_name": "Cuc Thue Hai Phong (logistics)",
+      "n_samples": 500,
+      "local_auc": 0.885111,
+      "industry_mix": {
+        "retail": 500
+      },
+      "province_mix": {
+        "HCM": 141,
+        "CT": 133,
+        "DN": 119,
+        "HN": 107
+      }
+    },
+    {
+      "node_id": "quang_ninh",
+      "display_name": "Cuc Thue Quang Ninh (mining)",
+      "n_samples": 500,
+      "local_auc": 0.855736,
+      "industry_mix": {
+        "retail": 500
+      },
+      "province_mix": {
+        "CT": 140,
+        "HCM": 127,
+        "DN": 122,
+        "HN": 111
+      }
+    },
+    {
+      "node_id": "hcmc",
+      "display_name": "Cuc Thue TP.HCM (finance/tech)",
+      "n_samples": 500,
+      "local_auc": 0.910811,
+      "industry_mix": {
+        "finance": 500
+      },
+      "province_mix": {
+        "CT": 135,
+        "HCM": 135,
+        "HN": 116,
+        "DN": 114
+      }
+    },
+    {
+      "node_id": "can_tho",
+      "display_name": "Cuc Thue Can Tho (agriculture)",
+      "n_samples": 500,
+      "local_auc": 0.81266,
+      "industry_mix": {
+        "retail": 500
+      },
+      "province_mix": {
+        "HN": 141,
+        "CT": 122,
+        "DN": 122,
+        "HCM": 115
+      }
+    },
+    {
+      "node_id": "dak_lak",
+      "display_name": "Cuc Thue Dak Lak (forestry)",
+      "n_samples": 500,
+      "local_auc": 0.82793,
+      "industry_mix": {
+        "construction": 187,
+        "finance": 181,
+        "services": 79,
+        "retail": 53
+      },
+      "province_mix": {
+        "CT": 130,
+        "HCM": 129,
+        "DN": 124,
+        "HN": 117
+      }
+    },
+    {
+      "node_id": "binh_duong",
+      "display_name": "Cuc Thue Binh Duong (manufacturing)",
+      "n_samples": 500,
+      "local_auc": 0.872154,
+      "industry_mix": {
+        "construction": 500
+      },
+      "province_mix": {
+        "HCM": 141,
+        "HN": 126,
+        "DN": 126,
+        "CT": 107
+      }
+    },
+    {
+      "node_id": "dong_nai",
+      "display_name": "Cuc Thue Dong Nai (manufacturing)",
+      "n_samples": 1500,
+      "local_auc": 0.723874,
+      "industry_mix": {
+        "finance": 831,
+        "services": 399,
+        "construction": 270
+      },
+      "province_mix": {
+        "CT": 400,
+        "HCM": 379,
+        "DN": 365,
+        "HN": 356
+      }
+    }
+  ],
+  "communication_bytes_per_round": 398,
+  "total_communication_bytes": 11952,
+  "convergence_curve": [
+    {
+      "round": 1.0,
+      "auc": 0.874601,
+      "nodes": 8,
+      "stragglers": 2
+    },
+    {
+      "round": 2.0,
+      "auc": 0.890177,
+      "nodes": 8,
+      "stragglers": 2
+    },
+    {
+      "round": 3.0,
+      "auc": 0.838453,
+      "nodes": 8,
+      "stragglers": 2
+    },
+    {
+      "round": 4.0,
+      "auc": 0.900044,
+      "nodes": 6,
+      "stragglers": 4
+    },
+    {
+      "round": 5.0,
+      "auc": 0.898848,
+      "nodes": 7,
+      "stragglers": 3
+    },
+    {
+      "round": 6.0,
+      "auc": 0.853426,
+      "nodes": 8,
+      "stragglers": 2
+    },
+    {
+      "round": 7.0,
+      "auc": 0.867828,
+      "nodes": 8,
+      "stragglers": 2
+    },
+    {
+      "round": 8.0,
+      "auc": 0.906738,
+      "nodes": 8,
+      "stragglers": 2
+    },
+    {
+      "round": 9.0,
+      "auc": 0.848462,
+      "nodes": 8,
+      "stragglers": 2
+    },
+    {
+      "round": 10.0,
+      "auc": 0.901463,
+      "nodes": 7,
+      "stragglers": 3
+    },
+    {
+      "round": 11.0,
+      "auc": 0.872824,
+      "nodes": 9,
+      "stragglers": 1
+    },
+    {
+      "round": 12.0,
+      "auc": 0.905762,
+      "nodes": 8,
+      "stragglers": 2
+    },
+    {
+      "round": 13.0,
+      "auc": 0.867775,
+      "nodes": 9,
+      "stragglers": 1
+    },
+    {
+      "round": 14.0,
+      "auc": 0.883577,
+      "nodes": 10,
+      "stragglers": 0
+    },
+    {
+      "round": 15.0,
+      "auc": 0.869309,
+      "nodes": 7,
+      "stragglers": 3
+    },
+    {
+      "round": 16.0,
+      "auc": 0.860931,
+      "nodes": 8,
+      "stragglers": 2
+    },
+    {
+      "round": 17.0,
+      "auc": 0.903324,
+      "nodes": 6,
+      "stragglers": 4
+    },
+    {
+      "round": 18.0,
+      "auc": 0.8859,
+      "nodes": 9,
+      "stragglers": 1
+    },
+    {
+      "round": 19.0,
+      "auc": 0.865199,
+      "nodes": 10,
+      "stragglers": 0
+    },
+    {
+      "round": 20.0,
+      "auc": 0.867762,
+      "nodes": 10,
+      "stragglers": 0
+    },
+    {
+      "round": 21.0,
+      "auc": 0.878524,
+      "nodes": 9,
+      "stragglers": 1
+    },
+    {
+      "round": 22.0,
+      "auc": 0.880855,
+      "nodes": 8,
+      "stragglers": 2
+    },
+    {
+      "round": 23.0,
+      "auc": 0.867859,
+      "nodes": 9,
+      "stragglers": 1
+    },
+    {
+      "round": 24.0,
+      "auc": 0.885217,
+      "nodes": 9,
+      "stragglers": 1
+    },
+    {
+      "round": 25.0,
+      "auc": 0.889871,
+      "nodes": 9,
+      "stragglers": 1
+    },
+    {
+      "round": 26.0,
+      "auc": 0.879255,
+      "nodes": 10,
+      "stragglers": 0
+    },
+    {
+      "round": 27.0,
+      "auc": 0.873085,
+      "nodes": 7,
+      "stragglers": 3
+    },
+    {
+      "round": 28.0,
+      "auc": 0.883994,
+      "nodes": 9,
+      "stragglers": 1
+    },
+    {
+      "round": 29.0,
+      "auc": 0.885186,
+      "nodes": 9,
+      "stragglers": 1
+    },
+    {
+      "round": 30.0,
+      "auc": 0.873865,
+      "nodes": 8,
+      "stragglers": 2
+    }
+  ],
+  "privacy": {
+    "mechanism": "Calibrated Gaussian (sigma = sensitivity * sqrt(2 ln(1.25/delta)) / epsilon)",
+    "epsilon": 1.0,
+    "delta": 1e-05,
+    "sensitivity": 0.004,
+    "sigma": 0.019379
+  },
+  "n_nodes": 10,
+  "topk_compression_ratio": 0.3,
+  "compression_savings_pct": 79.3,
+  "min_nodes_per_round": 5,
+  "avg_stragglers_per_round": 1.7,
+  "node_profiles": [
+    {
+      "node_id": "ha_noi",
+      "region": "north",
+      "industry_bias": "construction",
+      "fraud_weight": 0.85,
+      "infra_quality": 0.95
+    },
+    {
+      "node_id": "hai_phong",
+      "region": "north",
+      "industry_bias": "retail",
+      "fraud_weight": 1.05,
+      "infra_quality": 0.9
+    },
+    {
+      "node_id": "quang_ninh",
+      "region": "north",
+      "industry_bias": "retail",
+      "fraud_weight": 0.75,
+      "infra_quality": 0.8
+    },
+    {
+      "node_id": "da_nang",
+      "region": "central",
+      "industry_bias": "services",
+      "fraud_weight": 0.65,
+      "infra_quality": 0.88
+    },
+    {
+      "node_id": "khanh_hoa",
+      "region": "central",
+      "industry_bias": "services",
+      "fraud_weight": 0.5,
+      "infra_quality": 0.75
+    },
+    {
+      "node_id": "hcmc",
+      "region": "south",
+      "industry_bias": "finance",
+      "fraud_weight": 1.85,
+      "infra_quality": 0.97
+    },
+    {
+      "node_id": "can_tho",
+      "region": "south",
+      "industry_bias": "retail",
+      "fraud_weight": 0.6,
+      "infra_quality": 0.7
+    },
+    {
+      "node_id": "dak_lak",
+      "region": "south",
+      "industry_bias": "retail",
+      "fraud_weight": 0.4,
+      "infra_quality": 0.55
+    },
+    {
+      "node_id": "binh_duong",
+      "region": "industrial",
+      "industry_bias": "construction",
+      "fraud_weight": 1.15,
+      "infra_quality": 0.92
+    },
+    {
+      "node_id": "dong_nai",
+      "region": "industrial",
+      "industry_bias": "retail",
+      "fraud_weight": 1.05,
+      "infra_quality": 0.88
+    }
+  ]
+}

@@ -1,0 +1,14 @@
+{
+  "model_version": "tax-agent-rerank-v2-legal-grounding",
+  "w_bm25": 0.32,
+  "w_dense": 0.38,
+  "w_lexical": 0.22,
+  "w_doc_type": 0.08,
+  "grounding_eval": {
+    "query_count": 1054,
+    "pair_count": 3306,
+    "positive_pairs": 1102,
+    "top1_grounding_rate": 0.7704
+  },
+  "generated_at": "2026-05-16T03:47:41Z"
+}

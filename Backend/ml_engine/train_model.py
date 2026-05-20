@@ -51,6 +51,7 @@ TEMPORAL_AUC_DROP_MAX = 0.08
 TEMPORAL_PR_AUC_DROP_MAX = 0.10
 SLICE_MIN_AUC = 0.50
 SLICE_MIN_SAMPLES = 80
+FRAUD_DECISION_THRESHOLD = 0.30
 
 PR_AUC_CORE_FLOOR = 0.10
 PR_AUC_SLICE_FLOOR = 0.02
@@ -201,6 +202,7 @@ def _build_slice_metrics(eval_frame: pd.DataFrame, y_true: np.ndarray, y_prob: n
     payload = eval_frame.copy().reset_index(drop=True)
     payload["fraud_label"] = np.asarray(y_true, dtype=int)
     payload["fraud_probability"] = np.asarray(y_prob, dtype=float)
+    payload["fraud_prediction"] = (payload["fraud_probability"] >= FRAUD_DECISION_THRESHOLD).astype(int)
 
     revenue_series = pd.to_numeric(payload.get("revenue"), errors="coerce").fillna(0.0)
     payload["revenue_bucket"] = pd.cut(
@@ -235,6 +237,17 @@ def _build_slice_metrics(eval_frame: pd.DataFrame, y_true: np.ndarray, y_prob: n
                 group["fraud_label"].to_numpy(dtype=int),
                 group["fraud_probability"].to_numpy(dtype=float),
             )
+            labels = group["fraud_label"].to_numpy(dtype=int)
+            preds = group["fraud_prediction"].to_numpy(dtype=int)
+            fp = int(((preds == 1) & (labels == 0)).sum())
+            tn = int(((preds == 0) & (labels == 0)).sum())
+            tp = int(((preds == 1) & (labels == 1)).sum())
+            fn = int(((preds == 0) & (labels == 1)).sum())
+            group_metrics.update({
+                "fpr": round(float(fp / max(fp + tn, 1)), 6),
+                "tpr": round(float(tp / max(tp + fn, 1)), 6),
+                "selection_rate": round(float((tp + fp) / max(len(group), 1)), 6),
+            })
             group_value = "unknown" if pd.isna(raw_value) else str(raw_value)
             dim_result[group_value] = group_metrics
 
@@ -245,6 +258,18 @@ def _build_slice_metrics(eval_frame: pd.DataFrame, y_true: np.ndarray, y_prob: n
             evaluated_group_count += 1
 
         if dim_result:
+            fpr_values = [float(v.get("fpr", 0.0)) for v in dim_result.values()]
+            tpr_values = [float(v.get("tpr", 0.0)) for v in dim_result.values()]
+            selection_values = [float(v.get("selection_rate", 0.0)) for v in dim_result.values()]
+            max_fpr = max(fpr_values) if fpr_values else 0.0
+            max_selection = max(selection_values) if selection_values else 0.0
+            dim_result["_fairness_summary"] = {
+                "fpr_min": round(min(fpr_values), 6) if fpr_values else None,
+                "fpr_max": round(max_fpr, 6) if fpr_values else None,
+                "disparate_impact_fpr_ratio": round(min(fpr_values) / max(max_fpr, 1e-9), 6) if fpr_values else None,
+                "selection_rate_di_ratio": round(min(selection_values) / max(max_selection, 1e-9), 6) if selection_values else None,
+                "equal_opportunity_difference": round(max(tpr_values) - min(tpr_values), 6) if tpr_values else None,
+            }
             results[dimension_name] = dim_result
 
     summary = {
@@ -252,6 +277,11 @@ def _build_slice_metrics(eval_frame: pd.DataFrame, y_true: np.ndarray, y_prob: n
         "evaluated_group_count": evaluated_group_count,
         "min_auc_roc": round(float(min(auc_values)), 6) if auc_values else None,
         "min_pr_auc": round(float(min(pr_auc_values)), 6) if pr_auc_values else None,
+        "fairness_dimensions": {
+            dim: payload.get("_fairness_summary", {})
+            for dim, payload in results.items()
+            if isinstance(payload, dict) and "_fairness_summary" in payload
+        },
     }
     return results, summary
 
