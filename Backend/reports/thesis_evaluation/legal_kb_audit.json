@@ -1,0 +1,190 @@
+{
+  "generated_at": "2026-05-21T01:48:29Z",
+  "database": {
+    "available": true,
+    "documents_by_type": {
+      "circular": 11,
+      "collections": 1,
+      "decision": 1,
+      "decree": 13,
+      "law": 7,
+      "official_letter": 12,
+      "resolution": 1,
+      "transfer_pricing": 1,
+      "vat": 1
+    },
+    "document_count": 48,
+    "chunk_count": 107,
+    "kg_entity_count": 70,
+    "kg_relation_count": 61,
+    "recent_documents": [
+      {
+        "document_key": "CV_4019_TCT_CS_2024",
+        "title": "Công văn 4019/TCT-CS năm 2024 — Thuế GTGT hóa đơn hợp đồng xây dựng",
+        "doc_type": "official_letter"
+      },
+      {
+        "document_key": "CV_573_TCT_CS_2024",
+        "title": "Công văn 573/TCT-CS năm 2024 — HĐĐT cho hàng hóa xuất khẩu",
+        "doc_type": "official_letter"
+      },
+      {
+        "document_key": "CV_3543_TCT_CS_2024",
+        "title": "Công văn 3543/TCT-CS năm 2024 — Xử lý HĐĐT có sai sót",
+        "doc_type": "official_letter"
+      },
+      {
+        "document_key": "CV_2204_TCT_CS_2024",
+        "title": "Công văn 2204/TCT-CS năm 2024 — Thuế GTGT xuất khẩu phần mềm",
+        "doc_type": "official_letter"
+      },
+      {
+        "document_key": "CV_2155_TCT_CS_2024",
+        "title": "Công văn 2155/TCT-CS năm 2024 — Thuế GTGT dịch vụ khu chế xuất",
+        "doc_type": "official_letter"
+      },
+      {
+        "document_key": "TT_100_2021_TT_BTC",
+        "title": "Thông tư 100/2021/TT-BTC — Sửa đổi, bổ sung Thông tư 40/2021 về thuế hộ kinh doanh",
+        "doc_type": "circular"
+      },
+      {
+        "document_key": "TT_130_2016_TT_BTC",
+        "title": "Thông tư 130/2016/TT-BTC — Sửa đổi Thông tư 219 về thuế GTGT và Thông tư 78 về thuế TNDN",
+        "doc_type": "circular"
+      },
+      {
+        "document_key": "TT_92_2015_TT_BTC",
+        "title": "Thông tư 92/2015/TT-BTC — Sửa đổi, bổ sung quy định về thuế GTGT và TNCN",
+        "doc_type": "circular"
+      },
+      {
+        "document_key": "TT_111_2013_TT_BTC",
+        "title": "Thông tư 111/2013/TT-BTC — Hướng dẫn thực hiện Luật Thuế thu nhập cá nhân",
+        "doc_type": "circular"
+      },
+      {
+        "document_key": "ND_102_2021_NDCP",
+        "title": "Nghị định 102/2021/NĐ-CP: Sửa đổi quy định xử phạt hành chính về thuế, hóa đơn",
+        "doc_type": "decree"
+      },
+      {
+        "document_key": "ND_64_2024_NDCP",
+        "title": "Nghị định 64/2024/NĐ-CP: Gia hạn nộp thuế GTGT, TNDN, TNCN năm 2024",
+        "doc_type": "decree"
+      },
+      {
+        "document_key": "LUAT_GTGT_48_2024_QH15",
+        "title": "Luật Thuế giá trị gia tăng số 48/2024/QH15",
+        "doc_type": "law"
+      }
+    ]
+  },
+  "repository_seeds": {
+    "seed_files": [
+      {
+        "path": "Backend\\app\\scripts\\seed_minimal_tax_knowledge.py",
+        "key_count": 0,
+        "sample_keys": [],
+        "title_count": 0
+      },
+      {
+        "path": "Backend\\app\\scripts\\seed_real_tax_knowledge.py",
+        "key_count": 5,
+        "sample_keys": [
+          "cv_1122_2023",
+          "cv_2721_2024",
+          "cv_4781_2024",
+          "cv_6141_2024",
+          "nd_72_2024"
+        ],
+        "title_count": 5
+      },
+      {
+        "path": "Backend\\app\\scripts\\seed_complex_tax_knowledge.py",
+        "key_count": 10,
+        "sample_keys": [
+          "luat_38_2019_qh14",
+          "luat_thue_tncn_hop_nhat",
+          "nd_123_2020_ndcp",
+          "nd_125_2020_ndcp",
+          "nd_132_2020_ndcp",
+          "nd_52_2013_ndcp",
+          "nd_72_2024_ndcp",
+          "tt_40_2021_tt_btc",
+          "tt_80_2021_tt_btc",
+          "tt_96_2015_tt_btc"
+        ],
+        "title_count": 10
+      },
+      {
+        "path": "Backend\\scripts\\ingest_missing_legal_docs.py",
+        "key_count": 13,
+        "sample_keys": [
+          "CV_2155_TCT_CS_2024",
+          "CV_2204_TCT_CS_2024",
+          "CV_3543_TCT_CS_2024",
+          "CV_4019_TCT_CS_2024",
+          "CV_573_TCT_CS_2024",
+          "LUAT_GTGT_48_2024_QH15",
+          "ND_102_2021_NDCP",
+          "ND_64_2024_NDCP",
+          "NQ_954_2020_UBTVQH14",
+          "TT_100_2021_TT_BTC",
+          "TT_111_2013_TT_BTC",
+          "TT_130_2016_TT_BTC"
+        ],
+        "title_count": 13
+      }
+    ],
+    "seed_document_count_estimate": 28,
+    "citizen_snippet_count": 32,
+    "citizen_snippet_sample": [
+      "capital_transfer_tax",
+      "cash_payment_over_20m",
+      "corporate_tax_incentives",
+      "deductible_client_entertainment",
+      "ecommerce_individual_tax",
+      "einvoice_correction",
+      "einvoice_late_issue",
+      "etax_electronic_declaration",
+      "family_deduction_calculation",
+      "fixed_asset_depreciation",
+      "foreign_contractor_tax",
+      "foreign_income_tax",
+      "freelancer_tax",
+      "household_business_small_revenue",
+      "interest_expense_deduction",
+      "investment_project_vat_refund",
+      "late_filing_penalty",
+      "personal_tax_code_registration",
+      "prize_winning_tax",
+      "real_estate_transfer_individual",
+      "rental_income_individual",
+      "seasonal_contract_tax",
+      "stock_investment_tax",
+      "tax_audit_reassessment",
+      "tax_debt_enforcement",
+      "tax_extension_2024",
+      "tncn_salary_dependent_refund",
+      "two_workplaces_pit_finalization",
+      "vat_export_zero_percent",
+      "vat_import"
+    ]
+  },
+  "coverage_score": 0.8733,
+  "recommended_path": "ingest_curated_expansion_before_reranker_tuning",
+  "curated_expansion_count": 12,
+  "curated_topics": [
+    "cit",
+    "ecommerce",
+    "einvoice",
+    "extension",
+    "fct",
+    "household_business",
+    "penalty",
+    "pit",
+    "transfer_pricing",
+    "vat_2025"
+  ]
+}

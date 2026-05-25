@@ -1,0 +1,1438 @@
+{
+  "generated_at": "2026-05-22T10:38:25.094839Z",
+  "boundary_version": "vn_34_2025",
+  "research_state": {
+    "boundary_version": "vn_34_2025",
+    "research_title": "Vietnam Macro-Fiscal Digital Twin Research Lab",
+    "modules": [
+      {
+        "key": "multi_horizon_forecast",
+        "label": "TFT-ready multi-horizon forecast",
+        "status": "ready_fallback"
+      },
+      {
+        "key": "shock_propagation_graph",
+        "label": "STGCN-style shock propagation graph",
+        "status": "ready_deterministic"
+      },
+      {
+        "key": "causal_merger_lab",
+        "label": "Synthetic Control merger evaluation",
+        "status": "ready_provisional"
+      },
+      {
+        "key": "uncertainty_conformal",
+        "label": "Conformal/quantile uncertainty bands",
+        "status": "ready_proxy"
+      },
+      {
+        "key": "news_nowcasting",
+        "label": "Reviewed news/event nowcasting",
+        "status": "review_queue_ready"
+      }
+    ],
+    "model_cards": [
+      {
+        "model_key": "macro-ensemble-v2",
+        "model_version": "macro-research-lab-v1",
+        "model_family": "LightGBM baseline + TFT-ready multi-horizon ensemble",
+        "training_data_policy": "approved_sources_only; JSON fallback is marked province_estimate",
+        "intended_use": "Forecast GRDP, tax revenue and fiscal pressure under macro policy scenarios.",
+        "limitations": "Current local fallback is baseline-anchored; claims require reviewed GSO provincial panel.",
+        "metrics": {
+          "backtest_mae_proxy": 0.038,
+          "interval_coverage_target": "85-95%"
+        },
+        "sources": [
+          "World Bank Indicators API",
+          "IMF DataMapper",
+          "GSO/NSO yearbooks",
+          "reviewed macro event queue"
+        ],
+        "artifact_paths": [
+          "Backend/data/models/simulation_lgbm.joblib",
+          "Backend/data/models/macro_province_response_model.joblib"
+        ]
+      },
+      {
+        "model_key": "macro-shock-graph-v1",
+        "model_version": "macro-research-lab-v1",
+        "model_family": "Spatio-temporal graph shock propagation",
+        "training_data_policy": "approved province panel + reviewed graph edge evidence",
+        "intended_use": "Estimate how macro shocks diffuse between provinces over quarters.",
+        "limitations": "Graph edges are deterministic until logistics/FDI/supply-chain observations are approved.",
+        "metrics": {
+          "graph_ablation_required": true,
+          "coverage_target": "90% conformal band"
+        },
+        "sources": [
+          "administrative boundaries",
+          "province economic profiles",
+          "reviewed event articles"
+        ],
+        "artifact_paths": []
+      },
+      {
+        "model_key": "macro-causal-merger-v1",
+        "model_version": "macro-research-lab-v1",
+        "model_family": "Synthetic Control + event-study/Difference-in-Differences",
+        "training_data_policy": "reviewed pre/post merger province panel only",
+        "intended_use": "Evaluate whether administrative merger improves GRDP, tax revenue and tax efficiency.",
+        "limitations": "Post-2025 effect is provisional until official post-merger observations are ingested.",
+        "metrics": {
+          "placebo_test": "required",
+          "p_value_proxy": 0.18
+        },
+        "sources": [
+          "GSO/NSO provincial yearbooks",
+          "approved merger mapping"
+        ],
+        "artifact_paths": []
+      }
+    ],
+    "visualization_spec": [
+      "fan_chart",
+      "shock_flow_map",
+      "synthetic_control_line",
+      "sankey_merger_flow",
+      "parallel_coordinates",
+      "uncertainty_violin",
+      "waterfall_attribution",
+      "provenance_panel"
+    ],
+    "data_quality": {
+      "boundary_version": "vn_34_2025",
+      "province_count": 34,
+      "expected_provinces": 34,
+      "historical_event_count": 168,
+      "json_panel_rows": 693,
+      "json_source_count": 6,
+      "db_counts": {},
+      "review_policy": "approved_sources_only",
+      "observed_level": "mixed: national_observed + province_estimate",
+      "warnings": [],
+      "data_fingerprint": "902409b2a12e69bd",
+      "generated_at": "2026-05-22T10:38:24.696424Z"
+    },
+    "generated_at": "2026-05-22T10:38:24.696424Z"
+  },
+  "data_quality": {
+    "boundary_version": "vn_34_2025",
+    "province_count": 34,
+    "expected_provinces": 34,
+    "historical_event_count": 168,
+    "json_panel_rows": 693,
+    "json_source_count": 6,
+    "db_counts": {},
+    "review_policy": "approved_sources_only",
+    "observed_level": "mixed: national_observed + province_estimate",
+    "warnings": [],
+    "data_fingerprint": "902409b2a12e69bd",
+    "generated_at": "2026-05-22T10:38:24.701411Z"
+  },
+  "forecast_probe": {
+    "run_id": "forecast-622ecf5aecb545e8",
+    "model_key": "macro-ensemble-v2",
+    "model_version": "macro-research-lab-v1",
+    "boundary_version": "vn_34_2025",
+    "province_code": "VN34-HCM",
+    "province_name": "Hồ Chí Minh",
+    "horizon_quarters": 12,
+    "forecast_points": [
+      {
+        "quarter_index": 1,
+        "label": "Q1/2025",
+        "baseline_grdp": 4041465.59,
+        "forecast_grdp": 4018692.47,
+        "lower_grdp": 3851354.12,
+        "upper_grdp": 4186030.83,
+        "baseline_tax_revenue": 1005413.94,
+        "forecast_tax_revenue": 995786.74,
+        "lower_tax_revenue": 948102.5,
+        "upper_tax_revenue": 1043470.98,
+        "uncertainty_width_pct": 4.164
+      },
+      {
+        "quarter_index": 2,
+        "label": "Q2/2025",
+        "baseline_grdp": 4159903.25,
+        "forecast_grdp": 4115372.42,
+        "lower_grdp": 3925369.76,
+        "upper_grdp": 4305375.09,
+        "baseline_tax_revenue": 1036351.43,
+        "forecast_tax_revenue": 1017534.88,
+        "lower_tax_revenue": 963509.52,
+        "upper_tax_revenue": 1071560.24,
+        "uncertainty_width_pct": 4.617
+      },
+      {
+        "quarter_index": 3,
+        "label": "Q3/2025",
+        "baseline_grdp": 4281811.8,
+        "forecast_grdp": 4216433.55,
+        "lower_grdp": 4007367.93,
+        "upper_grdp": 4425499.17,
+        "baseline_tax_revenue": 1068240.9,
+        "forecast_tax_revenue": 1040622.78,
+        "lower_tax_revenue": 981285.37,
+        "upper_tax_revenue": 1099960.18,
+        "uncertainty_width_pct": 4.958
+      },
+      {
+        "quarter_index": 4,
+        "label": "Q4/2025",
+        "baseline_grdp": 4407292.95,
+        "forecast_grdp": 4321881.81,
+        "lower_grdp": 4095253.58,
+        "upper_grdp": 4548510.04,
+        "baseline_tax_revenue": 1101111.64,
+        "forecast_tax_revenue": 1065034.77,
+        "lower_tax_revenue": 1000809.97,
+        "upper_tax_revenue": 1129259.57,
+        "uncertainty_width_pct": 5.244
+      },
+      {
+        "quarter_index": 5,
+        "label": "Q1/2026",
+        "baseline_grdp": 4536451.41,
+        "forecast_grdp": 4431734.39,
+        "lower_grdp": 4188241.16,
+        "upper_grdp": 4675227.62,
+        "baseline_tax_revenue": 1134993.83,
+        "forecast_tax_revenue": 1090760.52,
+        "lower_tax_revenue": 1021841.29,
+        "upper_tax_revenue": 1159679.75,
+        "uncertainty_width_pct": 5.494
+      },
+      {
+        "quarter_index": 6,
+        "label": "Q2/2026",
+        "baseline_grdp": 4669394.94,
+        "forecast_grdp": 4546018.82,
+        "lower_grdp": 4285949.36,
+        "upper_grdp": 4806088.28,
+        "baseline_tax_revenue": 1169918.62,
+        "forecast_tax_revenue": 1117794.41,
+        "lower_tax_revenue": 1044255.38,
+        "upper_tax_revenue": 1191333.44,
+        "uncertainty_width_pct": 5.721
+      },
+      {
+        "quarter_index": 7,
+        "label": "Q3/2026",
+        "baseline_grdp": 4806234.45,
+        "forecast_grdp": 4664772.26,
+        "lower_grdp": 4388172.24,
+        "upper_grdp": 4941372.27,
+        "baseline_tax_revenue": 1205918.07,
+        "forecast_tax_revenue": 1146135.12,
+        "lower_tax_revenue": 1067980.36,
+        "upper_tax_revenue": 1224289.88,
+        "uncertainty_width_pct": 5.93
+      },
+      {
+        "quarter_index": 8,
+        "label": "Q4/2026",
+        "baseline_grdp": 4947084.14,
+        "forecast_grdp": 4788040.85,
+        "lower_grdp": 4494795.94,
+        "upper_grdp": 5081285.76,
+        "baseline_tax_revenue": 1243025.26,
+        "forecast_tax_revenue": 1175785.18,
+        "lower_tax_revenue": 1092972.19,
+        "upper_tax_revenue": 1258598.17,
+        "uncertainty_width_pct": 6.125
+      },
+      {
+        "quarter_index": 9,
+        "label": "Q1/2027",
+        "baseline_grdp": 5092061.51,
+        "forecast_grdp": 4915879.21,
+        "lower_grdp": 4605761.53,
+        "upper_grdp": 5225996.89,
+        "baseline_tax_revenue": 1281274.27,
+        "forecast_tax_revenue": 1206750.69,
+        "lower_tax_revenue": 1119203.8,
+        "upper_tax_revenue": 1294297.58,
+        "uncertainty_width_pct": 6.308
+      },
+      {
+        "quarter_index": 10,
+        "label": "Q2/2027",
+        "baseline_grdp": 5241287.54,
+        "forecast_grdp": 5048349.95,
+        "lower_grdp": 4721046.16,
+        "upper_grdp": 5375653.74,
+        "baseline_tax_revenue": 1320700.23,
+        "forecast_tax_revenue": 1239041.0,
+        "lower_tax_revenue": 1146659.48,
+        "upper_tax_revenue": 1331422.52,
+        "uncertainty_width_pct": 6.483
+      },
+      {
+        "quarter_index": 11,
+        "label": "Q3/2027",
+        "baseline_grdp": 5394886.73,
+        "forecast_grdp": 5185523.31,
+        "lower_grdp": 4840652.52,
+        "upper_grdp": 5530394.1,
+        "baseline_tax_revenue": 1361339.37,
+        "forecast_tax_revenue": 1272668.49,
+        "lower_tax_revenue": 1175331.71,
+        "upper_tax_revenue": 1370005.26,
+        "uncertainty_width_pct": 6.651
+      },
+      {
+        "quarter_index": 12,
+        "label": "Q4/2027",
+        "baseline_grdp": 5552987.23,
+        "forecast_grdp": 5327476.85,
+        "lower_grdp": 4964602.47,
+        "upper_grdp": 5690351.23,
+        "baseline_tax_revenue": 1403229.01,
+        "forecast_tax_revenue": 1307648.37,
+        "lower_tax_revenue": 1205219.23,
+        "upper_tax_revenue": 1410077.52,
+        "uncertainty_width_pct": 6.811
+      }
+    ],
+    "fan_chart": {
+      "labels": [
+        "Q1/2025",
+        "Q2/2025",
+        "Q3/2025",
+        "Q4/2025",
+        "Q1/2026",
+        "Q2/2026",
+        "Q3/2026",
+        "Q4/2026",
+        "Q1/2027",
+        "Q2/2027",
+        "Q3/2027",
+        "Q4/2027"
+      ],
+      "baseline": [
+        1005413.94,
+        1036351.43,
+        1068240.9,
+        1101111.64,
+        1134993.83,
+        1169918.62,
+        1205918.07,
+        1243025.26,
+        1281274.27,
+        1320700.23,
+        1361339.37,
+        1403229.01
+      ],
+      "forecast": [
+        995786.74,
+        1017534.88,
+        1040622.78,
+        1065034.77,
+        1090760.52,
+        1117794.41,
+        1146135.12,
+        1175785.18,
+        1206750.69,
+        1239041.0,
+        1272668.49,
+        1307648.37
+      ],
+      "lower": [
+        948102.5,
+        963509.52,
+        981285.37,
+        1000809.97,
+        1021841.29,
+        1044255.38,
+        1067980.36,
+        1092972.19,
+        1119203.8,
+        1146659.48,
+        1175331.71,
+        1205219.23
+      ],
+      "upper": [
+        1043470.98,
+        1071560.24,
+        1099960.18,
+        1129259.57,
+        1159679.75,
+        1191333.44,
+        1224289.88,
+        1258598.17,
+        1294297.58,
+        1331422.52,
+        1370005.26,
+        1410077.52
+      ]
+    },
+    "drivers": [
+      {
+        "factor": "Cú sốc GDP",
+        "value": -2.0,
+        "direction": "negative"
+      },
+      {
+        "factor": "FDI",
+        "value": -4.0,
+        "direction": "negative"
+      },
+      {
+        "factor": "Tuân thủ",
+        "value": -2.0,
+        "direction": "negative"
+      },
+      {
+        "factor": "Thất nghiệp",
+        "value": 0.0,
+        "direction": "negative"
+      }
+    ],
+    "metrics": {
+      "method": "hybrid_elasticity_tft_ready",
+      "baseline_cagr_pct": 11.722,
+      "scenario_delta_gdp_pct": -2.0,
+      "scenario_delta_revenue_pct": -4.2,
+      "coverage_target": "85-95%",
+      "backtest_mae_proxy": 0.055
+    },
+    "source_quality": {
+      "method": "aggregated_member_series",
+      "observed_level": "national_observed_province_estimated",
+      "review_policy": "approved_sources_only",
+      "quality_note": "Province panel is ready for research UI, but post-merger causal claims require reviewed GSO tables.",
+      "sources": [
+        {
+          "name": "World Bank Indicators API",
+          "url": "https://api.worldbank.org/v2/country/VNM/indicator/{indicator}?format=json",
+          "fields": [
+            "population",
+            "gdp_current_usd",
+            "gdp_growth_pct",
+            "cpi_inflation_pct",
+            "unemployment_pct",
+            "fdi_net_inflows_pct_gdp"
+          ]
+        },
+        {
+          "name": "IMF DataMapper API",
+          "url": "https://www.imf.org/external/datamapper/api/v1/{indicator}/VNM",
+          "fields": [
+            "real_gdp_growth_pct",
+            "consumer_price_inflation_pct",
+            "unemployment_rate_pct"
+          ]
+        },
+        {
+          "name": "GSO provincial statistical yearbooks",
+          "url": "https://www.gso.gov.vn/",
+          "fields": [
+            "province_population",
+            "province_grdp",
+            "province_fdi"
+          ],
+          "note": "Province panel is estimated from local province baselines until reviewed GSO table extraction is ingested."
+        },
+        {
+          "name": "MOF Tax Revenue Reports",
+          "url": "https://mof.gov.vn/",
+          "fields": [
+            "tax_revenue_est"
+          ],
+          "note": "Province tax revenue estimated from 2024 baseline using national tax growth trajectory"
+        },
+        {
+          "name": "DKKD Enterprise Registry",
+          "url": "https://dangkykinhdoanh.gov.vn/",
+          "fields": [
+            "num_enterprises_est"
+          ]
+        },
+        {
+          "name": "Vietnam Customs (Tổng cục Hải quan)",
+          "url": "https://customs.gov.vn/",
+          "fields": [
+            "export_billion_usd_est",
+            "import_billion_usd_est"
+          ]
+        }
+      ]
+    },
+    "data_fingerprint": "87cec751d41198d3",
+    "run_state": "completed"
+  },
+  "shock_probe": {
+    "run_id": "shock-bcf144464c514350",
+    "model_key": "macro-shock-graph-v1",
+    "model_version": "spatio-temporal-shock-v1",
+    "boundary_version": "vn_34_2025",
+    "source_province_code": "VN34-HCM",
+    "source_province_name": "Hồ Chí Minh",
+    "shock_type": "macro_text_scenario",
+    "shock_strength_pct": -3.0,
+    "horizon_quarters": 8,
+    "edge_paths": [
+      {
+        "source": "VN34-HCM",
+        "source_name": "Hồ Chí Minh",
+        "target": "VN34-PT",
+        "target_name": "Phú Thọ",
+        "weight": 1.0,
+        "edge_type": "adjacency_sector_fdi_similarity"
+      },
+      {
+        "source": "VN34-HCM",
+        "source_name": "Hồ Chí Minh",
+        "target": "VN34-DNAI",
+        "target_name": "Đồng Nai",
+        "weight": 1.0,
+        "edge_type": "adjacency_sector_fdi_similarity"
+      },
+      {
+        "source": "VN34-HCM",
+        "source_name": "Hồ Chí Minh",
+        "target": "VN34-HP",
+        "target_name": "Hải Phòng",
+        "weight": 0.8087,
+        "edge_type": "adjacency_sector_fdi_similarity"
+      },
+      {
+        "source": "VN34-HCM",
+        "source_name": "Hồ Chí Minh",
+        "target": "VN34-NB",
+        "target_name": "Ninh Bình",
+        "weight": 0.7836,
+        "edge_type": "adjacency_sector_fdi_similarity"
+      },
+      {
+        "source": "VN34-HCM",
+        "source_name": "Hồ Chí Minh",
+        "target": "VN34-CT",
+        "target_name": "Cần Thơ",
+        "weight": 0.6605,
+        "edge_type": "adjacency_sector_fdi_similarity"
+      },
+      {
+        "source": "VN34-HCM",
+        "source_name": "Hồ Chí Minh",
+        "target": "VN34-TNI",
+        "target_name": "Tây Ninh",
+        "weight": 0.6342,
+        "edge_type": "adjacency_sector_fdi_similarity"
+      },
+      {
+        "source": "VN34-HCM",
+        "source_name": "Hồ Chí Minh",
+        "target": "VN34-HN",
+        "target_name": "Hà Nội",
+        "weight": 0.6035,
+        "edge_type": "adjacency_sector_fdi_similarity"
+      },
+      {
+        "source": "VN34-HCM",
+        "source_name": "Hồ Chí Minh",
+        "target": "VN34-KH",
+        "target_name": "Khánh Hòa",
+        "weight": 0.5824,
+        "edge_type": "adjacency_sector_fdi_similarity"
+      }
+    ],
+    "timeline": [
+      {
+        "quarter": 1,
+        "label": "Q+1",
+        "nodes": [
+          {
+            "province_code": "VN34-HCM",
+            "province_name": "Hồ Chí Minh",
+            "impact_pct": -2.16,
+            "lower_pct": -1.7172,
+            "upper_pct": -2.6028,
+            "risk_color_value": 25.92
+          },
+          {
+            "province_code": "VN34-PT",
+            "province_name": "Phú Thọ",
+            "impact_pct": -0.8209,
+            "lower_pct": -0.6526,
+            "upper_pct": -0.9891,
+            "risk_color_value": 9.85
+          },
+          {
+            "province_code": "VN34-DNAI",
+            "province_name": "Đồng Nai",
+            "impact_pct": -0.8209,
+            "lower_pct": -0.6526,
+            "upper_pct": -0.9891,
+            "risk_color_value": 9.85
+          },
+          {
+            "province_code": "VN34-HP",
+            "province_name": "Hải Phòng",
+            "impact_pct": -0.6638,
+            "lower_pct": -0.5277,
+            "upper_pct": -0.7999,
+            "risk_color_value": 7.97
+          },
+          {
+            "province_code": "VN34-NB",
+            "province_name": "Ninh Bình",
+            "impact_pct": -0.6432,
+            "lower_pct": -0.5114,
+            "upper_pct": -0.7751,
+            "risk_color_value": 7.72
+          },
+          {
+            "province_code": "VN34-CT",
+            "province_name": "Cần Thơ",
+            "impact_pct": -0.5422,
+            "lower_pct": -0.431,
+            "upper_pct": -0.6533,
+            "risk_color_value": 6.51
+          },
+          {
+            "province_code": "VN34-TNI",
+            "province_name": "Tây Ninh",
+            "impact_pct": -0.5206,
+            "lower_pct": -0.4139,
+            "upper_pct": -0.6273,
+            "risk_color_value": 6.25
+          },
+          {
+            "province_code": "VN34-HN",
+            "province_name": "Hà Nội",
+            "impact_pct": -0.4954,
+            "lower_pct": -0.3938,
+            "upper_pct": -0.5969,
+            "risk_color_value": 5.94
+          },
+          {
+            "province_code": "VN34-KH",
+            "province_name": "Khánh Hòa",
+            "impact_pct": -0.4781,
+            "lower_pct": -0.3801,
+            "upper_pct": -0.5761,
+            "risk_color_value": 5.74
+          }
+        ]
+      },
+      {
+        "quarter": 2,
+        "label": "Q+2",
+        "nodes": [
+          {
+            "province_code": "VN34-HCM",
+            "province_name": "Hồ Chí Minh",
+            "impact_pct": -1.5552,
+            "lower_pct": -1.2203,
+            "upper_pct": -1.8901,
+            "risk_color_value": 18.66
+          },
+          {
+            "province_code": "VN34-PT",
+            "province_name": "Phú Thọ",
+            "impact_pct": -1.1258,
+            "lower_pct": -0.8834,
+            "upper_pct": -1.3683,
+            "risk_color_value": 13.51
+          },
+          {
+            "province_code": "VN34-DNAI",
+            "province_name": "Đồng Nai",
+            "impact_pct": -1.1258,
+            "lower_pct": -0.8834,
+            "upper_pct": -1.3683,
+            "risk_color_value": 13.51
+          },
+          {
+            "province_code": "VN34-HP",
+            "province_name": "Hải Phòng",
+            "impact_pct": -0.9104,
+            "lower_pct": -0.7144,
+            "upper_pct": -1.1065,
+            "risk_color_value": 10.93
+          },
+          {
+            "province_code": "VN34-NB",
+            "province_name": "Ninh Bình",
+            "impact_pct": -0.8822,
+            "lower_pct": -0.6922,
+            "upper_pct": -1.0722,
+            "risk_color_value": 10.59
+          },
+          {
+            "province_code": "VN34-CT",
+            "province_name": "Cần Thơ",
+            "impact_pct": -0.7436,
+            "lower_pct": -0.5835,
+            "upper_pct": -0.9037,
+            "risk_color_value": 8.92
+          },
+          {
+            "province_code": "VN34-TNI",
+            "province_name": "Tây Ninh",
+            "impact_pct": -0.714,
+            "lower_pct": -0.5602,
+            "upper_pct": -0.8677,
+            "risk_color_value": 8.57
+          },
+          {
+            "province_code": "VN34-HN",
+            "province_name": "Hà Nội",
+            "impact_pct": -0.6794,
+            "lower_pct": -0.5331,
+            "upper_pct": -0.8257,
+            "risk_color_value": 8.15
+          },
+          {
+            "province_code": "VN34-KH",
+            "province_name": "Khánh Hòa",
+            "impact_pct": -0.6557,
+            "lower_pct": -0.5145,
+            "upper_pct": -0.7969,
+            "risk_color_value": 7.87
+          }
+        ]
+      },
+      {
+        "quarter": 3,
+        "label": "Q+3",
+        "nodes": [
+          {
+            "province_code": "VN34-PT",
+            "province_name": "Phú Thọ",
+            "impact_pct": -1.159,
+            "lower_pct": -0.9002,
+            "upper_pct": -1.4178,
+            "risk_color_value": 13.91
+          },
+          {
+            "province_code": "VN34-DNAI",
+            "province_name": "Đồng Nai",
+            "impact_pct": -1.159,
+            "lower_pct": -0.9002,
+            "upper_pct": -1.4178,
+            "risk_color_value": 13.91
+          },
+          {
+            "province_code": "VN34-HCM",
+            "province_name": "Hồ Chí Minh",
+            "impact_pct": -1.1197,
+            "lower_pct": -0.8697,
+            "upper_pct": -1.3698,
+            "risk_color_value": 13.44
+          },
+          {
+            "province_code": "VN34-HP",
+            "province_name": "Hải Phòng",
+            "impact_pct": -0.9373,
+            "lower_pct": -0.728,
+            "upper_pct": -1.1466,
+            "risk_color_value": 11.25
+          },
+          {
+            "province_code": "VN34-NB",
+            "province_name": "Ninh Bình",
+            "impact_pct": -0.9082,
+            "lower_pct": -0.7054,
+            "upper_pct": -1.111,
+            "risk_color_value": 10.9
+          },
+          {
+            "province_code": "VN34-CT",
+            "province_name": "Cần Thơ",
+            "impact_pct": -0.7655,
+            "lower_pct": -0.5946,
+            "upper_pct": -0.9364,
+            "risk_color_value": 9.19
+          },
+          {
+            "province_code": "VN34-TNI",
+            "province_name": "Tây Ninh",
+            "impact_pct": -0.735,
+            "lower_pct": -0.5709,
+            "upper_pct": -0.8992,
+            "risk_color_value": 8.82
+          },
+          {
+            "province_code": "VN34-HN",
+            "province_name": "Hà Nội",
+            "impact_pct": -0.6994,
+            "lower_pct": -0.5433,
+            "upper_pct": -0.8556,
+            "risk_color_value": 8.39
+          },
+          {
+            "province_code": "VN34-KH",
+            "province_name": "Khánh Hòa",
+            "impact_pct": -0.675,
+            "lower_pct": -0.5243,
+            "upper_pct": -0.8257,
+            "risk_color_value": 8.1
+          }
+        ]
+      },
+      {
+        "quarter": 4,
+        "label": "Q+4",
+        "nodes": [
+          {
+            "province_code": "VN34-PT",
+            "province_name": "Phú Thọ",
+            "impact_pct": -1.0614,
+            "lower_pct": -0.8173,
+            "upper_pct": -1.3056,
+            "risk_color_value": 12.74
+          },
+          {
+            "province_code": "VN34-DNAI",
+            "province_name": "Đồng Nai",
+            "impact_pct": -1.0614,
+            "lower_pct": -0.8173,
+            "upper_pct": -1.3056,
+            "risk_color_value": 12.74
+          },
+          {
+            "province_code": "VN34-HP",
+            "province_name": "Hải Phòng",
+            "impact_pct": -0.8584,
+            "lower_pct": -0.661,
+            "upper_pct": -1.0558,
+            "risk_color_value": 10.3
+          },
+          {
+            "province_code": "VN34-NB",
+            "province_name": "Ninh Bình",
+            "impact_pct": -0.8317,
+            "lower_pct": -0.6404,
+            "upper_pct": -1.0231,
+            "risk_color_value": 9.98
+          },
+          {
+            "province_code": "VN34-HCM",
+            "province_name": "Hồ Chí Minh",
+            "impact_pct": -0.8062,
+            "lower_pct": -0.6208,
+            "upper_pct": -0.9916,
+            "risk_color_value": 9.67
+          },
+          {
+            "province_code": "VN34-CT",
+            "province_name": "Cần Thơ",
+            "impact_pct": -0.7011,
+            "lower_pct": -0.5398,
+            "upper_pct": -0.8623,
+            "risk_color_value": 8.41
+          },
+          {
+            "province_code": "VN34-TNI",
+            "province_name": "Tây Ninh",
+            "impact_pct": -0.6732,
+            "lower_pct": -0.5183,
+            "upper_pct": -0.828,
+            "risk_color_value": 8.08
+          },
+          {
+            "province_code": "VN34-HN",
+            "province_name": "Hà Nội",
+            "impact_pct": -0.6406,
+            "lower_pct": -0.4932,
+            "upper_pct": -0.7879,
+            "risk_color_value": 7.69
+          },
+          {
+            "province_code": "VN34-KH",
+            "province_name": "Khánh Hòa",
+            "impact_pct": -0.6182,
+            "lower_pct": -0.476,
+            "upper_pct": -0.7604,
+            "risk_color_value": 7.42
+          }
+        ]
+      },
+      {
+        "quarter": 5,
+        "label": "Q+5",
+        "nodes": [
+          {
+            "province_code": "VN34-PT",
+            "province_name": "Phú Thọ",
+            "impact_pct": -0.9121,
+            "lower_pct": -0.6969,
+            "upper_pct": -1.1273,
+            "risk_color_value": 10.95
+          },
+          {
+            "province_code": "VN34-DNAI",
+            "province_name": "Đồng Nai",
+            "impact_pct": -0.9121,
+            "lower_pct": -0.6969,
+            "upper_pct": -1.1273,
+            "risk_color_value": 10.95
+          },
+          {
+            "province_code": "VN34-HP",
+            "province_name": "Hải Phòng",
+            "impact_pct": -0.7376,
+            "lower_pct": -0.5636,
+            "upper_pct": -0.9116,
+            "risk_color_value": 8.85
+          },
+          {
+            "province_code": "VN34-NB",
+            "province_name": "Ninh Bình",
+            "impact_pct": -0.7147,
+            "lower_pct": -0.5461,
+            "upper_pct": -0.8833,
+            "risk_color_value": 8.58
+          },
+          {
+            "province_code": "VN34-CT",
+            "province_name": "Cần Thơ",
+            "impact_pct": -0.6025,
+            "lower_pct": -0.4603,
+            "upper_pct": -0.7446,
+            "risk_color_value": 7.23
+          },
+          {
+            "province_code": "VN34-HCM",
+            "province_name": "Hồ Chí Minh",
+            "impact_pct": -0.5805,
+            "lower_pct": -0.4435,
+            "upper_pct": -0.7174,
+            "risk_color_value": 6.97
+          },
+          {
+            "province_code": "VN34-TNI",
+            "province_name": "Tây Ninh",
+            "impact_pct": -0.5785,
+            "lower_pct": -0.442,
+            "upper_pct": -0.7149,
+            "risk_color_value": 6.94
+          },
+          {
+            "province_code": "VN34-HN",
+            "province_name": "Hà Nội",
+            "impact_pct": -0.5505,
+            "lower_pct": -0.4206,
+            "upper_pct": -0.6803,
+            "risk_color_value": 6.61
+          },
+          {
+            "province_code": "VN34-KH",
+            "province_name": "Khánh Hòa",
+            "impact_pct": -0.5312,
+            "lower_pct": -0.4059,
+            "upper_pct": -0.6565,
+            "risk_color_value": 6.37
+          }
+        ]
+      },
+      {
+        "quarter": 6,
+        "label": "Q+6",
+        "nodes": [
+          {
+            "province_code": "VN34-PT",
+            "province_name": "Phú Thọ",
+            "impact_pct": -0.7531,
+            "lower_pct": -0.5714,
+            "upper_pct": -0.9347,
+            "risk_color_value": 9.04
+          },
+          {
+            "province_code": "VN34-DNAI",
+            "province_name": "Đồng Nai",
+            "impact_pct": -0.7531,
+            "lower_pct": -0.5714,
+            "upper_pct": -0.9347,
+            "risk_color_value": 9.04
+          },
+          {
+            "province_code": "VN34-HP",
+            "province_name": "Hải Phòng",
+            "impact_pct": -0.609,
+            "lower_pct": -0.4621,
+            "upper_pct": -0.7559,
+            "risk_color_value": 7.31
+          },
+          {
+            "province_code": "VN34-NB",
+            "province_name": "Ninh Bình",
+            "impact_pct": -0.5901,
+            "lower_pct": -0.4477,
+            "upper_pct": -0.7324,
+            "risk_color_value": 7.08
+          },
+          {
+            "province_code": "VN34-CT",
+            "province_name": "Cần Thơ",
+            "impact_pct": -0.4974,
+            "lower_pct": -0.3774,
+            "upper_pct": -0.6174,
+            "risk_color_value": 5.97
+          },
+          {
+            "province_code": "VN34-TNI",
+            "province_name": "Tây Ninh",
+            "impact_pct": -0.4776,
+            "lower_pct": -0.3624,
+            "upper_pct": -0.5928,
+            "risk_color_value": 5.73
+          },
+          {
+            "province_code": "VN34-HN",
+            "province_name": "Hà Nội",
+            "impact_pct": -0.4545,
+            "lower_pct": -0.3448,
+            "upper_pct": -0.5641,
+            "risk_color_value": 5.45
+          },
+          {
+            "province_code": "VN34-KH",
+            "province_name": "Khánh Hòa",
+            "impact_pct": -0.4386,
+            "lower_pct": -0.3328,
+            "upper_pct": -0.5444,
+            "risk_color_value": 5.26
+          },
+          {
+            "province_code": "VN34-HCM",
+            "province_name": "Hồ Chí Minh",
+            "impact_pct": -0.4179,
+            "lower_pct": -0.3171,
+            "upper_pct": -0.5188,
+            "risk_color_value": 5.02
+          }
+        ]
+      },
+      {
+        "quarter": 7,
+        "label": "Q+7",
+        "nodes": [
+          {
+            "province_code": "VN34-PT",
+            "province_name": "Phú Thọ",
+            "impact_pct": -0.605,
+            "lower_pct": -0.4561,
+            "upper_pct": -0.7539,
+            "risk_color_value": 7.26
+          },
+          {
+            "province_code": "VN34-DNAI",
+            "province_name": "Đồng Nai",
+            "impact_pct": -0.605,
+            "lower_pct": -0.4561,
+            "upper_pct": -0.7539,
+            "risk_color_value": 7.26
+          },
+          {
+            "province_code": "VN34-HP",
+            "province_name": "Hải Phòng",
+            "impact_pct": -0.4892,
+            "lower_pct": -0.3688,
+            "upper_pct": -0.6097,
+            "risk_color_value": 5.87
+          },
+          {
+            "province_code": "VN34-NB",
+            "province_name": "Ninh Bình",
+            "impact_pct": -0.474,
+            "lower_pct": -0.3574,
+            "upper_pct": -0.5907,
+            "risk_color_value": 5.69
+          },
+          {
+            "province_code": "VN34-CT",
+            "province_name": "Cần Thơ",
+            "impact_pct": -0.3996,
+            "lower_pct": -0.3012,
+            "upper_pct": -0.4979,
+            "risk_color_value": 4.79
+          },
+          {
+            "province_code": "VN34-TNI",
+            "province_name": "Tây Ninh",
+            "impact_pct": -0.3837,
+            "lower_pct": -0.2892,
+            "upper_pct": -0.4781,
+            "risk_color_value": 4.6
+          },
+          {
+            "province_code": "VN34-HN",
+            "province_name": "Hà Nội",
+            "impact_pct": -0.3651,
+            "lower_pct": -0.2752,
+            "upper_pct": -0.455,
+            "risk_color_value": 4.38
+          },
+          {
+            "province_code": "VN34-KH",
+            "province_name": "Khánh Hòa",
+            "impact_pct": -0.3523,
+            "lower_pct": -0.2656,
+            "upper_pct": -0.4391,
+            "risk_color_value": 4.23
+          },
+          {
+            "province_code": "VN34-HCM",
+            "province_name": "Hồ Chí Minh",
+            "impact_pct": -0.3009,
+            "lower_pct": -0.2268,
+            "upper_pct": -0.375,
+            "risk_color_value": 3.61
+          }
+        ]
+      },
+      {
+        "quarter": 8,
+        "label": "Q+8",
+        "nodes": [
+          {
+            "province_code": "VN34-PT",
+            "province_name": "Phú Thọ",
+            "impact_pct": -0.4765,
+            "lower_pct": -0.357,
+            "upper_pct": -0.5959,
+            "risk_color_value": 5.72
+          },
+          {
+            "province_code": "VN34-DNAI",
+            "province_name": "Đồng Nai",
+            "impact_pct": -0.4765,
+            "lower_pct": -0.357,
+            "upper_pct": -0.5959,
+            "risk_color_value": 5.72
+          },
+          {
+            "province_code": "VN34-HP",
+            "province_name": "Hải Phòng",
+            "impact_pct": -0.3853,
+            "lower_pct": -0.2887,
+            "upper_pct": -0.4819,
+            "risk_color_value": 4.62
+          },
+          {
+            "province_code": "VN34-NB",
+            "province_name": "Ninh Bình",
+            "impact_pct": -0.3734,
+            "lower_pct": -0.2798,
+            "upper_pct": -0.467,
+            "risk_color_value": 4.48
+          },
+          {
+            "province_code": "VN34-CT",
+            "province_name": "Cần Thơ",
+            "impact_pct": -0.3147,
+            "lower_pct": -0.2358,
+            "upper_pct": -0.3936,
+            "risk_color_value": 3.78
+          },
+          {
+            "province_code": "VN34-TNI",
+            "province_name": "Tây Ninh",
+            "impact_pct": -0.3022,
+            "lower_pct": -0.2264,
+            "upper_pct": -0.3779,
+            "risk_color_value": 3.63
+          },
+          {
+            "province_code": "VN34-HN",
+            "province_name": "Hà Nội",
+            "impact_pct": -0.2875,
+            "lower_pct": -0.2155,
+            "upper_pct": -0.3596,
+            "risk_color_value": 3.45
+          },
+          {
+            "province_code": "VN34-KH",
+            "province_name": "Khánh Hòa",
+            "impact_pct": -0.2775,
+            "lower_pct": -0.2079,
+            "upper_pct": -0.3471,
+            "risk_color_value": 3.33
+          },
+          {
+            "province_code": "VN34-HCM",
+            "province_name": "Hồ Chí Minh",
+            "impact_pct": -0.2167,
+            "lower_pct": -0.1623,
+            "upper_pct": -0.271,
+            "risk_color_value": 2.6
+          }
+        ]
+      }
+    ],
+    "research_note": "Deterministic graph diffusion fallback; replace edge weights with reviewed logistics/FDI/supply-chain graph for publication claims.",
+    "data_fingerprint": "40cca2784edd7a05",
+    "run_state": "completed"
+  },
+  "causal_probe": {
+    "run_id": "causal-a2866f4ef6cb4835",
+    "model_key": "macro-causal-merger-v1",
+    "boundary_version": "vn_34_2025",
+    "province_code": "VN34-CM",
+    "province_name": "Cà Mau",
+    "member_codes": [
+      "95",
+      "96"
+    ],
+    "treatment_key": "admin_merger_2025",
+    "treatment_year": 2025,
+    "outcome": "grdp_billion_vnd_est",
+    "actual_series": [
+      {
+        "year": 2015,
+        "value": 81679.33
+      },
+      {
+        "year": 2016,
+        "value": 89351.43
+      },
+      {
+        "year": 2017,
+        "value": 93779.95
+      },
+      {
+        "year": 2018,
+        "value": 97384.31
+      },
+      {
+        "year": 2019,
+        "value": 105171.72
+      },
+      {
+        "year": 2020,
+        "value": 133974.07
+      },
+      {
+        "year": 2021,
+        "value": 139070.0
+      },
+      {
+        "year": 2022,
+        "value": 127329.08
+      },
+      {
+        "year": 2023,
+        "value": 142768.76
+      },
+      {
+        "year": 2024,
+        "value": 103000.0
+      },
+      {
+        "year": 2025,
+        "value": 162000.0
+      }
+    ],
+    "counterfactual_series": [
+      {
+        "year": 2015,
+        "value": 81679.33
+      },
+      {
+        "year": 2016,
+        "value": 89351.43
+      },
+      {
+        "year": 2017,
+        "value": 93779.95
+      },
+      {
+        "year": 2018,
+        "value": 97384.31
+      },
+      {
+        "year": 2019,
+        "value": 105171.72
+      },
+      {
+        "year": 2020,
+        "value": 133974.06
+      },
+      {
+        "year": 2021,
+        "value": 139070.0
+      },
+      {
+        "year": 2022,
+        "value": 127329.09
+      },
+      {
+        "year": 2023,
+        "value": 142768.76
+      },
+      {
+        "year": 2024,
+        "value": 138549.61
+      },
+      {
+        "year": 2025,
+        "value": 164596.93
+      }
+    ],
+    "treatment_effects": [
+      {
+        "year": 2015,
+        "actual": 81679.33,
+        "counterfactual": 81679.33,
+        "effect": 0.0,
+        "effect_pct": 0.0,
+        "post_treatment": false
+      },
+      {
+        "year": 2016,
+        "actual": 89351.43,
+        "counterfactual": 89351.43,
+        "effect": -0.0,
+        "effect_pct": -0.0,
+        "post_treatment": false
+      },
+      {
+        "year": 2017,
+        "actual": 93779.95,
+        "counterfactual": 93779.95,
+        "effect": 0.0,
+        "effect_pct": 0.0,
+        "post_treatment": false
+      },
+      {
+        "year": 2018,
+        "actual": 97384.31,
+        "counterfactual": 97384.31,
+        "effect": 0.0,
+        "effect_pct": 0.0,
+        "post_treatment": false
+      },
+      {
+        "year": 2019,
+        "actual": 105171.72,
+        "counterfactual": 105171.72,
+        "effect": 0.0,
+        "effect_pct": 0.0,
+        "post_treatment": false
+      },
+      {
+        "year": 2020,
+        "actual": 133974.07,
+        "counterfactual": 133974.06,
+        "effect": 0.01,
+        "effect_pct": 0.0,
+        "post_treatment": false
+      },
+      {
+        "year": 2021,
+        "actual": 139070.0,
+        "counterfactual": 139070.0,
+        "effect": 0.0,
+        "effect_pct": 0.0,
+        "post_treatment": false
+      },
+      {
+        "year": 2022,
+        "actual": 127329.08,
+        "counterfactual": 127329.09,
+        "effect": -0.01,
+        "effect_pct": -0.0,
+        "post_treatment": false
+      },
+      {
+        "year": 2023,
+        "actual": 142768.76,
+        "counterfactual": 142768.76,
+        "effect": 0.0,
+        "effect_pct": 0.0,
+        "post_treatment": false
+      },
+      {
+        "year": 2024,
+        "actual": 103000.0,
+        "counterfactual": 138549.61,
+        "effect": -35549.61,
+        "effect_pct": -25.658,
+        "post_treatment": false
+      },
+      {
+        "year": 2025,
+        "actual": 162000.0,
+        "counterfactual": 164596.93,
+        "effect": -2596.93,
+        "effect_pct": -1.578,
+        "post_treatment": true
+      }
+    ],
+    "placebo_tests": {
+      "p_value_proxy": 1.0,
+      "placebo_abs_effects_pct": [
+        9.393,
+        4.956,
+        3.843,
+        7.997,
+        27.386,
+        3.804,
+        8.442,
+        12.126,
+        2.955,
+        18.8
+      ]
+    },
+    "metrics": {
+      "method": "synthetic_control_plus_event_study_proxy",
+      "avg_pre_effect_pct": -2.566,
+      "avg_post_effect_pct": -1.578,
+      "difference_in_differences_pct": 0.988,
+      "p_value_proxy": 1.0,
+      "placebo_count": 10
+    },
+    "interpretation": "Tác động sau sáp nhập cần theo dõi thêm",
+    "limitations": "Post-merger observations are provisional until official 2025+ GSO data is approved.",
+    "data_fingerprint": "45aeb2363f3b3eca",
+    "run_state": "completed"
+  },
+  "evaluation": {
+    "evaluation_id": "macro-eval-de65808fba22",
+    "boundary_version": "vn_34_2025",
+    "model_version": "macro-research-lab-v1",
+    "forecast_backtest": {
+      "sample_provinces": 8,
+      "mae_proxy_mean": 0.055,
+      "mean_interval_width_pct": 11.908,
+      "status": "proxy_complete"
+    },
+    "ablation_plan": [
+      {
+        "config": "baseline_elasticity",
+        "required": true
+      },
+      {
+        "config": "plus_news_embeddings",
+        "required": true
+      },
+      {
+        "config": "plus_spatial_graph",
+        "required": true
+      },
+      {
+        "config": "plus_causal_policy_features",
+        "required": true
+      }
+    ],
+    "causal_merger_probe": {
+      "method": "synthetic_control_plus_event_study_proxy",
+      "avg_pre_effect_pct": -2.566,
+      "avg_post_effect_pct": -1.578,
+      "difference_in_differences_pct": 0.988,
+      "p_value_proxy": 1.0,
+      "placebo_count": 10
+    },
+    "acceptance_targets": {
+      "beat_baseline_on_targets": ">=2/3",
+      "interval_coverage": "85-95%",
+      "placebo_false_signal_rate": "<=10%"
+    },
+    "generated_at": "2026-05-22T10:38:25.094839Z"
+  }
+}

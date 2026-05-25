@@ -7,15 +7,6 @@
     <title>Mô phỏng Kịch bản - Tax Inspectorate</title>
     <meta name="description"
         content="Digital Twin Simulation Engine – Mô phỏng tác động chính sách thuế lên hệ thống kinh tế Việt Nam">
-<!DOCTYPE html>
-<html class="light" lang="vi">
-
-<head>
-    <meta charset="utf-8" />
-    <meta content="width=device-width, initial-scale=1.0" name="viewport" />
-    <title>Mô phỏng Kịch bản - Tax Inspectorate</title>
-    <meta name="description"
-        content="Digital Twin Simulation Engine – Mô phỏng tác động chính sách thuế lên hệ thống kinh tế Việt Nam">
     <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&amp;display=swap"
         rel="stylesheet" />
@@ -119,6 +110,23 @@
         .stagger-6 {
             animation-delay: 0.3s;
         }
+
+        /* Smooth map transitions */
+        #vietnam-map, #vietnam-3d-map, #vietnam-echarts-map {
+            transition: opacity 0.35s ease;
+        }
+        .map-fade-out { opacity: 0 !important; }
+        .map-fade-in { opacity: 1; }
+
+        /* Province charts fade */
+        #province-charts-section,
+        #merger-analysis-panel {
+            animation: fadeSlideUp 0.3s ease forwards;
+        }
+        @keyframes fadeSlideUp {
+            from { opacity: 0; transform: translateY(12px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
     </style>
     <link rel="stylesheet" href="../css/global.css?v=3.2">
     <link rel="icon" type="image/png" href="../assets/logo.png">
@@ -198,6 +206,7 @@
                     <p class="text-[10px] text-slate-500" id="user-current-role">Quản trị viên</p>
                 </div>
             </div>
+
         </div>
     </aside>
 
@@ -233,7 +242,15 @@
             </div>
 
             <!-- KPI Row -->
-            <div class="grid grid-cols-1 md:grid-cols-4 gap-6 mb-10 fade-in" style="animation-delay:0.1s">
+            <div class="grid grid-cols-1 md:grid-cols-5 gap-6 mb-10 fade-in" style="animation-delay:0.1s">
+                <div class="bg-white p-6 rounded-xl shadow-[0_20px_40px_rgba(0,33,71,0.06)]">
+                    <div class="flex justify-between items-start mb-3">
+                        <span class="text-[10px] font-bold uppercase tracking-widest text-slate-500">Tổng doanh nghiệp</span>
+                        <span class="material-symbols-outlined text-indigo-600">corporate_fare</span>
+                    </div>
+                    <div class="text-3xl font-extrabold tracking-tighter text-indigo-600"
+                        data-kpi="sim-total-companies">---</div>
+                </div>
                 <div class="bg-white p-6 rounded-xl shadow-[0_20px_40px_rgba(0,33,71,0.06)]">
                     <div class="flex justify-between items-start mb-3">
                         <span class="text-[10px] font-bold uppercase tracking-widest text-slate-500">DN Rủi ro
@@ -277,7 +294,7 @@
                 <div class="lg:col-span-1 bg-white rounded-xl shadow-[0_20px_40px_rgba(0,33,71,0.06)] p-6 fade-in"
                     style="animation-delay:0.2s">
                     <h3 class="text-sm font-black text-primary-container tracking-tight mb-6 flex items-center gap-2">
-                        <span class="material-symbols-outlined text-[18px]">tune</span> Bảng điều khiển Vĩ mô
+                        Bảng điều khiển Vĩ mô
                     </h3>
                     <div class="space-y-5">
                         <div>
@@ -380,7 +397,7 @@
                 <div class="lg:col-span-2 bg-white rounded-xl shadow-[0_20px_40px_rgba(0,33,71,0.06)] p-6 fade-in"
                     style="animation-delay:0.3s">
                     <h3 class="text-sm font-black text-primary-container tracking-tight mb-4 flex items-center gap-2">
-                        <span class="material-symbols-outlined text-[18px]">monitoring</span> Dự phóng Doanh thu Quý (Tỷ
+                        Dự phóng Doanh thu Quý (Tỷ
                         VNĐ)
                     </h3>
                     <div class="w-full">
@@ -424,7 +441,7 @@
             <div class="mb-10 fade-in" style="animation-delay:0.4s">
                 <div class="flex items-center justify-between mb-4">
                     <h3 class="text-sm font-black text-primary-container tracking-tight flex items-center gap-2">
-                        <span class="material-symbols-outlined text-[18px]">bookmark</span> Kịch bản Có sẵn
+                        Kịch bản Có sẵn
                     </h3>
                     <button id="preset-reset-btn" class="text-xs font-bold text-slate-500 hover:text-primary-container border border-slate-200 rounded-lg px-3 py-1.5 hover:bg-slate-50 transition-colors">
                         <span class="material-symbols-outlined text-[14px] align-middle mr-0.5">restart_alt</span> Đặt lại mặc định
@@ -437,25 +454,40 @@
 
         <!-- ═══ Section: Bản đồ Kịch bản Kinh tế Việt Nam ═══ -->
         <div class="mt-8 bg-white rounded-xl shadow-[0_20px_40px_rgba(0,33,71,0.06)] p-6" id="province-map-section">
-            <div class="flex items-center gap-3 mb-6">
-                <span class="material-symbols-outlined text-primary-container text-2xl">map</span>
-                <h2 class="text-lg font-black text-primary-container tracking-tight">
+            <div class="flex items-center gap-3 mb-5">
+                <h2 id="province-map-title" class="text-sm font-black text-primary-container tracking-tight uppercase">
                     Bản đồ Kịch bản Kinh tế 34 Đơn vị Hành chính 2025
                 </h2>
-                <span class="ml-auto px-3 py-1 bg-blue-50 text-blue-600 text-xs font-bold rounded-full">DIGITAL
-                    TWIN</span>
+                <span class="ml-auto px-2.5 py-0.5 bg-slate-100 text-slate-500 text-[10px] font-bold rounded-full uppercase tracking-wider">Digital Twin</span>
             </div>
 
             <div class="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_420px] gap-6">
                 <!-- Bản đồ (3/5 width) -->
                 <div>
-                    <div
-                        class="mb-3 inline-flex rounded-lg border border-slate-200 bg-slate-50 p-1 text-xs font-bold text-slate-600 relative z-50">
-                        <button id="map-tab-leaflet" type="button"
-                            class="px-3 py-2 rounded-md bg-white text-primary-container border border-slate-200 shadow-sm">Leaflet
-                            2D</button>
-                        <button id="map-tab-3d" type="button" class="px-3 py-2 rounded-md">Three.js 3D</button>
-                        <button id="map-tab-echarts" type="button" class="px-3 py-2 rounded-md">ECharts Nhiệt</button>
+                    <div class="mb-3 flex flex-wrap items-center gap-3 relative z-50">
+                        <div class="inline-flex rounded-lg border border-slate-200 bg-slate-50 p-0.5 text-xs font-bold text-slate-600">
+                            <button id="map-tab-leaflet" type="button"
+                                class="px-3 py-1.5 rounded-md bg-white text-primary-container border border-slate-200 shadow-sm transition-all duration-200">Leaflet 2D</button>
+                            <button id="map-tab-3d" type="button" class="px-3 py-1.5 rounded-md transition-all duration-200">Three.js 3D</button>
+                            <button id="map-tab-echarts" type="button" class="px-3 py-1.5 rounded-md transition-all duration-200">ECharts Nhiệt</button>
+                        </div>
+                        <div class="inline-flex rounded-lg border border-slate-200 bg-slate-50 p-0.5 text-xs font-black">
+                            <button type="button" data-boundary-mode="34"
+                                class="px-3 py-1.5 rounded-md bg-primary-container text-white transition-all duration-200">34 Đơn vị</button>
+                            <button type="button" data-boundary-mode="63"
+                                class="px-3 py-1.5 rounded-md bg-white text-slate-600 transition-all duration-200">63 Tỉnh</button>
+                        </div>
+                        <label id="legacy-boundary-overlay-wrap"
+                            class="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-bold text-slate-600 cursor-pointer">
+                            <input id="legacy-boundary-overlay-toggle" type="checkbox" class="rounded border-slate-300">
+                            So sánh ranh giới cũ
+                        </label>
+                        <select id="leaflet-choropleth-layer" class="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-bold text-slate-600">
+                            <option value="risk">Rủi ro</option>
+                            <option value="gdp">GDP</option>
+                            <option value="tax_efficiency">Hiệu suất thuế</option>
+                            <option value="compliance">Tuân thủ</option>
+                        </select>
                     </div>
                     <div id="vietnam-map" class="w-full rounded-lg border border-slate-200 overflow-hidden relative z-0"
                         style="height: 550px;"></div>
@@ -464,116 +496,467 @@
                     <div id="vietnam-echarts-map" class="w-full rounded-lg border border-slate-200 overflow-hidden relative z-0 hidden"
                         style="height: 550px;"></div>
                     <p class="text-xs text-slate-400 mt-2 text-center">Click vào tỉnh để xem kịch bản kinh tế</p>
+
+                    <!-- Chi tiết Kinh tế & Dân số (Chuyển dưới bản đồ) -->
+                    <div id="province-details-left-section" class="mt-5 hidden bg-white rounded-xl border border-slate-200 p-5">
+                        <div class="mb-4">
+                            <h3 class="text-xs font-black text-primary-container uppercase tracking-wider">Thông tin chi tiết Tỉnh/Thành phố</h3>
+                        </div>
+                        <div id="province-context-cards" class="grid grid-cols-1 md:grid-cols-2 gap-4"></div>
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4 pt-4 border-t border-slate-100">
+                            <!-- Radar so sánh -->
+                            <div id="province-radar-wrap" class="rounded-lg border border-slate-200 bg-slate-50 p-4" style="display:none;">
+                                <div class="text-[10px] font-black uppercase tracking-wider text-slate-500 mb-2">Radar so sánh vs Trung bình Quốc gia</div>
+                                <div class="h-[220px]"><canvas id="province-radar-chart"></canvas></div>
+                            </div>
+                            
+                            <!-- Bản đồ thu nhỏ -->
+                            <div id="province-minimap" class="flex justify-center items-center" style="display:none;">
+                                <canvas id="province-minimap-canvas" width="120" height="160" class="rounded-lg border border-slate-200 bg-slate-50"></canvas>
+                            </div>
+                        </div>
+
+                        <!-- Advanced Analytics Grid -->
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mt-6 pt-6 border-t border-slate-200">
+                            <!-- Causal Contribution Analysis (XAI) -->
+                            <div id="province-causal-container" class="bg-slate-50 rounded-xl p-5 border border-slate-200" style="display:none;">
+                                <p class="text-xs text-slate-400 mb-3 uppercase font-bold">Đóng góp nhân quả (Causal XAI)</p>
+                                <div id="province-causal-chart" class="h-[220px] w-full"></div>
+                            </div>
+
+                            <!-- Confidence Gauge -->
+                            <div id="province-gauge-container" class="bg-slate-50 rounded-xl p-5 border border-slate-200" style="display:none;">
+                                <p class="text-xs text-slate-400 mb-3 uppercase font-bold">Chỉ số Tin cậy Mô hình</p>
+                                <div id="province-gauge-chart" class="h-[220px] w-full"></div>
+                            </div>
+
+                            <!-- Monte Carlo Distribution -->
+                            <div id="province-mc-container" class="md:col-span-2 bg-slate-50 rounded-xl p-5 border border-slate-200" style="display:none;">
+                                <div class="flex items-center justify-between mb-3">
+                                    <p class="text-xs text-slate-400 uppercase font-bold">Phân phối Monte Carlo (N=300)</p>
+                                    <span id="mc-var-badge" class="text-xs font-bold px-3 py-1 rounded-full bg-red-50 text-red-600 border border-red-100"></span>
+                                </div>
+                                <div id="province-mc-chart" class="h-[260px] w-full"></div>
+                                <div id="mc-stats-row" class="mt-4 grid grid-cols-4 gap-3 text-xs"></div>
+                            </div>
+
+                            <!-- Tornado Sensitivity Analysis -->
+                            <div id="province-tornado-container" class="md:col-span-2 bg-slate-50 rounded-xl p-5 border border-slate-200" style="display:none;">
+                                <p class="text-xs text-slate-400 mb-3 uppercase font-bold">Phân tích Nhạy cảm Tornado (OAT)</p>
+                                <div id="province-tornado-chart" class="h-[260px] w-full"></div>
+                            </div>
+
+                            <!-- Moran's I & Spatial GNN Spillover -->
+                            <div id="province-spatial-container" class="md:col-span-2 bg-slate-50 rounded-xl p-5 border border-slate-200 shadow-sm transition-all" style="display:none;">
+                                <div class="flex items-center justify-between mb-4 border-b border-slate-100 pb-2">
+                                    <h4 class="text-xs font-black text-primary-container uppercase tracking-tight flex items-center gap-1.5">
+                                        <span class="material-symbols-outlined text-sm text-emerald-500">hub</span>
+                                        Tác động Lan tỏa Không gian (Moran's I, Spatial GNN & Economic Linkage)
+                                    </h4>
+                                    <span class="text-[9px] font-black px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-600 border border-emerald-100 uppercase tracking-widest">Q1 Research Module</span>
+                                </div>
+                                <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                                    <div>
+                                        <div class="flex items-center justify-between mb-2">
+                                            <p class="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Đồ thị Phân tán Moran's I</p>
+                                            <span id="moran-index-val" class="text-[11px] font-extrabold text-slate-700 bg-slate-100 px-2 py-0.5 rounded">Moran's I = --</span>
+                                        </div>
+                                        <div id="province-moran-chart" class="h-[220px] w-full bg-white rounded-lg border border-slate-100 p-2"></div>
+                                    </div>
+                                    <div class="flex flex-col">
+                                        <p class="text-[10px] text-slate-400 font-bold uppercase tracking-wider mb-2">Hệ số truyền dẫn & Lan tỏa sang Tỉnh Lân cận</p>
+                                        <div id="province-spatial-flow" class="space-y-2 overflow-y-auto max-h-[220px] pr-1 scrollbar-thin">
+                                            <!-- Dynamically generated neighbor list -->
+                                        </div>
+                                    </div>
+                                    <div>
+                                        <p class="text-[10px] text-slate-400 font-bold uppercase tracking-wider mb-2">Đồ thị Chord liên kết kinh tế liên tỉnh</p>
+                                        <div id="province-chord-chart" class="h-[220px] w-full bg-white rounded-lg border border-slate-100 p-2"></div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- SHAP Global Feature Importance -->
+                            <div id="province-shap-container" class="md:col-span-2 bg-slate-50 rounded-xl p-5 border border-slate-200 shadow-sm" style="display:none;">
+                                <p class="text-xs text-slate-500 mb-3 uppercase font-black tracking-wider flex items-center gap-1.5">
+                                    <span class="material-symbols-outlined text-sm text-indigo-500">analytics</span>
+                                    Giải thích mô hình vĩ mô (SHAP Global Feature Importance)
+                                </p>
+                                <div id="province-shap-chart" class="h-[280px] w-full bg-white rounded-lg p-2 border border-slate-100"></div>
+                            </div>
+
+                            <!-- Pareto Multi-Objective Optimization -->
+                            <div id="province-pareto-container" class="md:col-span-2 bg-slate-50 rounded-xl p-5 border border-slate-200 shadow-sm" style="display:none;">
+                                <div class="flex items-center justify-between mb-3 border-b border-slate-100 pb-2">
+                                    <h4 class="text-xs font-black text-primary-container uppercase tracking-tight flex items-center gap-1.5">
+                                        <span class="material-symbols-outlined text-sm text-violet-500">architecture</span>
+                                        Tối ưu hóa chính sách Pareto (Doanh thu vs Rủi ro)
+                                    </h4>
+                                    <span id="pareto-opt-badge" class="text-[9px] font-black px-2 py-0.5 rounded-full bg-violet-50 text-violet-600 border border-violet-100 uppercase tracking-widest">Compromise Optimal</span>
+                                </div>
+                                <div id="province-pareto-chart" class="h-[280px] w-full bg-white rounded-lg p-2 border border-slate-100"></div>
+                                <div id="pareto-stats-row" class="mt-4 grid grid-cols-3 gap-3 text-xs bg-white p-3 rounded-lg border border-slate-100"></div>
+                            </div>
+
+                            <!-- Bayesian VAR (BVAR) Impulse Response Functions (IRF) -->
+                            <div id="province-bvar-container" class="md:col-span-2 bg-slate-50 rounded-xl p-5 border border-slate-200 shadow-sm" style="display:none;">
+                                <p class="text-xs text-slate-500 mb-3 uppercase font-black tracking-wider flex items-center gap-1.5">
+                                    <span class="material-symbols-outlined text-sm text-amber-500">show_chart</span>
+                                    Mô phỏng phản ứng xung kinh tế (Bayesian VAR Impulse Response - 20 quý)
+                                </p>
+                                <div id="province-bvar-chart" class="h-[300px] w-full bg-white rounded-lg p-2 border border-slate-100"></div>
+                            </div>
+
+                            <!-- Regime-Switching Markov Model -->
+                            <div id="province-regime-container" class="md:col-span-2 bg-slate-50 rounded-xl p-5 border border-slate-200 shadow-sm" style="display:none;">
+                                <div class="flex items-center justify-between mb-3 border-b border-slate-100 pb-2">
+                                    <h4 class="text-xs font-black text-primary-container uppercase tracking-tight flex items-center gap-1.5">
+                                        <span class="material-symbols-outlined text-sm text-blue-500">timeline</span>
+                                        Chu kỳ trạng thái ẩn kinh tế tỉnh (Markov Regime-Switching)
+                                    </h4>
+                                    <span id="regime-status-badge" class="text-[9px] font-black px-2 py-0.5 rounded-full bg-blue-50 text-blue-600 border border-blue-100 uppercase tracking-widest">Active Regime</span>
+                                </div>
+                                <div id="province-regime-chart" class="h-[280px] w-full bg-white rounded-lg p-2 border border-slate-100"></div>
+                            </div>
+                        </div>
+                    </div>
                 </div>
 
-                <!-- Panel kịch bản (2/5 width) -->
-                <div id="province-scenario-panel" class="rounded-xl border border-slate-200 bg-white p-4">
-                    <div class="mb-4">
-                        <label class="text-xs font-bold text-slate-600 uppercase tracking-wider">Nhập kịch bản tương
-                            lai</label>
-                        <textarea id="scenario-text-input" rows="4"
-                            class="mt-1 w-full rounded-lg border-slate-300 text-sm"
-                            placeholder="Ví dụ: Mỹ đánh thuế hàng hóa Việt Nam 30%, hoặc Đại dịch X làm đứt gãy chuỗi cung ứng..."></textarea>
-                        <div class="mt-2 flex gap-2">
-                            <button id="interpret-text-scenario-btn" type="button"
-                                class="flex-1 rounded-lg bg-primary-container px-3 py-2 text-sm font-bold text-white">Phân
-                                tích bằng AI</button>
-                            <button id="remember-text-scenario-btn" type="button"
-                                class="rounded-lg border border-slate-300 px-3 py-2 text-sm font-bold text-slate-600"
-                                disabled>Lưu sau duyệt</button>
+                <!-- Panel kịch bản (Right Column - 420px) -->
+                <div class="space-y-6">
+                    <div id="province-scenario-panel" class="rounded-xl border border-slate-200 bg-white p-4">
+                        <div class="mb-4">
+                            <label class="text-xs font-bold text-slate-600 uppercase tracking-wider">Nhập kịch bản tương
+                                lai</label>
+                            <textarea id="scenario-text-input" rows="4"
+                                class="mt-1 w-full rounded-lg border-slate-300 text-sm"
+                                placeholder="Ví dụ: Mỹ đánh thuế hàng hóa Việt Nam 30%, hoặc Đại dịch X làm đứt gãy chuỗi cung ứng..."></textarea>
+                            <div class="mt-2 flex gap-2">
+                                <button id="interpret-text-scenario-btn" type="button"
+                                    class="flex-1 rounded-lg bg-primary-container px-3 py-2 text-sm font-bold text-white">Phân
+                                    tích bằng AI</button>
+                                <button id="remember-text-scenario-btn" type="button"
+                                    class="rounded-lg border border-slate-300 px-3 py-2 text-sm font-bold text-slate-600"
+                                    disabled>Lưu sau duyệt</button>
+                            </div>
+                            <div id="text-scenario-status" class="mt-2 text-xs text-slate-500"></div>
+                            <div id="text-scenario-cards" class="mt-3 space-y-2"></div>
                         </div>
-                        <div id="text-scenario-status" class="mt-2 text-xs text-slate-500"></div>
-                        <div id="text-scenario-cards" class="mt-3 space-y-2"></div>
-                    </div>
-                    <!-- Event selector -->
-                    <div class="mb-4">
-                        <label class="text-xs font-bold text-slate-600 uppercase tracking-wider">Sự kiện kinh tế</label>
-                        <select id="event-selector" class="mt-1 w-full rounded-lg border-slate-300 text-sm">
-                            <option value="">-- Không áp dụng sự kiện --</option>
-                        </select>
-                    </div>
-                    <div class="mb-4">
-                        <label class="text-xs font-bold text-slate-600 uppercase tracking-wider">Kỳ hạn dân số/GDP</label>
-                        <select id="province-horizon-years" class="mt-1 w-full rounded-lg border-slate-300 text-sm">
-                            <option value="5">5 năm</option>
-                            <option value="10" selected>10 năm</option>
-                            <option value="20">20 năm</option>
-                        </select>
+                        <!-- Event selector -->
+                        <div class="mb-4">
+                            <label class="text-xs font-bold text-slate-600 uppercase tracking-wider">Sự kiện kinh tế</label>
+                            <select id="event-selector" class="mt-1 w-full rounded-lg border-slate-300 text-sm">
+                                <option value="">-- Không áp dụng sự kiện --</option>
+                            </select>
+                        </div>
+                        <div class="mb-4">
+                            <label class="text-xs font-bold text-slate-600 uppercase tracking-wider">Kỳ hạn dân số/GDP</label>
+                            <select id="province-horizon-years" class="mt-1 w-full rounded-lg border-slate-300 text-sm">
+                                <option value="5">5 năm</option>
+                                <option value="10" selected>10 năm</option>
+                                <option value="20">20 năm</option>
+                            </select>
+                        </div>
+
+                        <!-- Sliders -->
+                        <div class="space-y-3 mb-4">
+                            <div>
+                                <label class="text-xs text-slate-500">GDP Delta: <span id="gdp-delta-val">0%</span></label>
+                                <input type="range" id="gdp-delta-slider" min="-20" max="20" value="0" step="0.5"
+                                    class="w-full h-1.5 bg-slate-200 rounded-lg appearance-none">
+                            </div>
+                            <div>
+                                <label class="text-xs text-slate-500">Tax Rate Delta: <span
+                                        id="tax-delta-val">0%</span></label>
+                                <input type="range" id="tax-delta-slider" min="-5" max="5" value="0" step="0.1"
+                                    class="w-full h-1.5 bg-slate-200 rounded-lg appearance-none">
+                            </div>
+                            <div>
+                                <label class="text-xs text-slate-500">Compliance Delta: <span
+                                        id="compliance-delta-val">0%</span></label>
+                                <input type="range" id="compliance-delta-slider" min="-20" max="20" value="0" step="1"
+                                    class="w-full h-1.5 bg-slate-200 rounded-lg appearance-none">
+                            </div>
+                        </div>
+
+                        <button id="run-province-scenario-btn"
+                            class="w-full py-2.5 bg-primary-container text-white text-sm font-bold rounded-lg hover:opacity-90 transition mb-4"
+                            disabled>
+                            <span class="material-symbols-outlined text-sm align-middle mr-1">play_arrow</span>
+                            Chạy Kịch bản
+                        </button>
+
+                        <!-- Metrics cards -->
+                        <div id="province-metrics" class="grid grid-cols-2 gap-2 mb-4" style="display:none;">
+                            <div class="bg-slate-50 rounded-lg p-3 text-center">
+                                <p class="text-[10px] text-slate-400 uppercase">Δ GDP</p>
+                                <p id="metric-gdp" class="text-lg font-black text-primary-container">--</p>
+                            </div>
+                            <div class="bg-slate-50 rounded-lg p-3 text-center">
+                                <p class="text-[10px] text-slate-400 uppercase">Δ Thu thuế</p>
+                                <p id="metric-revenue" class="text-lg font-black text-primary-container">--</p>
+                            </div>
+                            <div class="bg-slate-50 rounded-lg p-3 text-center">
+                                <p class="text-[10px] text-slate-400 uppercase">Rủi ro</p>
+                                <p id="metric-risk" class="text-lg font-black">--</p>
+                            </div>
+                            <div class="bg-slate-50 rounded-lg p-3 text-center">
+                                <p class="text-[10px] text-slate-400 uppercase">Tuân thủ</p>
+                                <p id="metric-compliance" class="text-lg font-black text-primary-container">--</p>
+                            </div>
+                        </div>
+
+                        <!-- Narrative output -->
+                        <div id="province-narrative"
+                            class="bg-slate-50 rounded-lg p-4 text-sm text-slate-700 leading-relaxed max-h-[300px] overflow-y-auto"
+                            style="display:none;">
+                            <p class="text-xs text-slate-400 mb-2 uppercase font-bold">Phân tích kịch bản</p>
+                            <div id="narrative-content"></div>
+                        </div>
+
+
+
+                        <!-- Empty state -->
+                        <div id="province-empty-state" class="text-center py-12 text-slate-400">
+                            <span class="material-symbols-outlined text-4xl mb-2">touch_app</span>
+                            <p class="text-sm">Chọn một tỉnh trên bản đồ để bắt đầu</p>
+                        </div>
                     </div>
 
-                    <!-- Sliders -->
-                    <div class="space-y-3 mb-4">
-                        <div>
-                            <label class="text-xs text-slate-500">GDP Delta: <span id="gdp-delta-val">0%</span></label>
-                            <input type="range" id="gdp-delta-slider" min="-20" max="20" value="0" step="0.5"
-                                class="w-full h-1.5 bg-slate-200 rounded-lg appearance-none">
+                    <!-- Bài báo/Sự kiện liên quan (Đã chuyển sang bên phải để cân bằng) -->
+                    <div id="province-events-sidebar-card" class="rounded-xl border border-slate-200 bg-white p-5 hidden">
+                        <div class="mb-3">
+                            <h3 class="text-xs font-black text-primary-container uppercase tracking-wider">Bài báo/Sự kiện liên quan</h3>
                         </div>
-                        <div>
-                            <label class="text-xs text-slate-500">Tax Rate Delta: <span
-                                    id="tax-delta-val">0%</span></label>
-                            <input type="range" id="tax-delta-slider" min="-5" max="5" value="0" step="0.1"
-                                class="w-full h-1.5 bg-slate-200 rounded-lg appearance-none">
-                        </div>
-                        <div>
-                            <label class="text-xs text-slate-500">Compliance Delta: <span
-                                    id="compliance-delta-val">0%</span></label>
-                            <input type="range" id="compliance-delta-slider" min="-20" max="20" value="0" step="1"
-                                class="w-full h-1.5 bg-slate-200 rounded-lg appearance-none">
-                        </div>
-                    </div>
-
-                    <button id="run-province-scenario-btn"
-                        class="w-full py-2.5 bg-primary-container text-white text-sm font-bold rounded-lg hover:opacity-90 transition mb-4"
-                        disabled>
-                        <span class="material-symbols-outlined text-sm align-middle mr-1">play_arrow</span>
-                        Chạy Kịch bản
-                    </button>
-
-                    <!-- Metrics cards -->
-                    <div id="province-metrics" class="grid grid-cols-2 gap-2 mb-4" style="display:none;">
-                        <div class="bg-slate-50 rounded-lg p-3 text-center">
-                            <p class="text-[10px] text-slate-400 uppercase">Δ GDP</p>
-                            <p id="metric-gdp" class="text-lg font-black text-primary-container">--</p>
-                        </div>
-                        <div class="bg-slate-50 rounded-lg p-3 text-center">
-                            <p class="text-[10px] text-slate-400 uppercase">Δ Thu thuế</p>
-                            <p id="metric-revenue" class="text-lg font-black text-primary-container">--</p>
-                        </div>
-                        <div class="bg-slate-50 rounded-lg p-3 text-center">
-                            <p class="text-[10px] text-slate-400 uppercase">Rủi ro</p>
-                            <p id="metric-risk" class="text-lg font-black">--</p>
-                        </div>
-                        <div class="bg-slate-50 rounded-lg p-3 text-center">
-                            <p class="text-[10px] text-slate-400 uppercase">Tuân thủ</p>
-                            <p id="metric-compliance" class="text-lg font-black text-primary-container">--</p>
-                        </div>
-                    </div>
-
-                    <!-- Narrative output -->
-                    <div id="province-narrative"
-                        class="bg-slate-50 rounded-lg p-4 text-sm text-slate-700 leading-relaxed max-h-[300px] overflow-y-auto"
-                        style="display:none;">
-                        <p class="text-xs text-slate-400 mb-2 uppercase font-bold">📝 Phân tích kịch bản</p>
-                        <div id="narrative-content"></div>
-                    </div>
-                    <div id="province-context-cards" class="mt-4 space-y-2"></div>
-                    <div id="province-event-cards" class="mt-4 space-y-2"></div>
-
-                    <!-- Empty state -->
-                    <div id="province-empty-state" class="text-center py-12 text-slate-400">
-                        <span class="material-symbols-outlined text-4xl mb-2">touch_app</span>
-                        <p class="text-sm">Chọn một tỉnh trên bản đồ để bắt đầu</p>
+                        <div id="province-event-cards" class="space-y-3 max-h-[550px] overflow-y-auto pr-1"></div>
                     </div>
                 </div>
             </div>
         </div>
+
+            <!-- ═══ Section: Biểu đồ Kinh tế Tỉnh qua các năm ═══ -->
+            <div id="province-charts-section" class="mt-6 hidden">
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+                    <!-- Line Chart: GRDP qua năm -->
+                    <div class="bg-white rounded-xl border border-slate-200 p-5">
+                        <div class="text-xs font-black uppercase tracking-wider text-slate-500 mb-3">GRDP qua các năm (2015-2025)</div>
+                        <div class="h-[260px]"><canvas id="province-grdp-line-chart"></canvas></div>
+                    </div>
+                    <!-- Bar Chart: Thu thuế qua năm -->
+                    <div class="bg-white rounded-xl border border-slate-200 p-5">
+                        <div class="text-xs font-black uppercase tracking-wider text-slate-500 mb-3">Thu ngân sách qua các năm</div>
+                        <div class="h-[260px]"><canvas id="province-tax-bar-chart"></canvas></div>
+                    </div>
+                </div>
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+                    <!-- Stacked Area: Cơ cấu ngành thay đổi qua năm -->
+                    <div class="bg-white rounded-xl border border-slate-200 p-5">
+                        <div class="text-xs font-black uppercase tracking-wider text-slate-500 mb-3">Cơ cấu ngành kinh tế qua các năm</div>
+                        <div class="h-[260px]"><canvas id="province-sector-area-chart"></canvas></div>
+                    </div>
+                    <!-- Scatter: GDP vs Thu thuế + Export -->
+                    <div class="bg-white rounded-xl border border-slate-200 p-5">
+                        <div class="text-xs font-black uppercase tracking-wider text-slate-500 mb-3">Xuất nhập khẩu qua các năm</div>
+                        <div class="h-[260px]"><canvas id="province-trade-line-chart"></canvas></div>
+                    </div>
+                </div>
+                <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
+                    <!-- Donut: Cơ cấu sắc thuế -->
+                    <div class="bg-white rounded-xl border border-slate-200 p-5">
+                        <div class="text-xs font-black uppercase tracking-wider text-slate-500 mb-3">Cơ cấu sắc thuế</div>
+                        <div class="h-[240px]"><canvas id="province-tax-donut-chart"></canvas></div>
+                    </div>
+                    <!-- Doughnut: Cơ cấu ngành GRDP -->
+                    <div class="bg-white rounded-xl border border-slate-200 p-5">
+                        <div class="text-xs font-black uppercase tracking-wider text-slate-500 mb-3">Cơ cấu ngành GRDP</div>
+                        <div class="h-[240px]"><canvas id="province-sector-donut-chart"></canvas></div>
+                    </div>
+                    <!-- Line: GDP bình quân đầu người -->
+                    <div class="bg-white rounded-xl border border-slate-200 p-5">
+                        <div class="text-xs font-black uppercase tracking-wider text-slate-500 mb-3">GDP bình quân đầu người</div>
+                        <div class="h-[240px]"><canvas id="province-gdp-per-capita-chart"></canvas></div>
+                    </div>
+                </div>
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+                    <!-- Bubble: GDP vs Thu thuế (toàn quốc) -->
+                    <div class="bg-white rounded-xl border border-slate-200 p-5">
+                        <div class="text-xs font-black uppercase tracking-wider text-slate-500 mb-3">Tương quan GDP – Thu thuế (toàn quốc)</div>
+                        <div class="h-[280px]"><canvas id="province-gdp-tax-bubble-chart"></canvas></div>
+                    </div>
+                    <!-- Horizontal Bar: Top 10 tỉnh theo GRDP -->
+                    <div class="bg-white rounded-xl border border-slate-200 p-5">
+                        <div class="text-xs font-black uppercase tracking-wider text-slate-500 mb-3">Top 10 tỉnh theo GRDP</div>
+                        <div class="h-[280px]"><canvas id="province-top10-bar-chart"></canvas></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ═══ Section: Phân tích Sáp nhập ═══ -->
+            <div id="merger-analysis-panel" class="mt-6 hidden bg-white rounded-xl border border-slate-200 p-5">
+                <div class="mb-4 flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                        <h3 id="merger-analysis-title" class="text-sm font-black text-primary-container">
+                            Phân tích kinh tế trước và sau sáp nhập
+                        </h3>
+                        <p id="merger-analysis-status" class="mt-1 text-xs text-slate-500">
+                            Chọn một tỉnh trên bản đồ để xem chuỗi GRDP và nhóm sáp nhập.
+                        </p>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <button id="merger-export-pdf-btn" type="button" class="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-[10px] font-black text-slate-600 hover:bg-slate-50 transition-colors">
+                            Xuất báo cáo
+                        </button>
+                        <span class="rounded-full bg-slate-100 px-3 py-1 text-[10px] font-black uppercase tracking-wider text-slate-500">
+                            GRDP 2019-2025
+                        </span>
+                    </div>
+                </div>
+                <div id="merger-summary-cards" class="grid grid-cols-2 gap-3 md:grid-cols-4"></div>
+                <div class="mt-5 grid grid-cols-1 gap-5 lg:grid-cols-2">
+                    <div class="rounded-lg border border-slate-200 bg-slate-50 p-4">
+                        <div class="mb-3 text-xs font-black uppercase tracking-wider text-slate-500">Biểu đồ GRDP theo năm</div>
+                        <div class="h-[260px]"><canvas id="merger-grdp-chart"></canvas></div>
+                    </div>
+                    <div class="rounded-lg border border-slate-200 bg-slate-50 p-4">
+                        <div class="mb-3 text-xs font-black uppercase tracking-wider text-slate-500">Radar so sánh đa chiều</div>
+                        <div class="h-[260px]"><canvas id="merger-radar-chart"></canvas></div>
+                    </div>
+                </div>
+                <div class="mt-5 grid grid-cols-1 gap-5 lg:grid-cols-2">
+                    <div class="rounded-lg border border-slate-200 bg-slate-50 p-4">
+                        <div class="mb-3 text-xs font-black uppercase tracking-wider text-slate-500">Cơ cấu ngành kinh tế</div>
+                        <div class="h-[260px]"><canvas id="merger-sector-chart"></canvas></div>
+                    </div>
+                    <div class="rounded-lg border border-slate-200 bg-slate-50 p-4">
+                        <div class="mb-3 text-xs font-black uppercase tracking-wider text-slate-500">Bài báo/Sự kiện liên quan</div>
+                        <div id="merger-event-cards" class="space-y-2 max-h-[420px] overflow-y-auto"></div>
+                    </div>
+                </div>
+                <div class="mt-5 overflow-x-auto rounded-lg border border-slate-200">
+                    <table class="w-full text-xs">
+                        <thead class="bg-slate-50 text-[10px] font-black uppercase tracking-wider text-slate-500">
+                            <tr>
+                                <th class="px-3 py-2 text-left">Tỉnh thành viên</th>
+                                <th class="px-3 py-2 text-left">Năm</th>
+                                <th class="px-3 py-2 text-left">GRDP</th>
+                                <th class="px-3 py-2 text-left">Tăng trưởng YoY (so vs n-1)</th>
+                                <th class="px-3 py-2 text-left">Tỷ trọng trong cụm</th>
+                                <th class="px-3 py-2 text-left">Đánh giá</th>
+                            </tr>
+                        </thead>
+                        <tbody id="merger-comparison-body" class="bg-white text-slate-700"></tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- ═══ Section: Macro-Fiscal Research Lab ═══ -->
+            <div id="macro-research-lab-section" class="mt-6 bg-white rounded-xl border border-slate-200 p-5">
+                <div class="mb-4 flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                        <div class="flex flex-wrap items-center gap-2">
+                            <h3 class="text-sm font-black text-primary-container uppercase tracking-tight">
+                                Phòng nghiên cứu Vĩ mô - Tài khóa
+                            </h3>
+                            <span class="rounded-full bg-indigo-50 px-2.5 py-0.5 text-[10px] font-black uppercase tracking-wider text-indigo-600 border border-indigo-100">
+                                Research Lab
+                            </span>
+                        </div>
+                        <p id="macro-research-status" class="mt-1 text-xs text-slate-500">
+                            Đang nạp model cards, provenance và kiểm định dữ liệu.
+                        </p>
+                    </div>
+                    <div class="flex flex-wrap items-center gap-2">
+                        <span id="macro-research-province-badge" class="rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-[10px] font-black uppercase tracking-wider text-slate-500">
+                            Chưa chọn tỉnh
+                        </span>
+                        <button id="macro-research-refresh-btn" type="button" class="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-[10px] font-black text-slate-600 hover:bg-slate-50">
+                            Làm mới Lab
+                        </button>
+                    </div>
+                </div>
+
+                <div id="macro-research-quality-cards" class="grid grid-cols-2 gap-3 md:grid-cols-4"></div>
+                <div id="macro-research-module-cards" class="mt-4 grid grid-cols-1 gap-3 md:grid-cols-5"></div>
+
+                <div class="mt-5 flex flex-wrap gap-2">
+                    <button id="macro-research-run-forecast" type="button" class="rounded-lg bg-primary-container px-4 py-2 text-xs font-black text-white hover:opacity-90">
+                        Chạy forecast đa kỳ
+                    </button>
+                    <button id="macro-research-run-shock" type="button" class="rounded-lg border border-slate-300 bg-white px-4 py-2 text-xs font-black text-slate-700 hover:bg-slate-50">
+                        Lan truyền cú sốc
+                    </button>
+                    <button id="macro-research-run-causal" type="button" class="rounded-lg border border-slate-300 bg-white px-4 py-2 text-xs font-black text-slate-700 hover:bg-slate-50">
+                        Kiểm định sáp nhập
+                    </button>
+                    <button id="macro-research-export-pdf-btn" type="button" class="rounded-lg border border-slate-300 bg-white px-4 py-2 text-xs font-black text-slate-700 hover:bg-slate-50 flex items-center gap-1">
+                        <span class="material-symbols-outlined text-[14px]">picture_as_pdf</span> Xuất báo cáo Lab
+                    </button>
+                </div>
+
+                <div class="mt-5 grid grid-cols-1 gap-5 xl:grid-cols-2">
+                    <div class="rounded-lg border border-slate-200 bg-slate-50 p-4">
+                        <div class="mb-3 flex items-center justify-between">
+                            <div class="text-xs font-black uppercase tracking-wider text-slate-500">Fan chart dự báo thu ngân sách</div>
+                            <span id="macro-research-forecast-meta" class="text-[10px] font-bold text-slate-400">Chưa chạy</span>
+                        </div>
+                        <div class="h-[280px]"><canvas id="macro-research-fan-chart"></canvas></div>
+                    </div>
+                    <div class="rounded-lg border border-slate-200 bg-slate-50 p-4">
+                        <div class="mb-3 text-xs font-black uppercase tracking-wider text-slate-500">Đồ thị lan truyền cú sốc không gian</div>
+                        <div id="macro-research-shock-chart" class="h-[280px] w-full rounded-lg bg-white border border-slate-100"></div>
+                    </div>
+                    <div class="rounded-lg border border-slate-200 bg-slate-50 p-4">
+                        <div class="mb-3 text-xs font-black uppercase tracking-wider text-slate-500">Synthetic Control - Actual vs Counterfactual</div>
+                        <div id="macro-research-causal-chart" class="h-[280px] w-full rounded-lg bg-white border border-slate-100"></div>
+                    </div>
+                    <div class="rounded-lg border border-slate-200 bg-slate-50 p-4">
+                        <div class="mb-3 text-xs font-black uppercase tracking-wider text-slate-500">Sankey dòng sáp nhập và đóng góp GRDP</div>
+                        <div id="macro-research-sankey-chart" class="h-[280px] w-full rounded-lg bg-white border border-slate-100"></div>
+                    </div>
+                    <div class="rounded-lg border border-slate-200 bg-slate-50 p-4">
+                        <div class="mb-3 text-xs font-black uppercase tracking-wider text-slate-500">Parallel coordinates so sánh kịch bản</div>
+                        <div id="macro-research-parallel-chart" class="h-[280px] w-full rounded-lg bg-white border border-slate-100"></div>
+                    </div>
+                    <div class="rounded-lg border border-slate-200 bg-slate-50 p-4">
+                        <div class="mb-3 text-xs font-black uppercase tracking-wider text-slate-500">Thác nước phân tích đóng góp chính sách (Waterfall)</div>
+                        <div id="macro-research-waterfall-chart" class="h-[280px] w-full rounded-lg bg-white border border-slate-100"></div>
+                    </div>
+                    <div class="rounded-lg border border-slate-200 bg-slate-50 p-4">
+                        <div class="mb-3 text-xs font-black uppercase tracking-wider text-slate-500">Ma trận tương quan tài khóa & vĩ mô (Correlogram Heatmap)</div>
+                        <div id="macro-research-radar-chart" class="h-[280px] w-full rounded-lg bg-white border border-slate-100"></div>
+                    </div>
+                    <div class="rounded-lg border border-slate-200 bg-slate-50 p-4">
+                        <div class="mb-3 text-xs font-black uppercase tracking-wider text-slate-500">Cơ cấu kinh tế ngành chi tiết (Treemap)</div>
+                        <div id="macro-research-treemap-chart" class="h-[280px] w-full rounded-lg bg-white border border-slate-100"></div>
+                    </div>
+                    <div class="rounded-lg border border-slate-200 bg-slate-50 p-4">
+                        <div class="mb-3 text-xs font-black uppercase tracking-wider text-slate-500">Phân tích Nhân quả Granger (Granger Causality Matrix)</div>
+                        <div id="macro-research-granger-chart" class="h-[280px] w-full rounded-lg bg-white border border-slate-100"></div>
+                    </div>
+                    <div class="rounded-lg border border-slate-200 bg-slate-50 p-4">
+                        <div class="mb-3 text-xs font-black uppercase tracking-wider text-slate-500">Kiểm định Điểm gãy Cấu trúc (CUSUM Structural Break)</div>
+                        <div id="macro-research-cusum-chart" class="h-[280px] w-full rounded-lg bg-white border border-slate-100"></div>
+                    </div>
+                    <div class="rounded-lg border border-slate-200 bg-slate-50 p-4">
+                        <div class="mb-3 text-xs font-black uppercase tracking-wider text-slate-500">Phân rã Phương sai Dự báo (VAR-based FEVD)</div>
+                        <div id="macro-research-fevd-chart" class="h-[280px] w-full rounded-lg bg-white border border-slate-100"></div>
+                    </div>
+                    <div class="rounded-lg border border-slate-200 bg-slate-50 p-4">
+                        <div class="mb-3 text-xs font-black uppercase tracking-wider text-slate-500">Model cards & provenance</div>
+                        <div id="macro-research-model-cards" class="space-y-2 max-h-[280px] overflow-y-auto pr-1"></div>
+                    </div>
+                </div>
+
+                <div id="macro-research-provenance" class="mt-5 rounded-lg border border-slate-200 bg-slate-50 p-4 text-xs text-slate-600">
+                    Chưa có run nào. Chọn tỉnh và chạy forecast/causal để xem fingerprint, model version và policy dữ liệu.
+                </div>
             </div>
 
             <div class="mb-10">
                 <div class="bg-white rounded-xl shadow-[0_20px_40px_rgba(0,33,71,0.06)] p-6">
                     <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
                         <h3 class="text-sm font-black text-primary-container tracking-tight flex items-center gap-2">
-                            <span class="material-symbols-outlined text-[18px]">psychology</span> Giả thuyết Phát triển
+                            Giả thuyết Phát triển
                             1/5/10 năm
                         </h3>
                         <span id="sim-hypothesis-meta" class="text-[10px] text-slate-500 font-semibold">Đang tải dữ liệu
@@ -600,7 +983,7 @@
                 <div class="bg-white rounded-xl shadow-[0_20px_40px_rgba(0,33,71,0.06)] p-6 fade-in"
                     style="animation-delay:0.5s">
                     <h3 class="text-sm font-black text-primary-container tracking-tight mb-4 flex items-center gap-2">
-                        <span class="material-symbols-outlined text-[18px]">donut_large</span> Phân bổ Rủi ro Mô phỏng
+                        Phân bổ Rủi ro Mô phỏng
                     </h3>
                     <div class="flex items-center justify-center min-h-[250px]">
                         <canvas id="sim-risk-chart" class="w-full" style="height: 250px;"></canvas>
@@ -615,7 +998,7 @@
                     style="animation-delay:0.6s">
                     <div class="px-6 py-4 border-b border-slate-100">
                         <h3 class="text-sm font-black text-primary-container tracking-tight flex items-center gap-2">
-                            <span class="material-symbols-outlined text-[18px]">factory</span> Tác động theo Ngành
+                            Tác động theo Ngành
                         </h3>
                     </div>
                     <div class="overflow-x-auto max-h-[400px] overflow-y-auto">
@@ -760,13 +1143,18 @@
     <script src="https://unpkg.com/three@0.128.0/build/three.min.js"></script>
     <script src="https://unpkg.com/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
     <script>window.MACRO_BOUNDARY_VERSION = window.MACRO_BOUNDARY_VERSION || 'vn_34_2025';</script>
-    <script src="../js/simulation.js?v=5.2"></script>
+    <script src="../js/simulation.js?v=5.5"></script>
     <script src="../js/macro_map_data.js?v=1.0"></script>
-    <script src="../js/vietnam_map.js?v=1.3"></script>
-    <script src="../js/vietnam_3d_map.js?v=1.1"></script>
-    <script src="../js/vietnam_echarts_map.js?v=1.1"></script>
-    <script src="../js/province_scenario.js?v=1.2"></script>
+    <script src="../js/merger_map_data.js?v=1.0"></script>
+    <script src="../js/vietnam_map.js?v=1.4"></script>
+    <script src="../js/vietnam_3d_map.js?v=1.2"></script>
+    <script src="../js/vietnam_echarts_map.js?v=1.2"></script>
+    <script src="../js/province_scenario.js?v=1.5"></script>
+    <script src="../js/merger_analysis.js?v=1.0"></script>
+    <script src="../js/map_enhancements.js?v=1.0"></script>
+    <script src="../js/province_charts.js?v=1.0"></script>
     <script src="../js/macro_text_scenario.js?v=1.1"></script>
+    <script src="../js/macro_research_lab.js?v=2.0"></script>
     <script>
         document.addEventListener("DOMContentLoaded", function () {
             const currentPage = window.location.pathname.split("/").pop() || 'dashboard.html';

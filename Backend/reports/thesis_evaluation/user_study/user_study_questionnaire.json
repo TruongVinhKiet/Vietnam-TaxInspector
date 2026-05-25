@@ -1,0 +1,176 @@
+{
+  "generated_at": "2026-05-21T01:48:38Z",
+  "scale": "1=rat khong dong y, 5=rat dong y",
+  "sus": [
+    {
+      "id": "SUS01",
+      "text": "Toi nghi minh se muon su dung TaxInspector thuong xuyen."
+    },
+    {
+      "id": "SUS02",
+      "text": "Toi thay he thong nay phuc tap khong can thiet."
+    },
+    {
+      "id": "SUS03",
+      "text": "Toi thay TaxInspector de su dung."
+    },
+    {
+      "id": "SUS04",
+      "text": "Toi can ho tro ky thuat moi co the su dung he thong."
+    },
+    {
+      "id": "SUS05",
+      "text": "Cac chuc nang trong TaxInspector duoc tich hop tot."
+    },
+    {
+      "id": "SUS06",
+      "text": "Toi thay he thong co qua nhieu diem khong nhat quan."
+    },
+    {
+      "id": "SUS07",
+      "text": "Toi nghi can bo thue co the hoc cach dung TaxInspector nhanh."
+    },
+    {
+      "id": "SUS08",
+      "text": "Toi thay he thong kho su dung."
+    },
+    {
+      "id": "SUS09",
+      "text": "Toi tu tin khi su dung TaxInspector."
+    },
+    {
+      "id": "SUS10",
+      "text": "Toi can hoc rat nhieu truoc khi su dung thanh thao."
+    }
+  ],
+  "tam": {
+    "PU": [
+      {
+        "id": "PU01",
+        "text": "TaxInspector giup toi phan tich ho so thue nhanh hon."
+      },
+      {
+        "id": "PU02",
+        "text": "TaxInspector cai thien chat luong ra quyet dinh thanh tra."
+      },
+      {
+        "id": "PU03",
+        "text": "TaxInspector giup giam bo sot rui ro quan trong."
+      },
+      {
+        "id": "PU04",
+        "text": "TaxInspector giup trich dan can cu phap ly ro rang hon."
+      },
+      {
+        "id": "PU05",
+        "text": "TaxInspector huu ich cho cong viec nghiep vu hang ngay."
+      },
+      {
+        "id": "PU06",
+        "text": "TaxInspector giup uu tien nguon luc thanh tra hieu qua."
+      }
+    ],
+    "PEOU": [
+      {
+        "id": "PEOU01",
+        "text": "Toi thay thao tac voi TaxInspector ro rang."
+      },
+      {
+        "id": "PEOU02",
+        "text": "Toi de dang chuyen giua che do phap ly, gian lan, VAT va no dong."
+      },
+      {
+        "id": "PEOU03",
+        "text": "Toi de hieu trang thai dang xu ly/loi/hoan tat cua agent."
+      },
+      {
+        "id": "PEOU04",
+        "text": "Ket qua tra ve duoc trinh bay de kiem chung."
+      },
+      {
+        "id": "PEOU05",
+        "text": "Toi khong mat nhieu cong suc de hoc cach su dung."
+      },
+      {
+        "id": "PEOU06",
+        "text": "TaxInspector phan hoi tot voi cau hoi tu nhien cua toi."
+      }
+    ],
+    "BI": [
+      {
+        "id": "BI01",
+        "text": "Toi se de xuat dung TaxInspector trong quy trinh thu nghiem."
+      },
+      {
+        "id": "BI02",
+        "text": "Toi san sang dung TaxInspector cho ho so rui ro cao."
+      },
+      {
+        "id": "BI03",
+        "text": "Toi tin TaxInspector co the ho tro quy trinh nghiep vu trong don vi."
+      }
+    ]
+  },
+  "tasks": [
+    {
+      "id": "T01",
+      "mode": "legal",
+      "title": "Tu van nguoi dan nop to khai GTGT quy bi tre han",
+      "success_criteria": "Tra loi han nop, rui ro phat, buoc khac phuc va can cu Luat QLT/ND125."
+    },
+    {
+      "id": "T02",
+      "mode": "legal",
+      "title": "Giai thich mua hang tren 20 trieu thanh toan tien mat",
+      "success_criteria": "Neu dieu kien khau tru VAT/chi phi duoc tru va khuyen nghi chung tu."
+    },
+    {
+      "id": "T03",
+      "mode": "fraud",
+      "title": "Tra cuu MST rui ro cao va giai thich top SHAP",
+      "success_criteria": "Dung model fraud, neu score, drivers, hanh dong thanh tra."
+    },
+    {
+      "id": "T04",
+      "mode": "vat",
+      "title": "Truy vet vong hoa don VAT giua cac doanh nghiep",
+      "success_criteria": "Dung GraphRAG/VAT graph, neu vong, nut trung tam, bang chung hoa don."
+    },
+    {
+      "id": "T05",
+      "mode": "delinquency",
+      "title": "Du bao no dong va de xuat bien phap cuong che",
+      "success_criteria": "Dung delinquency + causal uplift, giai thich ly do va khuyen nghi."
+    },
+    {
+      "id": "T06",
+      "mode": "macro",
+      "title": "Mo phong giam VAT 2 diem phan tram trong quy toi",
+      "success_criteria": "Tra workspace mo phong, tham so, sensitivity, so sanh kich ban."
+    },
+    {
+      "id": "T07",
+      "mode": "legal",
+      "title": "Ca nhan ban hang online qua san va nguong doanh thu",
+      "success_criteria": "Hoi them nam tinh thue neu can, neu TT40/TT100 va nghia vu ke khai."
+    },
+    {
+      "id": "T08",
+      "mode": "full",
+      "title": "Upload CSV 50 ho so va hoi follow-up vi sao cong ty A rui ro",
+      "success_criteria": "Dung snapshot upload, giai thich theo cau truoc, khong mat ngu canh."
+    },
+    {
+      "id": "T09",
+      "mode": "legal",
+      "title": "Nguoi dung go khong dau/sai chinh ta: 'xn chao hoi thue tncn'",
+      "success_criteria": "Nhan dien loi chao/khong dau, dieu huong tu van TNCN dung."
+    },
+    {
+      "id": "T10",
+      "mode": "vat",
+      "title": "Kiem tra hoan thue GTGT du an dau tu co hoa don truoc giay phep",
+      "success_criteria": "Neu dieu kien hoan, canh bao rui ro ho so va can cu lien quan."
+    }
+  ]
+}

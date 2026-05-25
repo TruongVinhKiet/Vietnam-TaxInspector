@@ -1194,7 +1194,7 @@ async def lifespan(app: FastAPI):
                 from .agent_schema import ensure_agent_resilience_schema
                 ensure_agent_resilience_schema(conn)
             except Exception as exc:
-                logger.warning("Agent resilience schema bootstrap skipped: %s", exc)
+                print(f"[WARN] Agent resilience schema bootstrap skipped: {exc}")
             conn.execute(text(
                 "CREATE TABLE IF NOT EXISTS agent_eval_suites ("
                 "id SERIAL PRIMARY KEY, "
@@ -1430,6 +1430,47 @@ async def lifespan(app: FastAPI):
                 "created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP"
                 ");"
             ))
+
+            # Advanced Macro Analytics tables (v6)
+            conn.execute(text(
+                "CREATE TABLE IF NOT EXISTS macro_pareto_runs ("
+                "id BIGSERIAL PRIMARY KEY, "
+                "province_code VARCHAR(20) NOT NULL, "
+                "boundary_version VARCHAR(80) DEFAULT 'vn_34_2025', "
+                "pareto_points JSONB NOT NULL DEFAULT '[]'::jsonb, "
+                "optimal_point JSONB, "
+                "model_version VARCHAR(80), "
+                "created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()"
+                ");"
+            ))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS idx_macro_pareto_runs_province ON macro_pareto_runs (province_code);"))
+
+            conn.execute(text(
+                "CREATE TABLE IF NOT EXISTS macro_regime_states ("
+                "id BIGSERIAL PRIMARY KEY, "
+                "province_code VARCHAR(20) NOT NULL, "
+                "current_regime VARCHAR(30) NOT NULL, "
+                "transition_matrix JSONB NOT NULL, "
+                "smoothed_probabilities JSONB NOT NULL DEFAULT '[]'::jsonb, "
+                "model_version VARCHAR(80), "
+                "detected_at TIMESTAMPTZ NOT NULL DEFAULT NOW()"
+                ");"
+            ))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS idx_macro_regime_states_province ON macro_regime_states (province_code);"))
+
+            conn.execute(text(
+                "CREATE TABLE IF NOT EXISTS macro_shap_explanations ("
+                "id BIGSERIAL PRIMARY KEY, "
+                "province_code VARCHAR(20) NOT NULL, "
+                "scenario_params JSONB NOT NULL, "
+                "shap_values JSONB NOT NULL, "
+                "base_value DOUBLE PRECISION, "
+                "model_version VARCHAR(80), "
+                "created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()"
+                ");"
+            ))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS idx_macro_shap_explanations_province ON macro_shap_explanations (province_code);"))
+
             conn.execute(text(
                 "CREATE INDEX IF NOT EXISTS idx_kpi_snapshot_track_metric_ts "
                 "ON kpi_metric_snapshots (track_name, metric_name, generated_at DESC);"

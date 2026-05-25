@@ -862,6 +862,188 @@ def _run_macro_map_state_migration(conn) -> None:
     """))
 
 
+def _run_macro_research_lab_migration(conn) -> None:
+    conn.execute(text("""
+        CREATE TABLE IF NOT EXISTS macro_event_articles (
+            id BIGSERIAL PRIMARY KEY,
+            event_key VARCHAR(120),
+            title TEXT NOT NULL,
+            source_url TEXT,
+            source_name TEXT,
+            published_at TIMESTAMPTZ,
+            province_code VARCHAR(20),
+            article_text TEXT,
+            extracted_signals JSONB NOT NULL DEFAULT '{}'::jsonb,
+            review_status VARCHAR(30) NOT NULL DEFAULT 'pending_review',
+            data_fingerprint VARCHAR(64),
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+    """))
+    conn.execute(text("""
+        CREATE TABLE IF NOT EXISTS macro_event_embeddings (
+            id BIGSERIAL PRIMARY KEY,
+            article_id BIGINT REFERENCES macro_event_articles(id) ON DELETE CASCADE,
+            model_key VARCHAR(120) NOT NULL DEFAULT 'text-embedding-tax-macro-v1',
+            embedding_json JSONB NOT NULL DEFAULT '[]'::jsonb,
+            metadata_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+    """))
+    conn.execute(text("""
+        CREATE TABLE IF NOT EXISTS macro_province_panel (
+            id BIGSERIAL PRIMARY KEY,
+            boundary_version VARCHAR(80) NOT NULL DEFAULT 'vn_34_2025',
+            province_code VARCHAR(20) NOT NULL,
+            year INTEGER NOT NULL,
+            quarter INTEGER NOT NULL DEFAULT 0,
+            indicator_key VARCHAR(100) NOT NULL,
+            value_num DOUBLE PRECISION NOT NULL,
+            unit VARCHAR(80),
+            source_key VARCHAR(120),
+            review_status VARCHAR(30) NOT NULL DEFAULT 'pending_review',
+            observed_level VARCHAR(40) NOT NULL DEFAULT 'province_estimate',
+            provenance_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+            data_fingerprint VARCHAR(64),
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            UNIQUE (boundary_version, province_code, year, quarter, indicator_key, source_key)
+        );
+    """))
+    conn.execute(text("""
+        CREATE TABLE IF NOT EXISTS macro_graph_edges (
+            id BIGSERIAL PRIMARY KEY,
+            boundary_version VARCHAR(80) NOT NULL DEFAULT 'vn_34_2025',
+            source_code VARCHAR(20) NOT NULL,
+            target_code VARCHAR(20) NOT NULL,
+            edge_type VARCHAR(60) NOT NULL DEFAULT 'economic_similarity',
+            weight DOUBLE PRECISION NOT NULL,
+            evidence_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+            review_status VARCHAR(30) NOT NULL DEFAULT 'approved',
+            data_fingerprint VARCHAR(64),
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            UNIQUE (boundary_version, source_code, target_code, edge_type)
+        );
+    """))
+    conn.execute(text("""
+        CREATE TABLE IF NOT EXISTS macro_forecast_runs (
+            run_id VARCHAR(100) PRIMARY KEY,
+            model_key VARCHAR(120) NOT NULL,
+            boundary_version VARCHAR(80) NOT NULL DEFAULT 'vn_34_2025',
+            province_code VARCHAR(20),
+            horizon_quarters INTEGER NOT NULL,
+            scenario_params JSONB NOT NULL DEFAULT '{}'::jsonb,
+            forecasts JSONB NOT NULL DEFAULT '[]'::jsonb,
+            metrics_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+            data_fingerprint VARCHAR(64),
+            review_policy TEXT NOT NULL DEFAULT 'approved_sources_only',
+            status VARCHAR(30) NOT NULL DEFAULT 'completed',
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+    """))
+    conn.execute(text("""
+        CREATE TABLE IF NOT EXISTS macro_shock_runs (
+            run_id VARCHAR(100) PRIMARY KEY,
+            boundary_version VARCHAR(80) NOT NULL DEFAULT 'vn_34_2025',
+            source_province_code VARCHAR(20) NOT NULL,
+            shock_type VARCHAR(80) NOT NULL,
+            shock_strength_pct DOUBLE PRECISION NOT NULL,
+            horizon_quarters INTEGER NOT NULL,
+            timeline_json JSONB NOT NULL DEFAULT '[]'::jsonb,
+            edge_paths_json JSONB NOT NULL DEFAULT '[]'::jsonb,
+            data_fingerprint VARCHAR(64),
+            model_version VARCHAR(80) DEFAULT 'spatio-temporal-shock-v1',
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+    """))
+    conn.execute(text("""
+        CREATE TABLE IF NOT EXISTS macro_causal_runs (
+            run_id VARCHAR(100) PRIMARY KEY,
+            boundary_version VARCHAR(80) NOT NULL DEFAULT 'vn_34_2025',
+            province_code VARCHAR(20) NOT NULL,
+            treatment_key VARCHAR(120) NOT NULL,
+            method VARCHAR(80) NOT NULL,
+            actual_series JSONB NOT NULL DEFAULT '[]'::jsonb,
+            counterfactual_series JSONB NOT NULL DEFAULT '[]'::jsonb,
+            treatment_effects JSONB NOT NULL DEFAULT '[]'::jsonb,
+            placebo_tests JSONB NOT NULL DEFAULT '{}'::jsonb,
+            metrics_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+            data_fingerprint VARCHAR(64),
+            status VARCHAR(30) NOT NULL DEFAULT 'completed',
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+    """))
+    conn.execute(text("""
+        CREATE TABLE IF NOT EXISTS macro_model_cards (
+            model_key VARCHAR(120) PRIMARY KEY,
+            model_version VARCHAR(80) NOT NULL,
+            model_family VARCHAR(80) NOT NULL,
+            training_data_policy TEXT NOT NULL,
+            intended_use TEXT NOT NULL,
+            limitations TEXT NOT NULL,
+            metrics_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+            sources_json JSONB NOT NULL DEFAULT '[]'::jsonb,
+            artifact_paths_json JSONB NOT NULL DEFAULT '[]'::jsonb,
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+    """))
+    for index_sql in [
+        "CREATE INDEX IF NOT EXISTS idx_macro_event_articles_status ON macro_event_articles (review_status, created_at DESC);",
+        "CREATE INDEX IF NOT EXISTS idx_macro_province_panel_lookup ON macro_province_panel (boundary_version, province_code, indicator_key, year, quarter);",
+        "CREATE INDEX IF NOT EXISTS idx_macro_graph_edges_source ON macro_graph_edges (boundary_version, source_code, weight DESC);",
+        "CREATE INDEX IF NOT EXISTS idx_macro_forecast_runs_created ON macro_forecast_runs (model_key, created_at DESC);",
+        "CREATE INDEX IF NOT EXISTS idx_macro_causal_runs_created ON macro_causal_runs (province_code, created_at DESC);",
+    ]:
+        conn.execute(text(index_sql))
+    conn.execute(text("""
+        INSERT INTO macro_model_cards (
+            model_key, model_version, model_family, training_data_policy,
+            intended_use, limitations, metrics_json, sources_json, artifact_paths_json
+        ) VALUES
+        (
+            'macro-ensemble-v2',
+            'macro-research-lab-v1',
+            'Hybrid macro-fiscal forecasting',
+            'Only approved/reviewed macro panel and economic event sources may be used for production training.',
+            'Multi-horizon GRDP, tax revenue and fiscal-pressure forecasting with uncertainty intervals.',
+            'Province panel currently mixes observed national series with reviewed baseline-anchored province estimates.',
+            '{"baseline": "elasticity_lgbm", "interval_target_coverage": "85-95%"}'::jsonb,
+            '["World Bank", "IMF DataMapper", "GSO/NSO", "reviewed macro event queue"]'::jsonb,
+            '["Backend/data/models/simulation_lgbm.joblib", "Backend/data/models/simulation_config.json"]'::jsonb
+        ),
+        (
+            'macro-shock-graph-v1',
+            'macro-research-lab-v1',
+            'Spatio-temporal graph shock propagation',
+            'Graph edges must carry reviewed evidence or deterministic reproducible derivation metadata.',
+            'Estimate spatial diffusion of macro shocks between provinces and administrative units.',
+            'Fallback implementation is deterministic diffusion until STGCN/TFT artifacts are trained.',
+            '{"graph_contract": "province adjacency + economic similarity + logistics/FDI similarity"}'::jsonb,
+            '["province boundary manifest", "macro province panel", "reviewed event articles"]'::jsonb,
+            '[]'::jsonb
+        ),
+        (
+            'macro-causal-merger-v1',
+            'macro-research-lab-v1',
+            'Causal merger and tax-policy evaluation',
+            'Causal claims require reviewed observed data, treatment metadata and placebo checks.',
+            'Compare actual outcomes with synthetic-control counterfactuals for merger/policy questions.',
+            'Current fallback is synthetic-control proxy and event-study style diagnostics.',
+            '{"methods": ["synthetic_control_proxy", "event_study", "placebo_tests"]}'::jsonb,
+            '["macro province panel", "merger mapping", "approved policy events"]'::jsonb,
+            '[]'::jsonb
+        )
+        ON CONFLICT (model_key) DO UPDATE SET
+            model_version = EXCLUDED.model_version,
+            model_family = EXCLUDED.model_family,
+            training_data_policy = EXCLUDED.training_data_policy,
+            intended_use = EXCLUDED.intended_use,
+            limitations = EXCLUDED.limitations,
+            metrics_json = EXCLUDED.metrics_json,
+            sources_json = EXCLUDED.sources_json,
+            artifact_paths_json = EXCLUDED.artifact_paths_json,
+            updated_at = NOW();
+    """))
+
+
 def run_migration() -> None:
     with engine.begin() as conn:
         _run_safe_user_profile_migration(conn)
@@ -878,6 +1060,7 @@ def run_migration() -> None:
         _run_agent_routing_telemetry_migration(conn)
         _run_agent_session_resilience_migration(conn)
         _run_macro_map_state_migration(conn)
+        _run_macro_research_lab_migration(conn)
 
     print("[OK] Completed migration: user profile columns + offshore proxy mapping + numeric tax_code contract + multimodal uploads + legal agent v2 + agent routing telemetry.")
 

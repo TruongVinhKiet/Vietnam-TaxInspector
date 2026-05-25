@@ -1,0 +1,82 @@
+{
+  "generated_at": "2026-05-21T01:48:37Z",
+  "seed": 42,
+  "rows": 5000,
+  "deep_learning_benchmarks": {
+    "gat": {
+      "edge": {
+        "auc": 0.965787,
+        "pr_auc": 0.623056,
+        "precision": 0.608,
+        "recall": 0.804233,
+        "f1": 0.692483
+      },
+      "node": {
+        "auc": 0.998655,
+        "pr_auc": 0.976541,
+        "precision": 0.39521,
+        "recall": 1.0,
+        "f1": 0.566524
+      },
+      "temporal_edge_features": true
+    },
+    "hetero_gnn": {
+      "edge": {
+        "auc": 0.95035,
+        "pr_auc": 0.585437,
+        "precision": 0.556,
+        "recall": 0.73545,
+        "f1": 0.633257
+      },
+      "node": {
+        "auc": 0.998248,
+        "pr_auc": 0.966151,
+        "precision": 0.358696,
+        "recall": 1.0,
+        "f1": 0.528
+      },
+      "node_types": [
+        "company",
+        "invoice",
+        "owner"
+      ]
+    },
+    "graph_baseline": {
+      "auc": 0.462297,
+      "pr_auc": 0.06856,
+      "precision": 0.056,
+      "recall": 0.074074,
+      "f1": 0.063781
+    },
+    "vae_anomaly": {
+      "mode": "pca_vae_proxy",
+      "input_dims": 16,
+      "p95_threshold": 0.962983,
+      "reconstruction_error_mean": 0.6275,
+      "vae_proxy": {
+        "auc": 0.994492,
+        "pr_auc": 0.93386,
+        "precision": 0.48125,
+        "recall": 0.987179,
+        "f1": 0.647059
+      },
+      "isolation_forest": {
+        "auc": 0.931844,
+        "pr_auc": 0.596863,
+        "precision": 0.614286,
+        "recall": 0.551282,
+        "f1": 0.581081
+      },
+      "anomaly_detection_f1_at_p95": 0.647059
+    },
+    "temporal_transformer": {
+      "mode": "sequence_proxy_from_evaluation",
+      "temporal_transformer": {},
+      "gbdt_sequence_proxy": {}
+    }
+  },
+  "limitations": [
+    "Default runner uses CPU proxy tasks; replace with full PyTorch trainers for final artifact-level numbers.",
+    "Metrics are deterministic synthetic benchmarks intended for thesis reproducibility and CI gating."
+  ]
+}

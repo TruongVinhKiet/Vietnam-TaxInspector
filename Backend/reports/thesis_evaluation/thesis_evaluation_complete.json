@@ -1,0 +1,2533 @@
+{
+  "generated_at": "2026-05-21T01:48:38Z",
+  "quick_mode": true,
+  "rows": 5000,
+  "folds": 2,
+  "seed": 42,
+  "thesis_score_estimate": 9.35,
+  "evaluation_summary": {
+    "ablation": {
+      "status": "complete",
+      "best_model": "C1_XGB_Graph",
+      "key_finding": {
+        "delta_auc_vs_B1": 0.050721,
+        "relative_delta_pct": 5.6362
+      }
+    },
+    "statistical_significance": {
+      "status": "complete",
+      "baseline": "B1_XGBoost"
+    },
+    "fairness": {
+      "status": "complete",
+      "disparate_impact_pass": false,
+      "red_flag_count": 4
+    },
+    "rag_grounding": {
+      "status": "complete",
+      "rate": 0.7704,
+      "recommended_path": "ingest_curated_expansion_before_reranker_tuning"
+    },
+    "deep_learning": {
+      "status": "complete",
+      "gat_f1": 0.692483,
+      "vae_f1": 0.647059
+    },
+    "concept_drift": {
+      "status": "complete",
+      "adwin_validated": true
+    },
+    "federated_learning": {
+      "status": "complete",
+      "fed_vs_central_gap": 0.0
+    },
+    "user_study": {
+      "status": "complete",
+      "sus_mean": 82.5,
+      "simulated": true
+    }
+  },
+  "steps": {
+    "ablation": {
+      "status": "complete",
+      "elapsed_seconds": 13.928,
+      "result": {
+        "generated_at": "2026-05-21T01:48:28Z",
+        "dataset": {
+          "csv_path": "E:\\TaxInspector\\scratch\\experimental_evaluation\\tax_data_mock_5001_rows_seed42.csv",
+          "rows": 5001,
+          "companies": 1667,
+          "fraud_ratio": 0.04799
+        },
+        "folds": 2,
+        "threshold": 0.3,
+        "configs": {
+          "B0_Logistic": {
+            "precision": {
+              "mean": 0.098793,
+              "std": 0.004028,
+              "fold_values": [
+                0.102821,
+                0.094765
+              ]
+            },
+            "recall": {
+              "mean": 0.908333,
+              "std": 0.033333,
+              "fold_values": [
+                0.941667,
+                0.875
+              ]
+            },
+            "f1": {
+              "mean": 0.178204,
+              "std": 0.007194,
+              "fold_values": [
+                0.185398,
+                0.17101
+              ]
+            },
+            "auc_roc": {
+              "mean": 0.848305,
+              "std": 0.000883,
+              "fold_values": [
+                0.849188,
+                0.847423
+              ]
+            },
+            "average_precision": {
+              "mean": 0.432983,
+              "std": 0.004598,
+              "fold_values": [
+                0.437581,
+                0.428384
+              ]
+            }
+          },
+          "B1_XGBoost": {
+            "precision": {
+              "mean": 0.755601,
+              "std": 0.036851,
+              "fold_values": [
+                0.71875,
+                0.792453
+              ]
+            },
+            "recall": {
+              "mean": 0.366667,
+              "std": 0.016667,
+              "fold_values": [
+                0.383333,
+                0.35
+              ]
+            },
+            "f1": {
+              "mean": 0.492775,
+              "std": 0.007225,
+              "fold_values": [
+                0.5,
+                0.485549
+              ]
+            },
+            "auc_roc": {
+              "mean": 0.899921,
+              "std": 0.005631,
+              "fold_values": [
+                0.89429,
+                0.905551
+              ]
+            },
+            "average_precision": {
+              "mean": 0.552758,
+              "std": 0.00051,
+              "fold_values": [
+                0.553268,
+                0.552249
+              ]
+            }
+          },
+          "C1_XGB_Graph": {
+            "precision": {
+              "mean": 0.734562,
+              "std": 0.012913,
+              "fold_values": [
+                0.721649,
+                0.747475
+              ]
+            },
+            "recall": {
+              "mean": 0.6,
+              "std": 0.016667,
+              "fold_values": [
+                0.583333,
+                0.616667
+              ]
+            },
+            "f1": {
+              "mean": 0.66048,
+              "std": 0.015319,
+              "fold_values": [
+                0.645161,
+                0.675799
+              ]
+            },
+            "auc_roc": {
+              "mean": 0.957604,
+              "std": 0.0024,
+              "fold_values": [
+                0.955204,
+                0.960004
+              ]
+            },
+            "average_precision": {
+              "mean": 0.730731,
+              "std": 0.018927,
+              "fold_values": [
+                0.711804,
+                0.749658
+              ]
+            }
+          },
+          "C2_XGB_IF": {
+            "precision": {
+              "mean": 0.052461,
+              "std": 0.004461,
+              "fold_values": [
+                0.056922,
+                0.048
+              ]
+            },
+            "recall": {
+              "mean": 0.991667,
+              "std": 0.008333,
+              "fold_values": [
+                0.983333,
+                1.0
+              ]
+            },
+            "f1": {
+              "mean": 0.099609,
+              "std": 0.008006,
+              "fold_values": [
+                0.107615,
+                0.091603
+              ]
+            },
+            "auc_roc": {
+              "mean": 0.850584,
+              "std": 0.024198,
+              "fold_values": [
+                0.826386,
+                0.874783
+              ]
+            },
+            "average_precision": {
+              "mean": 0.521335,
+              "std": 0.00419,
+              "fold_values": [
+                0.517145,
+                0.525525
+              ]
+            }
+          },
+          "C3_XGB_IF_Graph": {
+            "precision": {
+              "mean": 0.625984,
+              "std": 0.019685,
+              "fold_values": [
+                0.606299,
+                0.645669
+              ]
+            },
+            "recall": {
+              "mean": 0.6625,
+              "std": 0.020833,
+              "fold_values": [
+                0.641667,
+                0.683333
+              ]
+            },
+            "f1": {
+              "mean": 0.643725,
+              "std": 0.020243,
+              "fold_values": [
+                0.623482,
+                0.663968
+              ]
+            },
+            "auc_roc": {
+              "mean": 0.946966,
+              "std": 0.01329,
+              "fold_values": [
+                0.933676,
+                0.960256
+              ]
+            },
+            "average_precision": {
+              "mean": 0.730383,
+              "std": 0.024375,
+              "fold_values": [
+                0.706009,
+                0.754758
+              ]
+            }
+          },
+          "C4_XGB_VAE": {
+            "precision": {
+              "mean": 0.778375,
+              "std": 0.03644,
+              "fold_values": [
+                0.741935,
+                0.814815
+              ]
+            },
+            "recall": {
+              "mean": 0.375,
+              "std": 0.008333,
+              "fold_values": [
+                0.383333,
+                0.366667
+              ]
+            },
+            "f1": {
+              "mean": 0.505621,
+              "std": 0.000126,
+              "fold_values": [
+                0.505495,
+                0.505747
+              ]
+            },
+            "auc_roc": {
+              "mean": 0.902994,
+              "std": 0.002654,
+              "fold_values": [
+                0.900339,
+                0.905648
+              ]
+            },
+            "average_precision": {
+              "mean": 0.553279,
+              "std": 0.001387,
+              "fold_values": [
+                0.554666,
+                0.551892
+              ]
+            }
+          },
+          "C5_Full_Hybrid": {
+            "precision": {
+              "mean": 0.764868,
+              "std": 0.017741,
+              "fold_values": [
+                0.747126,
+                0.782609
+              ]
+            },
+            "recall": {
+              "mean": 0.570833,
+              "std": 0.029167,
+              "fold_values": [
+                0.541667,
+                0.6
+              ]
+            },
+            "f1": {
+              "mean": 0.653632,
+              "std": 0.025613,
+              "fold_values": [
+                0.628019,
+                0.679245
+              ]
+            },
+            "auc_roc": {
+              "mean": 0.950642,
+              "std": 0.007779,
+              "fold_values": [
+                0.942864,
+                0.958421
+              ]
+            },
+            "average_precision": {
+              "mean": 0.73947,
+              "std": 0.025319,
+              "fold_values": [
+                0.714151,
+                0.764789
+              ]
+            }
+          }
+        },
+        "confidence_intervals": {
+          "B0_Logistic": {
+            "auc_roc": {
+              "estimate": 0.848449,
+              "low": 0.825131,
+              "high": 0.866958,
+              "method": "bca"
+            },
+            "average_precision": {
+              "estimate": 0.430112,
+              "low": 0.364157,
+              "high": 0.490541,
+              "method": "bca"
+            },
+            "precision": {
+              "estimate": 0.098777,
+              "low": 0.087777,
+              "high": 0.109674,
+              "method": "bca"
+            },
+            "recall": {
+              "estimate": 0.908333,
+              "low": 0.868209,
+              "high": 0.943789,
+              "method": "bca"
+            },
+            "f1": {
+              "estimate": 0.178177,
+              "low": 0.154825,
+              "high": 0.195945,
+              "method": "bca"
+            }
+          },
+          "B1_XGBoost": {
+            "auc_roc": {
+              "estimate": 0.898631,
+              "low": 0.881782,
+              "high": 0.917753,
+              "method": "bca"
+            },
+            "average_precision": {
+              "estimate": 0.552,
+              "low": 0.494673,
+              "high": 0.596523,
+              "method": "bca"
+            },
+            "precision": {
+              "estimate": 0.752137,
+              "low": 0.681308,
+              "high": 0.832209,
+              "method": "bca"
+            },
+            "recall": {
+              "estimate": 0.366667,
+              "low": 0.307261,
+              "high": 0.415807,
+              "method": "bca"
+            },
+            "f1": {
+              "estimate": 0.492997,
+              "low": 0.44701,
+              "high": 0.551612,
+              "method": "bca"
+            }
+          },
+          "C1_XGB_Graph": {
+            "auc_roc": {
+              "estimate": 0.95718,
+              "low": 0.948143,
+              "high": 0.96467,
+              "method": "bca"
+            },
+            "average_precision": {
+              "estimate": 0.730345,
+              "low": 0.680463,
+              "high": 0.771548,
+              "method": "bca"
+            },
+            "precision": {
+              "estimate": 0.734694,
+              "low": 0.67171,
+              "high": 0.777966,
+              "method": "bca"
+            },
+            "recall": {
+              "estimate": 0.6,
+              "low": 0.542083,
+              "high": 0.648698,
+              "method": "bca"
+            },
+            "f1": {
+              "estimate": 0.66055,
+              "low": 0.610908,
+              "high": 0.703308,
+              "method": "bca"
+            }
+          },
+          "C2_XGB_IF": {
+            "auc_roc": {
+              "estimate": 0.839382,
+              "low": 0.802852,
+              "high": 0.868573,
+              "method": "bca"
+            },
+            "average_precision": {
+              "estimate": 0.517758,
+              "low": 0.460995,
+              "high": 0.576678,
+              "method": "bca"
+            },
+            "precision": {
+              "estimate": 0.052045,
+              "low": 0.04577,
+              "high": 0.057778,
+              "method": "bca"
+            },
+            "recall": {
+              "estimate": 0.991667,
+              "low": 0.978816,
+              "high": 1.0,
+              "method": "bca"
+            },
+            "f1": {
+              "estimate": 0.098899,
+              "low": 0.083954,
+              "high": 0.111896,
+              "method": "bca"
+            }
+          },
+          "C3_XGB_IF_Graph": {
+            "auc_roc": {
+              "estimate": 0.944358,
+              "low": 0.930064,
+              "high": 0.958755,
+              "method": "bca"
+            },
+            "average_precision": {
+              "estimate": 0.72985,
+              "low": 0.683369,
+              "high": 0.775481,
+              "method": "bca"
+            },
+            "precision": {
+              "estimate": 0.625984,
+              "low": 0.566886,
+              "high": 0.703996,
+              "method": "bca"
+            },
+            "recall": {
+              "estimate": 0.6625,
+              "low": 0.594686,
+              "high": 0.720622,
+              "method": "bca"
+            },
+            "f1": {
+              "estimate": 0.643725,
+              "low": 0.603381,
+              "high": 0.707384,
+              "method": "bca"
+            }
+          },
+          "C4_XGB_VAE": {
+            "auc_roc": {
+              "estimate": 0.901486,
+              "low": 0.881122,
+              "high": 0.918888,
+              "method": "bca"
+            },
+            "average_precision": {
+              "estimate": 0.552336,
+              "low": 0.488525,
+              "high": 0.612913,
+              "method": "bca"
+            },
+            "precision": {
+              "estimate": 0.775862,
+              "low": 0.695018,
+              "high": 0.840772,
+              "method": "bca"
+            },
+            "recall": {
+              "estimate": 0.375,
+              "low": 0.312884,
+              "high": 0.446876,
+              "method": "bca"
+            },
+            "f1": {
+              "estimate": 0.505618,
+              "low": 0.437005,
+              "high": 0.552185,
+              "method": "bca"
+            }
+          },
+          "C5_Full_Hybrid": {
+            "auc_roc": {
+              "estimate": 0.950161,
+              "low": 0.934639,
+              "high": 0.966814,
+              "method": "bca"
+            },
+            "average_precision": {
+              "estimate": 0.738652,
+              "low": 0.67965,
+              "high": 0.781,
+              "method": "bca"
+            },
+            "precision": {
+              "estimate": 0.765363,
+              "low": 0.701557,
+              "high": 0.83127,
+              "method": "bca"
+            },
+            "recall": {
+              "estimate": 0.570833,
+              "low": 0.512719,
+              "high": 0.618921,
+              "method": "bca"
+            },
+            "f1": {
+              "estimate": 0.653938,
+              "low": 0.599908,
+              "high": 0.700869,
+              "method": "bca"
+            }
+          }
+        },
+        "contribution_delta": {
+          "B0_Logistic": {
+            "delta_auc_vs_B1": -0.051616,
+            "relative_delta_pct": -5.7356
+          },
+          "C1_XGB_Graph": {
+            "delta_auc_vs_B1": 0.057683,
+            "relative_delta_pct": 6.4098
+          },
+          "C2_XGB_IF": {
+            "delta_auc_vs_B1": -0.049337,
+            "relative_delta_pct": -5.4824
+          },
+          "C3_XGB_IF_Graph": {
+            "delta_auc_vs_B1": 0.047045,
+            "relative_delta_pct": 5.2277
+          },
+          "C4_XGB_VAE": {
+            "delta_auc_vs_B1": 0.003073,
+            "relative_delta_pct": 0.3415
+          },
+          "C5_Full_Hybrid": {
+            "delta_auc_vs_B1": 0.050721,
+            "relative_delta_pct": 5.6362
+          }
+        },
+        "pairwise_vs_B1": {
+          "B0_Logistic_vs_B1_XGBoost": {
+            "delong": {
+              "auc_a": 0.848449,
+              "auc_b": 0.898631,
+              "delta_auc": -0.050182,
+              "z": -4.856762,
+              "p_value": 1.19e-06,
+              "ci95_low": -0.070434,
+              "ci95_high": -0.029931
+            },
+            "mcnemar": {
+              "both_correct": 2857,
+              "a_correct_b_wrong": 133,
+              "a_wrong_b_correct": 1963,
+              "both_wrong": 48,
+              "chi2": 1596.011927,
+              "p_value": 0.0,
+              "odds_ratio": 0.067991
+            },
+            "paired_t_auc": {
+              "mean_delta": -0.051615,
+              "t": -7.924919,
+              "p_value": 0.07990906
+            }
+          },
+          "C1_XGB_Graph_vs_B1_XGBoost": {
+            "delong": {
+              "auc_a": 0.95718,
+              "auc_b": 0.898631,
+              "delta_auc": 0.058549,
+              "z": 6.820873,
+              "p_value": 0.0,
+              "ci95_low": 0.041724,
+              "ci95_high": 0.075373
+            },
+            "mcnemar": {
+              "both_correct": 4769,
+              "a_correct_b_wrong": 84,
+              "a_wrong_b_correct": 51,
+              "both_wrong": 97,
+              "chi2": 7.585185,
+              "p_value": 0.00588499,
+              "odds_ratio": 1.640777
+            },
+            "paired_t_auc": {
+              "mean_delta": 0.057683,
+              "t": 17.855905,
+              "p_value": 0.03561597
+            }
+          },
+          "C2_XGB_IF_vs_B1_XGBoost": {
+            "delong": {
+              "auc_a": 0.839382,
+              "auc_b": 0.898631,
+              "delta_auc": -0.05925,
+              "z": -5.273636,
+              "p_value": 1.3e-07,
+              "ci95_low": -0.08127,
+              "ci95_high": -0.037229
+            },
+            "mcnemar": {
+              "both_correct": 514,
+              "a_correct_b_wrong": 150,
+              "a_wrong_b_correct": 4306,
+              "both_wrong": 31,
+              "chi2": 3874.332361,
+              "p_value": 0.0,
+              "odds_ratio": 0.034947
+            },
+            "paired_t_auc": {
+              "mean_delta": -0.049336,
+              "t": -2.657044,
+              "p_value": 0.22915813
+            }
+          },
+          "C3_XGB_IF_Graph_vs_B1_XGBoost": {
+            "delong": {
+              "auc_a": 0.944358,
+              "auc_b": 0.898631,
+              "delta_auc": 0.045727,
+              "z": 4.804213,
+              "p_value": 1.55e-06,
+              "ci95_low": 0.027071,
+              "ci95_high": 0.064382
+            },
+            "mcnemar": {
+              "both_correct": 4729,
+              "a_correct_b_wrong": 96,
+              "a_wrong_b_correct": 91,
+              "both_wrong": 85,
+              "chi2": 0.085561,
+              "p_value": 0.7698975,
+              "odds_ratio": 1.054645
+            },
+            "paired_t_auc": {
+              "mean_delta": 0.047045,
+              "t": 6.142111,
+              "p_value": 0.10274685
+            }
+          },
+          "C4_XGB_VAE_vs_B1_XGBoost": {
+            "delong": {
+              "auc_a": 0.901486,
+              "auc_b": 0.898631,
+              "delta_auc": 0.002855,
+              "z": 1.085993,
+              "p_value": 0.27748213,
+              "ci95_low": -0.002298,
+              "ci95_high": 0.008007
+            },
+            "mcnemar": {
+              "both_correct": 4813,
+              "a_correct_b_wrong": 12,
+              "a_wrong_b_correct": 7,
+              "both_wrong": 169,
+              "chi2": 0.842105,
+              "p_value": 0.35879536,
+              "odds_ratio": 1.666667
+            },
+            "paired_t_auc": {
+              "mean_delta": 0.003073,
+              "t": 1.032594,
+              "p_value": 0.48979223
+            }
+          },
+          "C5_Full_Hybrid_vs_B1_XGBoost": {
+            "delong": {
+              "auc_a": 0.950161,
+              "auc_b": 0.898631,
+              "delta_auc": 0.05153,
+              "z": 6.166049,
+              "p_value": 0.0,
+              "ci95_low": 0.03515,
+              "ci95_high": 0.06791
+            },
+            "mcnemar": {
+              "both_correct": 4778,
+              "a_correct_b_wrong": 78,
+              "a_wrong_b_correct": 42,
+              "both_wrong": 103,
+              "chi2": 10.208333,
+              "p_value": 0.00139807,
+              "odds_ratio": 1.847059
+            },
+            "paired_t_auc": {
+              "mean_delta": 0.050722,
+              "t": 23.613594,
+              "p_value": 0.02694379
+            }
+          }
+        },
+        "threshold_tradeoff_C5": [
+          {
+            "threshold": 0.1,
+            "precision": 0.4263,
+            "recall": 0.7708,
+            "f1": 0.549,
+            "flagged_cases": 434,
+            "true_positives": 185,
+            "false_positives": 249,
+            "missed_frauds": 55,
+            "cost_fp_billion_vnd": 24.895,
+            "benefit_tp_billion_vnd": 295.941,
+            "net_benefit_billion_vnd": 271.046
+          },
+          {
+            "threshold": 0.15,
+            "precision": 0.5691,
+            "recall": 0.7208,
+            "f1": 0.636,
+            "flagged_cases": 304,
+            "true_positives": 173,
+            "false_positives": 131,
+            "missed_frauds": 67,
+            "cost_fp_billion_vnd": 13.097,
+            "benefit_tp_billion_vnd": 276.745,
+            "net_benefit_billion_vnd": 263.647
+          },
+          {
+            "threshold": 0.2,
+            "precision": 0.6432,
+            "recall": 0.6458,
+            "f1": 0.6445,
+            "flagged_cases": 241,
+            "true_positives": 155,
+            "false_positives": 86,
+            "missed_frauds": 85,
+            "cost_fp_billion_vnd": 8.598,
+            "benefit_tp_billion_vnd": 247.95,
+            "net_benefit_billion_vnd": 239.352
+          },
+          {
+            "threshold": 0.25,
+            "precision": 0.7065,
+            "recall": 0.5917,
+            "f1": 0.644,
+            "flagged_cases": 201,
+            "true_positives": 142,
+            "false_positives": 59,
+            "missed_frauds": 98,
+            "cost_fp_billion_vnd": 5.899,
+            "benefit_tp_billion_vnd": 227.155,
+            "net_benefit_billion_vnd": 221.256
+          },
+          {
+            "threshold": 0.3,
+            "precision": 0.7654,
+            "recall": 0.5708,
+            "f1": 0.6539,
+            "flagged_cases": 179,
+            "true_positives": 137,
+            "false_positives": 42,
+            "missed_frauds": 103,
+            "cost_fp_billion_vnd": 4.199,
+            "benefit_tp_billion_vnd": 219.156,
+            "net_benefit_billion_vnd": 214.957
+          },
+          {
+            "threshold": 0.4,
+            "precision": 0.8693,
+            "recall": 0.5542,
+            "f1": 0.6768,
+            "flagged_cases": 153,
+            "true_positives": 133,
+            "false_positives": 20,
+            "missed_frauds": 107,
+            "cost_fp_billion_vnd": 2.0,
+            "benefit_tp_billion_vnd": 212.757,
+            "net_benefit_billion_vnd": 210.758
+          },
+          {
+            "threshold": 0.5,
+            "precision": 0.9426,
+            "recall": 0.4792,
+            "f1": 0.6354,
+            "flagged_cases": 122,
+            "true_positives": 115,
+            "false_positives": 7,
+            "missed_frauds": 125,
+            "cost_fp_billion_vnd": 0.7,
+            "benefit_tp_billion_vnd": 183.963,
+            "net_benefit_billion_vnd": 183.263
+          }
+        ],
+        "threshold_tradeoff_B1": [
+          {
+            "threshold": 0.1,
+            "precision": 0.2969,
+            "recall": 0.5542,
+            "f1": 0.3866,
+            "flagged_cases": 448,
+            "true_positives": 133,
+            "false_positives": 315,
+            "missed_frauds": 107,
+            "cost_fp_billion_vnd": 31.494,
+            "benefit_tp_billion_vnd": 212.757,
+            "net_benefit_billion_vnd": 181.264
+          },
+          {
+            "threshold": 0.15,
+            "precision": 0.4677,
+            "recall": 0.4833,
+            "f1": 0.4754,
+            "flagged_cases": 248,
+            "true_positives": 116,
+            "false_positives": 132,
+            "missed_frauds": 124,
+            "cost_fp_billion_vnd": 13.197,
+            "benefit_tp_billion_vnd": 185.563,
+            "net_benefit_billion_vnd": 172.366
+          },
+          {
+            "threshold": 0.2,
+            "precision": 0.6185,
+            "recall": 0.4458,
+            "f1": 0.5182,
+            "flagged_cases": 173,
+            "true_positives": 107,
+            "false_positives": 66,
+            "missed_frauds": 133,
+            "cost_fp_billion_vnd": 6.599,
+            "benefit_tp_billion_vnd": 171.166,
+            "net_benefit_billion_vnd": 164.567
+          },
+          {
+            "threshold": 0.25,
+            "precision": 0.7338,
+            "recall": 0.425,
+            "f1": 0.5383,
+            "flagged_cases": 139,
+            "true_positives": 102,
+            "false_positives": 37,
+            "missed_frauds": 138,
+            "cost_fp_billion_vnd": 3.699,
+            "benefit_tp_billion_vnd": 163.167,
+            "net_benefit_billion_vnd": 159.468
+          },
+          {
+            "threshold": 0.3,
+            "precision": 0.7521,
+            "recall": 0.3667,
+            "f1": 0.493,
+            "flagged_cases": 117,
+            "true_positives": 88,
+            "false_positives": 29,
+            "missed_frauds": 152,
+            "cost_fp_billion_vnd": 2.899,
+            "benefit_tp_billion_vnd": 140.772,
+            "net_benefit_billion_vnd": 137.872
+          },
+          {
+            "threshold": 0.4,
+            "precision": 0.8416,
+            "recall": 0.3542,
+            "f1": 0.4985,
+            "flagged_cases": 101,
+            "true_positives": 85,
+            "false_positives": 16,
+            "missed_frauds": 155,
+            "cost_fp_billion_vnd": 1.6,
+            "benefit_tp_billion_vnd": 135.973,
+            "net_benefit_billion_vnd": 134.373
+          },
+          {
+            "threshold": 0.5,
+            "precision": 0.9022,
+            "recall": 0.3458,
+            "f1": 0.5,
+            "flagged_cases": 92,
+            "true_positives": 83,
+            "false_positives": 9,
+            "missed_frauds": 157,
+            "cost_fp_billion_vnd": 0.9,
+            "benefit_tp_billion_vnd": 132.773,
+            "net_benefit_billion_vnd": 131.874
+          }
+        ],
+        "elapsed_seconds": 12.11
+      }
+    },
+    "fairness": {
+      "status": "complete",
+      "elapsed_seconds": 0.651,
+      "result": {
+        "generated_at": "2026-05-21T01:48:29Z",
+        "dataset": {
+          "csv_path": "E:\\TaxInspector\\scratch\\experimental_evaluation\\tax_data_mock_5001_rows_seed42.csv",
+          "rows": 5001,
+          "eval_rows": 1251,
+          "fraud_ratio": 0.04799
+        },
+        "threshold": 0.3,
+        "min_samples_per_group": 20,
+        "overall": {
+          "n": 1251,
+          "positives": 60,
+          "fpr": 0.009236,
+          "tpr": 0.566667,
+          "selection_rate": 0.035971,
+          "precision": 0.755556,
+          "recall": 0.566667,
+          "f1": 0.647619,
+          "auc_roc": 0.952981
+        },
+        "slices": {
+          "industry": {
+            "groups": {
+              "Bất động sản": {
+                "n": 88,
+                "positives": 7,
+                "fpr": 0.012346,
+                "tpr": 0.571429,
+                "selection_rate": 0.056818,
+                "precision": 0.8,
+                "recall": 0.571429,
+                "f1": 0.666667,
+                "auc_roc": 0.938272
+              },
+              "Công nghệ thông tin": {
+                "n": 83,
+                "positives": 4,
+                "fpr": 0.025316,
+                "tpr": 0.75,
+                "selection_rate": 0.060241,
+                "precision": 0.6,
+                "recall": 0.75,
+                "f1": 0.666667,
+                "auc_roc": 0.993671
+              },
+              "Du lịch & Khách sạn": {
+                "n": 97,
+                "positives": 9,
+                "fpr": 0.0,
+                "tpr": 0.777778,
+                "selection_rate": 0.072165,
+                "precision": 1.0,
+                "recall": 0.777778,
+                "f1": 0.875,
+                "auc_roc": 0.960859
+              },
+              "Dịch vụ tài chính": {
+                "n": 80,
+                "positives": 5,
+                "fpr": 0.013333,
+                "tpr": 0.6,
+                "selection_rate": 0.05,
+                "precision": 0.75,
+                "recall": 0.6,
+                "f1": 0.666667,
+                "auc_roc": 0.986667
+              },
+              "Giáo dục & Đào tạo": {
+                "n": 87,
+                "positives": 2,
+                "fpr": 0.0,
+                "tpr": 0.5,
+                "selection_rate": 0.011494,
+                "precision": 1.0,
+                "recall": 0.5,
+                "f1": 0.666667,
+                "auc_roc": 0.941176
+              },
+              "Khoáng sản & Năng lượng": {
+                "n": 74,
+                "positives": 2,
+                "fpr": 0.0,
+                "tpr": 0.0,
+                "selection_rate": 0.0,
+                "precision": 0.0,
+                "recall": 0.0,
+                "f1": 0.0,
+                "auc_roc": 0.986111
+              },
+              "May mặc & Giầy da": {
+                "n": 77,
+                "positives": 5,
+                "fpr": 0.0,
+                "tpr": 0.6,
+                "selection_rate": 0.038961,
+                "precision": 1.0,
+                "recall": 0.6,
+                "f1": 0.75,
+                "auc_roc": 0.897222
+              },
+              "Nông nghiệp": {
+                "n": 79,
+                "positives": 3,
+                "fpr": 0.0,
+                "tpr": 0.666667,
+                "selection_rate": 0.025316,
+                "precision": 1.0,
+                "recall": 0.666667,
+                "f1": 0.8,
+                "auc_roc": 1.0
+              },
+              "Sản xuất công nghiệp": {
+                "n": 94,
+                "positives": 3,
+                "fpr": 0.010989,
+                "tpr": 0.0,
+                "selection_rate": 0.010638,
+                "precision": 0.0,
+                "recall": 0.0,
+                "f1": 0.0,
+                "auc_roc": 0.981685
+              },
+              "Thương mại XNK": {
+                "n": 76,
+                "positives": 2,
+                "fpr": 0.0,
+                "tpr": 1.0,
+                "selection_rate": 0.026316,
+                "precision": 1.0,
+                "recall": 1.0,
+                "f1": 1.0,
+                "auc_roc": 1.0
+              },
+              "Thực phẩm & Đồ uống": {
+                "n": 96,
+                "positives": 0,
+                "fpr": 0.041667,
+                "tpr": 0.0,
+                "selection_rate": 0.041667,
+                "precision": 0.0,
+                "recall": 0.0,
+                "f1": 0.0,
+                "auc_roc": null
+              },
+              "Viễn thông": {
+                "n": 81,
+                "positives": 4,
+                "fpr": 0.012987,
+                "tpr": 0.5,
+                "selection_rate": 0.037037,
+                "precision": 0.666667,
+                "recall": 0.5,
+                "f1": 0.571429,
+                "auc_roc": 0.863636
+              },
+              "Vận tải & Logistics": {
+                "n": 67,
+                "positives": 1,
+                "fpr": 0.0,
+                "tpr": 1.0,
+                "selection_rate": 0.014925,
+                "precision": 1.0,
+                "recall": 1.0,
+                "f1": 1.0,
+                "auc_roc": 1.0
+              },
+              "Xây dựng": {
+                "n": 95,
+                "positives": 9,
+                "fpr": 0.0,
+                "tpr": 0.444444,
+                "selection_rate": 0.042105,
+                "precision": 1.0,
+                "recall": 0.444444,
+                "f1": 0.615385,
+                "auc_roc": 0.959948
+              },
+              "Y tế & Dược phẩm": {
+                "n": 77,
+                "positives": 4,
+                "fpr": 0.013699,
+                "tpr": 0.5,
+                "selection_rate": 0.038961,
+                "precision": 0.666667,
+                "recall": 0.5,
+                "f1": 0.571429,
+                "auc_roc": 0.965753
+              }
+            },
+            "summary": {
+              "evaluated_groups": 15,
+              "fpr_min": 0.0,
+              "fpr_max": 0.041667,
+              "disparate_impact_fpr_ratio": 0.0,
+              "selection_rate_di_ratio": 0.0,
+              "equal_opportunity_difference": 1.0,
+              "passes_four_fifths_rule": false,
+              "red_flag": true
+            }
+          },
+          "revenue_bucket": {
+            "groups": {
+              "lt_1b": {
+                "n": 42,
+                "positives": 5,
+                "fpr": 0.0,
+                "tpr": 0.4,
+                "selection_rate": 0.047619,
+                "precision": 1.0,
+                "recall": 0.4,
+                "f1": 0.571429,
+                "auc_roc": 0.956757
+              },
+              "1b_to_10b": {
+                "n": 709,
+                "positives": 30,
+                "fpr": 0.007364,
+                "tpr": 0.5,
+                "selection_rate": 0.028209,
+                "precision": 0.75,
+                "recall": 0.5,
+                "f1": 0.6,
+                "auc_roc": 0.946343
+              },
+              "10b_to_100b": {
+                "n": 485,
+                "positives": 21,
+                "fpr": 0.012931,
+                "tpr": 0.619048,
+                "selection_rate": 0.039175,
+                "precision": 0.684211,
+                "recall": 0.619048,
+                "f1": 0.65,
+                "auc_roc": 0.966954
+              }
+            },
+            "summary": {
+              "evaluated_groups": 3,
+              "fpr_min": 0.0,
+              "fpr_max": 0.012931,
+              "disparate_impact_fpr_ratio": 0.0,
+              "selection_rate_di_ratio": 0.59239,
+              "equal_opportunity_difference": 0.219048,
+              "passes_four_fifths_rule": false,
+              "red_flag": true
+            }
+          },
+          "province": {
+            "groups": {
+              "An Giang": {
+                "n": 20,
+                "positives": 2,
+                "fpr": 0.0,
+                "tpr": 0.5,
+                "selection_rate": 0.05,
+                "precision": 1.0,
+                "recall": 0.5,
+                "f1": 0.666667,
+                "auc_roc": 0.777778
+              },
+              "Bà Rịa - Vũng Tàu": {
+                "n": 22,
+                "positives": 3,
+                "fpr": 0.0,
+                "tpr": 0.0,
+                "selection_rate": 0.0,
+                "precision": 0.0,
+                "recall": 0.0,
+                "f1": 0.0,
+                "auc_roc": 0.929825
+              },
+              "Bình Phước": {
+                "n": 22,
+                "positives": 2,
+                "fpr": 0.0,
+                "tpr": 0.5,
+                "selection_rate": 0.045455,
+                "precision": 1.0,
+                "recall": 0.5,
+                "f1": 0.666667,
+                "auc_roc": 1.0
+              },
+              "Bắc Kạn": {
+                "n": 20,
+                "positives": 2,
+                "fpr": 0.0,
+                "tpr": 0.5,
+                "selection_rate": 0.05,
+                "precision": 1.0,
+                "recall": 0.5,
+                "f1": 0.666667,
+                "auc_roc": 1.0
+              },
+              "Cao Bằng": {
+                "n": 27,
+                "positives": 2,
+                "fpr": 0.0,
+                "tpr": 0.5,
+                "selection_rate": 0.037037,
+                "precision": 1.0,
+                "recall": 0.5,
+                "f1": 0.666667,
+                "auc_roc": 0.96
+              },
+              "Cà Mau": {
+                "n": 21,
+                "positives": 0,
+                "fpr": 0.0,
+                "tpr": 0.0,
+                "selection_rate": 0.0,
+                "precision": 0.0,
+                "recall": 0.0,
+                "f1": 0.0,
+                "auc_roc": null
+              },
+              "Cần Thơ": {
+                "n": 25,
+                "positives": 3,
+                "fpr": 0.0,
+                "tpr": 0.666667,
+                "selection_rate": 0.08,
+                "precision": 1.0,
+                "recall": 0.666667,
+                "f1": 0.8,
+                "auc_roc": 1.0
+              },
+              "Hà Giang": {
+                "n": 20,
+                "positives": 0,
+                "fpr": 0.0,
+                "tpr": 0.0,
+                "selection_rate": 0.0,
+                "precision": 0.0,
+                "recall": 0.0,
+                "f1": 0.0,
+                "auc_roc": null
+              },
+              "Hòa Bình": {
+                "n": 23,
+                "positives": 2,
+                "fpr": 0.0,
+                "tpr": 1.0,
+                "selection_rate": 0.086957,
+                "precision": 1.0,
+                "recall": 1.0,
+                "f1": 1.0,
+                "auc_roc": 1.0
+              },
+              "Hưng Yên": {
+                "n": 25,
+                "positives": 0,
+                "fpr": 0.0,
+                "tpr": 0.0,
+                "selection_rate": 0.0,
+                "precision": 0.0,
+                "recall": 0.0,
+                "f1": 0.0,
+                "auc_roc": null
+              },
+              "Hải Phòng": {
+                "n": 21,
+                "positives": 0,
+                "fpr": 0.047619,
+                "tpr": 0.0,
+                "selection_rate": 0.047619,
+                "precision": 0.0,
+                "recall": 0.0,
+                "f1": 0.0,
+                "auc_roc": null
+              },
+              "Hậu Giang": {
+                "n": 29,
+                "positives": 1,
+                "fpr": 0.0,
+                "tpr": 1.0,
+                "selection_rate": 0.034483,
+                "precision": 1.0,
+                "recall": 1.0,
+                "f1": 1.0,
+                "auc_roc": 1.0
+              },
+              "Hồ Chí Minh city": {
+                "n": 22,
+                "positives": 2,
+                "fpr": 0.0,
+                "tpr": 1.0,
+                "selection_rate": 0.090909,
+                "precision": 1.0,
+                "recall": 1.0,
+                "f1": 1.0,
+                "auc_roc": 1.0
+              },
+              "Khánh Hòa": {
+                "n": 26,
+                "positives": 3,
+                "fpr": 0.043478,
+                "tpr": 0.333333,
+                "selection_rate": 0.076923,
+                "precision": 0.5,
+                "recall": 0.333333,
+                "f1": 0.4,
+                "auc_roc": 0.84058
+              },
+              "Kiên Giang": {
+                "n": 20,
+                "positives": 0,
+                "fpr": 0.0,
+                "tpr": 0.0,
+                "selection_rate": 0.0,
+                "precision": 0.0,
+                "recall": 0.0,
+                "f1": 0.0,
+                "auc_roc": null
+              },
+              "Kon Tum": {
+                "n": 25,
+                "positives": 0,
+                "fpr": 0.0,
+                "tpr": 0.0,
+                "selection_rate": 0.0,
+                "precision": 0.0,
+                "recall": 0.0,
+                "f1": 0.0,
+                "auc_roc": null
+              },
+              "Long An": {
+                "n": 21,
+                "positives": 0,
+                "fpr": 0.047619,
+                "tpr": 0.0,
+                "selection_rate": 0.047619,
+                "precision": 0.0,
+                "recall": 0.0,
+                "f1": 0.0,
+                "auc_roc": null
+              },
+              "Lào Cai": {
+                "n": 22,
+                "positives": 0,
+                "fpr": 0.0,
+                "tpr": 0.0,
+                "selection_rate": 0.0,
+                "precision": 0.0,
+                "recall": 0.0,
+                "f1": 0.0,
+                "auc_roc": null
+              },
+              "Lạng Sơn": {
+                "n": 21,
+                "positives": 2,
+                "fpr": 0.052632,
+                "tpr": 0.5,
+                "selection_rate": 0.095238,
+                "precision": 0.5,
+                "recall": 0.5,
+                "f1": 0.5,
+                "auc_roc": 0.868421
+              },
+              "Nam Định": {
+                "n": 28,
+                "positives": 2,
+                "fpr": 0.0,
+                "tpr": 0.5,
+                "selection_rate": 0.035714,
+                "precision": 1.0,
+                "recall": 0.5,
+                "f1": 0.666667,
+                "auc_roc": 0.961538
+              },
+              "Ninh Bình": {
+                "n": 21,
+                "positives": 1,
+                "fpr": 0.05,
+                "tpr": 1.0,
+                "selection_rate": 0.095238,
+                "precision": 0.5,
+                "recall": 1.0,
+                "f1": 0.666667,
+                "auc_roc": 1.0
+              },
+              "Phú Yên": {
+                "n": 28,
+                "positives": 0,
+                "fpr": 0.0,
+                "tpr": 0.0,
+                "selection_rate": 0.0,
+                "precision": 0.0,
+                "recall": 0.0,
+                "f1": 0.0,
+                "auc_roc": null
+              },
+              "Quảng Bình": {
+                "n": 21,
+                "positives": 0,
+                "fpr": 0.0,
+                "tpr": 0.0,
+                "selection_rate": 0.0,
+                "precision": 0.0,
+                "recall": 0.0,
+                "f1": 0.0,
+                "auc_roc": null
+              },
+              "Quảng Nam": {
+                "n": 28,
+                "positives": 4,
+                "fpr": 0.0,
+                "tpr": 0.25,
+                "selection_rate": 0.035714,
+                "precision": 1.0,
+                "recall": 0.25,
+                "f1": 0.4,
+                "auc_roc": 1.0
+              },
+              "Quảng Trị": {
+                "n": 26,
+                "positives": 1,
+                "fpr": 0.04,
+                "tpr": 0.0,
+                "selection_rate": 0.038462,
+                "precision": 0.0,
+                "recall": 0.0,
+                "f1": 0.0,
+                "auc_roc": 0.88
+              },
+              "Sóc Trăng": {
+                "n": 20,
+                "positives": 3,
+                "fpr": 0.0,
+                "tpr": 0.0,
+                "selection_rate": 0.0,
+                "precision": 0.0,
+                "recall": 0.0,
+                "f1": 0.0,
+                "auc_roc": 0.941176
+              },
+              "Thái Bình": {
+                "n": 20,
+                "positives": 3,
+                "fpr": 0.0,
+                "tpr": 1.0,
+                "selection_rate": 0.15,
+                "precision": 1.0,
+                "recall": 1.0,
+                "f1": 1.0,
+                "auc_roc": 1.0
+              },
+              "Thừa Thiên - Huế": {
+                "n": 23,
+                "positives": 1,
+                "fpr": 0.0,
+                "tpr": 0.0,
+                "selection_rate": 0.0,
+                "precision": 0.0,
+                "recall": 0.0,
+                "f1": 0.0,
+                "auc_roc": 1.0
+              },
+              "Tây Ninh": {
+                "n": 31,
+                "positives": 2,
+                "fpr": 0.0,
+                "tpr": 0.5,
+                "selection_rate": 0.032258,
+                "precision": 1.0,
+                "recall": 0.5,
+                "f1": 0.666667,
+                "auc_roc": 0.982759
+              },
+              "Yên Bái": {
+                "n": 20,
+                "positives": 0,
+                "fpr": 0.0,
+                "tpr": 0.0,
+                "selection_rate": 0.0,
+                "precision": 0.0,
+                "recall": 0.0,
+                "f1": 0.0,
+                "auc_roc": null
+              },
+              "Đăk Nông": {
+                "n": 23,
+                "positives": 1,
+                "fpr": 0.0,
+                "tpr": 1.0,
+                "selection_rate": 0.043478,
+                "precision": 1.0,
+                "recall": 1.0,
+                "f1": 1.0,
+                "auc_roc": 1.0
+              },
+              "Đồng Nai": {
+                "n": 22,
+                "positives": 0,
+                "fpr": 0.045455,
+                "tpr": 0.0,
+                "selection_rate": 0.045455,
+                "precision": 0.0,
+                "recall": 0.0,
+                "f1": 0.0,
+                "auc_roc": null
+              }
+            },
+            "summary": {
+              "evaluated_groups": 32,
+              "fpr_min": 0.0,
+              "fpr_max": 0.052632,
+              "disparate_impact_fpr_ratio": 0.0,
+              "selection_rate_di_ratio": 0.0,
+              "equal_opportunity_difference": 1.0,
+              "passes_four_fifths_rule": false,
+              "red_flag": true
+            }
+          },
+          "company_age": {
+            "groups": {
+              "young_lt_2y": {
+                "n": 1144,
+                "positives": 53,
+                "fpr": 0.010082,
+                "tpr": 0.528302,
+                "selection_rate": 0.034091,
+                "precision": 0.717949,
+                "recall": 0.528302,
+                "f1": 0.608696,
+                "auc_roc": 0.945506
+              },
+              "mid_2_to_5y": {
+                "n": 107,
+                "positives": 7,
+                "fpr": 0.0,
+                "tpr": 0.857143,
+                "selection_rate": 0.056075,
+                "precision": 1.0,
+                "recall": 0.857143,
+                "f1": 0.923077,
+                "auc_roc": 1.0
+              }
+            },
+            "summary": {
+              "evaluated_groups": 2,
+              "fpr_min": 0.0,
+              "fpr_max": 0.010082,
+              "disparate_impact_fpr_ratio": 0.0,
+              "selection_rate_di_ratio": 0.607954,
+              "equal_opportunity_difference": 0.328841,
+              "passes_four_fifths_rule": false,
+              "red_flag": true
+            }
+          }
+        },
+        "calibration_equity": {
+          "industry": {
+            "Bất động sản": [
+              {
+                "bin": "(-0.001, 0.2]",
+                "n": 82,
+                "mean_score": 0.015378,
+                "observed_rate": 0.036585
+              },
+              {
+                "bin": "(0.2, 0.4]",
+                "n": 4,
+                "mean_score": 0.319249,
+                "observed_rate": 0.5
+              },
+              {
+                "bin": "(0.4, 0.6]",
+                "n": 1,
+                "mean_score": 0.590849,
+                "observed_rate": 1.0
+              },
+              {
+                "bin": "(0.8, 1.0]",
+                "n": 1,
+                "mean_score": 0.959409,
+                "observed_rate": 1.0
+              }
+            ],
+            "Công nghệ thông tin": [
+              {
+                "bin": "(-0.001, 0.2]",
+                "n": 76,
+                "mean_score": 0.0148,
+                "observed_rate": 0.0
+              },
+              {
+                "bin": "(0.2, 0.4]",
+                "n": 3,
+                "mean_score": 0.268019,
+                "observed_rate": 0.333333
+              },
+              {
+                "bin": "(0.4, 0.6]",
+                "n": 1,
+                "mean_score": 0.45597,
+                "observed_rate": 0.0
+              },
+              {
+                "bin": "(0.8, 1.0]",
+                "n": 3,
+                "mean_score": 0.95881,
+                "observed_rate": 1.0
+              }
+            ],
+            "Du lịch & Khách sạn": [
+              {
+                "bin": "(-0.001, 0.2]",
+                "n": 90,
+                "mean_score": 0.013971,
+                "observed_rate": 0.022222
+              },
+              {
+                "bin": "(0.6, 0.8]",
+                "n": 4,
+                "mean_score": 0.724827,
+                "observed_rate": 1.0
+              },
+              {
+                "bin": "(0.8, 1.0]",
+                "n": 3,
+                "mean_score": 0.919797,
+                "observed_rate": 1.0
+              }
+            ],
+            "Dịch vụ tài chính": [
+              {
+                "bin": "(-0.001, 0.2]",
+                "n": 73,
+                "mean_score": 0.011901,
+                "observed_rate": 0.013699
+              },
+              {
+                "bin": "(0.2, 0.4]",
+                "n": 3,
+                "mean_score": 0.234818,
+                "observed_rate": 0.333333
+              },
+              {
+                "bin": "(0.6, 0.8]",
+                "n": 1,
+                "mean_score": 0.621087,
+                "observed_rate": 0.0
+              },
+              {
+                "bin": "(0.8, 1.0]",
+                "n": 3,
+                "mean_score": 0.926874,
+                "observed_rate": 1.0
+              }
+            ],
+            "Giáo dục & Đào tạo": [
+              {
+                "bin": "(-0.001, 0.2]",
+                "n": 86,
+                "mean_score": 0.01759,
+                "observed_rate": 0.011628
+              },
+              {
+                "bin": "(0.8, 1.0]",
+                "n": 1,
+                "mean_score": 0.912152,
+                "observed_rate": 1.0
+              }
+            ],
+            "Khoáng sản & Năng lượng": [
+              {
+                "bin": "(-0.001, 0.2]",
+                "n": 74,
+                "mean_score": 0.02061,
+                "observed_rate": 0.027027
+              }
+            ],
+            "May mặc & Giầy da": [
+              {
+                "bin": "(-0.001, 0.2]",
+                "n": 73,
+                "mean_score": 0.011214,
+                "observed_rate": 0.027397
+              },
+              {
+                "bin": "(0.2, 0.4]",
+                "n": 2,
+                "mean_score": 0.298231,
+                "observed_rate": 0.5
+              },
+              {
+                "bin": "(0.4, 0.6]",
+                "n": 1,
+                "mean_score": 0.424602,
+                "observed_rate": 1.0
+              },
+              {
+                "bin": "(0.8, 1.0]",
+                "n": 1,
+                "mean_score": 0.890101,
+                "observed_rate": 1.0
+              }
+            ],
+            "Nông nghiệp": [
+              {
+                "bin": "(-0.001, 0.2]",
+                "n": 76,
+                "mean_score": 0.010352,
+                "observed_rate": 0.0
+              },
+              {
+                "bin": "(0.2, 0.4]",
+                "n": 2,
+                "mean_score": 0.295379,
+                "observed_rate": 1.0
+              },
+              {
+                "bin": "(0.8, 1.0]",
+                "n": 1,
+                "mean_score": 0.959902,
+                "observed_rate": 1.0
+              }
+            ],
+            "Sản xuất công nghiệp": [
+              {
+                "bin": "(-0.001, 0.2]",
+                "n": 91,
+                "mean_score": 0.012389,
+                "observed_rate": 0.021978
+              },
+              {
+                "bin": "(0.2, 0.4]",
+                "n": 2,
+                "mean_score": 0.264546,
+                "observed_rate": 0.5
+              },
+              {
+                "bin": "(0.4, 0.6]",
+                "n": 1,
+                "mean_score": 0.594472,
+                "observed_rate": 0.0
+              }
+            ],
+            "Thương mại XNK": [
+              {
+                "bin": "(-0.001, 0.2]",
+                "n": 74,
+                "mean_score": 0.008637,
+                "observed_rate": 0.0
+              },
+              {
+                "bin": "(0.8, 1.0]",
+                "n": 2,
+                "mean_score": 0.969068,
+                "observed_rate": 1.0
+              }
+            ],
+            "Thực phẩm & Đồ uống": [
+              {
+                "bin": "(-0.001, 0.2]",
+                "n": 92,
+                "mean_score": 0.013309,
+                "observed_rate": 0.0
+              },
+              {
+                "bin": "(0.4, 0.6]",
+                "n": 2,
+                "mean_score": 0.516258,
+                "observed_rate": 0.0
+              },
+              {
+                "bin": "(0.6, 0.8]",
+                "n": 1,
+                "mean_score": 0.659801,
+                "observed_rate": 0.0
+              },
+              {
+                "bin": "(0.8, 1.0]",
+                "n": 1,
+                "mean_score": 0.871614,
+                "observed_rate": 0.0
+              }
+            ],
+            "Viễn thông": [
+              {
+                "bin": "(-0.001, 0.2]",
+                "n": 77,
+                "mean_score": 0.011843,
+                "observed_rate": 0.025974
+              },
+              {
+                "bin": "(0.2, 0.4]",
+                "n": 1,
+                "mean_score": 0.204399,
+                "observed_rate": 0.0
+              },
+              {
+                "bin": "(0.6, 0.8]",
+                "n": 1,
+                "mean_score": 0.740318,
+                "observed_rate": 0.0
+              },
+              {
+                "bin": "(0.8, 1.0]",
+                "n": 2,
+                "mean_score": 0.902662,
+                "observed_rate": 1.0
+              }
+            ],
+            "Vận tải & Logistics": [
+              {
+                "bin": "(-0.001, 0.2]",
+                "n": 65,
+                "mean_score": 0.010038,
+                "observed_rate": 0.0
+              },
+              {
+                "bin": "(0.2, 0.4]",
+                "n": 1,
+                "mean_score": 0.245243,
+                "observed_rate": 0.0
+              },
+              {
+                "bin": "(0.8, 1.0]",
+                "n": 1,
+                "mean_score": 0.929621,
+                "observed_rate": 1.0
+              }
+            ],
+            "Xây dựng": [
+              {
+                "bin": "(-0.001, 0.2]",
+                "n": 90,
+                "mean_score": 0.013601,
+                "observed_rate": 0.044444
+              },
+              {
+                "bin": "(0.2, 0.4]",
+                "n": 1,
+                "mean_score": 0.266544,
+                "observed_rate": 1.0
+              },
+              {
+                "bin": "(0.8, 1.0]",
+                "n": 4,
+                "mean_score": 0.968398,
+                "observed_rate": 1.0
+              }
+            ],
+            "Y tế & Dược phẩm": [
+              {
+                "bin": "(-0.001, 0.2]",
+                "n": 70,
+                "mean_score": 0.017776,
+                "observed_rate": 0.014286
+              },
+              {
+                "bin": "(0.2, 0.4]",
+                "n": 5,
+                "mean_score": 0.254607,
+                "observed_rate": 0.2
+              },
+              {
+                "bin": "(0.4, 0.6]",
+                "n": 1,
+                "mean_score": 0.404711,
+                "observed_rate": 1.0
+              },
+              {
+                "bin": "(0.8, 1.0]",
+                "n": 1,
+                "mean_score": 0.913377,
+                "observed_rate": 1.0
+              }
+            ]
+          },
+          "revenue_bucket": {
+            "lt_1b": [
+              {
+                "bin": "(-0.001, 0.2]",
+                "n": 39,
+                "mean_score": 0.010909,
+                "observed_rate": 0.051282
+              },
+              {
+                "bin": "(0.2, 0.4]",
+                "n": 1,
+                "mean_score": 0.205439,
+                "observed_rate": 1.0
+              },
+              {
+                "bin": "(0.6, 0.8]",
+                "n": 2,
+                "mean_score": 0.737314,
+                "observed_rate": 1.0
+              }
+            ],
+            "1b_to_10b": [
+              {
+                "bin": "(-0.001, 0.2]",
+                "n": 682,
+                "mean_score": 0.01238,
+                "observed_rate": 0.017595
+              },
+              {
+                "bin": "(0.2, 0.4]",
+                "n": 12,
+                "mean_score": 0.275927,
+                "observed_rate": 0.583333
+              },
+              {
+                "bin": "(0.4, 0.6]",
+                "n": 4,
+                "mean_score": 0.497432,
+                "observed_rate": 0.5
+              },
+              {
+                "bin": "(0.6, 0.8]",
+                "n": 2,
+                "mean_score": 0.70006,
+                "observed_rate": 0.0
+              },
+              {
+                "bin": "(0.8, 1.0]",
+                "n": 9,
+                "mean_score": 0.933098,
+                "observed_rate": 1.0
+              }
+            ],
+            "10b_to_100b": [
+              {
+                "bin": "(-0.001, 0.2]",
+                "n": 457,
+                "mean_score": 0.015203,
+                "observed_rate": 0.013129
+              },
+              {
+                "bin": "(0.2, 0.4]",
+                "n": 11,
+                "mean_score": 0.270408,
+                "observed_rate": 0.181818
+              },
+              {
+                "bin": "(0.4, 0.6]",
+                "n": 3,
+                "mean_score": 0.504464,
+                "observed_rate": 0.333333
+              },
+              {
+                "bin": "(0.6, 0.8]",
+                "n": 3,
+                "mean_score": 0.681923,
+                "observed_rate": 0.666667
+              },
+              {
+                "bin": "(0.8, 1.0]",
+                "n": 11,
+                "mean_score": 0.927366,
+                "observed_rate": 0.909091
+              }
+            ]
+          }
+        },
+        "red_flags": [
+          {
+            "dimension": "industry",
+            "summary": {
+              "evaluated_groups": 15,
+              "fpr_min": 0.0,
+              "fpr_max": 0.041667,
+              "disparate_impact_fpr_ratio": 0.0,
+              "selection_rate_di_ratio": 0.0,
+              "equal_opportunity_difference": 1.0,
+              "passes_four_fifths_rule": false,
+              "red_flag": true
+            }
+          },
+          {
+            "dimension": "revenue_bucket",
+            "summary": {
+              "evaluated_groups": 3,
+              "fpr_min": 0.0,
+              "fpr_max": 0.012931,
+              "disparate_impact_fpr_ratio": 0.0,
+              "selection_rate_di_ratio": 0.59239,
+              "equal_opportunity_difference": 0.219048,
+              "passes_four_fifths_rule": false,
+              "red_flag": true
+            }
+          },
+          {
+            "dimension": "province",
+            "summary": {
+              "evaluated_groups": 32,
+              "fpr_min": 0.0,
+              "fpr_max": 0.052632,
+              "disparate_impact_fpr_ratio": 0.0,
+              "selection_rate_di_ratio": 0.0,
+              "equal_opportunity_difference": 1.0,
+              "passes_four_fifths_rule": false,
+              "red_flag": true
+            }
+          },
+          {
+            "dimension": "company_age",
+            "summary": {
+              "evaluated_groups": 2,
+              "fpr_min": 0.0,
+              "fpr_max": 0.010082,
+              "disparate_impact_fpr_ratio": 0.0,
+              "selection_rate_di_ratio": 0.607954,
+              "equal_opportunity_difference": 0.328841,
+              "passes_four_fifths_rule": false,
+              "red_flag": true
+            }
+          }
+        ],
+        "disparate_impact_pass": false,
+        "mitigation_recommendations": [
+          "Review flagged slices with domain experts before using the score as an automatic enforcement trigger.",
+          "Calibrate thresholds per risk tier and inspect selection-rate gaps for low-volume groups.",
+          "Add post-model human review for slices with high false-positive disparity or unstable sample counts.",
+          "Re-run the report on the full 120k/5-fold evaluation; small smoke runs can overstate disparity because some groups receive zero selections."
+        ],
+        "elapsed_seconds": 0.644
+      }
+    },
+    "rag_grounding": {
+      "status": "complete",
+      "elapsed_seconds": 1.13,
+      "result": {
+        "kb_audit": {
+          "generated_at": "2026-05-21T01:48:29Z",
+          "database": {
+            "available": true,
+            "documents_by_type": {
+              "circular": 11,
+              "collections": 1,
+              "decision": 1,
+              "decree": 13,
+              "law": 7,
+              "official_letter": 12,
+              "resolution": 1,
+              "transfer_pricing": 1,
+              "vat": 1
+            },
+            "document_count": 48,
+            "chunk_count": 107,
+            "kg_entity_count": 70,
+            "kg_relation_count": 61,
+            "recent_documents": [
+              {
+                "document_key": "CV_4019_TCT_CS_2024",
+                "title": "Công văn 4019/TCT-CS năm 2024 — Thuế GTGT hóa đơn hợp đồng xây dựng",
+                "doc_type": "official_letter"
+              },
+              {
+                "document_key": "CV_573_TCT_CS_2024",
+                "title": "Công văn 573/TCT-CS năm 2024 — HĐĐT cho hàng hóa xuất khẩu",
+                "doc_type": "official_letter"
+              },
+              {
+                "document_key": "CV_3543_TCT_CS_2024",
+                "title": "Công văn 3543/TCT-CS năm 2024 — Xử lý HĐĐT có sai sót",
+                "doc_type": "official_letter"
+              },
+              {
+                "document_key": "CV_2204_TCT_CS_2024",
+                "title": "Công văn 2204/TCT-CS năm 2024 — Thuế GTGT xuất khẩu phần mềm",
+                "doc_type": "official_letter"
+              },
+              {
+                "document_key": "CV_2155_TCT_CS_2024",
+                "title": "Công văn 2155/TCT-CS năm 2024 — Thuế GTGT dịch vụ khu chế xuất",
+                "doc_type": "official_letter"
+              },
+              {
+                "document_key": "TT_100_2021_TT_BTC",
+                "title": "Thông tư 100/2021/TT-BTC — Sửa đổi, bổ sung Thông tư 40/2021 về thuế hộ kinh doanh",
+                "doc_type": "circular"
+              },
+              {
+                "document_key": "TT_130_2016_TT_BTC",
+                "title": "Thông tư 130/2016/TT-BTC — Sửa đổi Thông tư 219 về thuế GTGT và Thông tư 78 về thuế TNDN",
+                "doc_type": "circular"
+              },
+              {
+                "document_key": "TT_92_2015_TT_BTC",
+                "title": "Thông tư 92/2015/TT-BTC — Sửa đổi, bổ sung quy định về thuế GTGT và TNCN",
+                "doc_type": "circular"
+              },
+              {
+                "document_key": "TT_111_2013_TT_BTC",
+                "title": "Thông tư 111/2013/TT-BTC — Hướng dẫn thực hiện Luật Thuế thu nhập cá nhân",
+                "doc_type": "circular"
+              },
+              {
+                "document_key": "ND_102_2021_NDCP",
+                "title": "Nghị định 102/2021/NĐ-CP: Sửa đổi quy định xử phạt hành chính về thuế, hóa đơn",
+                "doc_type": "decree"
+              },
+              {
+                "document_key": "ND_64_2024_NDCP",
+                "title": "Nghị định 64/2024/NĐ-CP: Gia hạn nộp thuế GTGT, TNDN, TNCN năm 2024",
+                "doc_type": "decree"
+              },
+              {
+                "document_key": "LUAT_GTGT_48_2024_QH15",
+                "title": "Luật Thuế giá trị gia tăng số 48/2024/QH15",
+                "doc_type": "law"
+              }
+            ]
+          },
+          "repository_seeds": {
+            "seed_files": [
+              {
+                "path": "Backend\\app\\scripts\\seed_minimal_tax_knowledge.py",
+                "key_count": 0,
+                "sample_keys": [],
+                "title_count": 0
+              },
+              {
+                "path": "Backend\\app\\scripts\\seed_real_tax_knowledge.py",
+                "key_count": 5,
+                "sample_keys": [
+                  "cv_1122_2023",
+                  "cv_2721_2024",
+                  "cv_4781_2024",
+                  "cv_6141_2024",
+                  "nd_72_2024"
+                ],
+                "title_count": 5
+              },
+              {
+                "path": "Backend\\app\\scripts\\seed_complex_tax_knowledge.py",
+                "key_count": 10,
+                "sample_keys": [
+                  "luat_38_2019_qh14",
+                  "luat_thue_tncn_hop_nhat",
+                  "nd_123_2020_ndcp",
+                  "nd_125_2020_ndcp",
+                  "nd_132_2020_ndcp",
+                  "nd_52_2013_ndcp",
+                  "nd_72_2024_ndcp",
+                  "tt_40_2021_tt_btc",
+                  "tt_80_2021_tt_btc",
+                  "tt_96_2015_tt_btc"
+                ],
+                "title_count": 10
+              },
+              {
+                "path": "Backend\\scripts\\ingest_missing_legal_docs.py",
+                "key_count": 13,
+                "sample_keys": [
+                  "CV_2155_TCT_CS_2024",
+                  "CV_2204_TCT_CS_2024",
+                  "CV_3543_TCT_CS_2024",
+                  "CV_4019_TCT_CS_2024",
+                  "CV_573_TCT_CS_2024",
+                  "LUAT_GTGT_48_2024_QH15",
+                  "ND_102_2021_NDCP",
+                  "ND_64_2024_NDCP",
+                  "NQ_954_2020_UBTVQH14",
+                  "TT_100_2021_TT_BTC",
+                  "TT_111_2013_TT_BTC",
+                  "TT_130_2016_TT_BTC"
+                ],
+                "title_count": 13
+              }
+            ],
+            "seed_document_count_estimate": 28,
+            "citizen_snippet_count": 32,
+            "citizen_snippet_sample": [
+              "capital_transfer_tax",
+              "cash_payment_over_20m",
+              "corporate_tax_incentives",
+              "deductible_client_entertainment",
+              "ecommerce_individual_tax",
+              "einvoice_correction",
+              "einvoice_late_issue",
+              "etax_electronic_declaration",
+              "family_deduction_calculation",
+              "fixed_asset_depreciation",
+              "foreign_contractor_tax",
+              "foreign_income_tax",
+              "freelancer_tax",
+              "household_business_small_revenue",
+              "interest_expense_deduction",
+              "investment_project_vat_refund",
+              "late_filing_penalty",
+              "personal_tax_code_registration",
+              "prize_winning_tax",
+              "real_estate_transfer_individual",
+              "rental_income_individual",
+              "seasonal_contract_tax",
+              "stock_investment_tax",
+              "tax_audit_reassessment",
+              "tax_debt_enforcement",
+              "tax_extension_2024",
+              "tncn_salary_dependent_refund",
+              "two_workplaces_pit_finalization",
+              "vat_export_zero_percent",
+              "vat_import"
+            ]
+          },
+          "coverage_score": 0.8733,
+          "recommended_path": "ingest_curated_expansion_before_reranker_tuning",
+          "curated_expansion_count": 12,
+          "curated_topics": [
+            "cit",
+            "ecommerce",
+            "einvoice",
+            "extension",
+            "fct",
+            "household_business",
+            "penalty",
+            "pit",
+            "transfer_pricing",
+            "vat_2025"
+          ]
+        },
+        "grounding_rate": 0.7704,
+        "pair_count": 3306
+      }
+    },
+    "deep_learning": {
+      "status": "complete",
+      "elapsed_seconds": 7.38,
+      "result": {
+        "generated_at": "2026-05-21T01:48:37Z",
+        "seed": 42,
+        "rows": 5000,
+        "deep_learning_benchmarks": {
+          "gat": {
+            "edge": {
+              "auc": 0.965787,
+              "pr_auc": 0.623056,
+              "precision": 0.608,
+              "recall": 0.804233,
+              "f1": 0.692483
+            },
+            "node": {
+              "auc": 0.998655,
+              "pr_auc": 0.976541,
+              "precision": 0.39521,
+              "recall": 1.0,
+              "f1": 0.566524
+            },
+            "temporal_edge_features": true
+          },
+          "hetero_gnn": {
+            "edge": {
+              "auc": 0.95035,
+              "pr_auc": 0.585437,
+              "precision": 0.556,
+              "recall": 0.73545,
+              "f1": 0.633257
+            },
+            "node": {
+              "auc": 0.998248,
+              "pr_auc": 0.966151,
+              "precision": 0.358696,
+              "recall": 1.0,
+              "f1": 0.528
+            },
+            "node_types": [
+              "company",
+              "invoice",
+              "owner"
+            ]
+          },
+          "graph_baseline": {
+            "auc": 0.462297,
+            "pr_auc": 0.06856,
+            "precision": 0.056,
+            "recall": 0.074074,
+            "f1": 0.063781
+          },
+          "vae_anomaly": {
+            "mode": "pca_vae_proxy",
+            "input_dims": 16,
+            "p95_threshold": 0.962983,
+            "reconstruction_error_mean": 0.6275,
+            "vae_proxy": {
+              "auc": 0.994492,
+              "pr_auc": 0.93386,
+              "precision": 0.48125,
+              "recall": 0.987179,
+              "f1": 0.647059
+            },
+            "isolation_forest": {
+              "auc": 0.931844,
+              "pr_auc": 0.596863,
+              "precision": 0.614286,
+              "recall": 0.551282,
+              "f1": 0.581081
+            },
+            "anomaly_detection_f1_at_p95": 0.647059
+          },
+          "temporal_transformer": {
+            "mode": "sequence_proxy_from_evaluation",
+            "temporal_transformer": {},
+            "gbdt_sequence_proxy": {}
+          }
+        },
+        "limitations": [
+          "Default runner uses CPU proxy tasks; replace with full PyTorch trainers for final artifact-level numbers.",
+          "Metrics are deterministic synthetic benchmarks intended for thesis reproducibility and CI gating."
+        ]
+      }
+    },
+    "concept_drift": {
+      "status": "complete",
+      "elapsed_seconds": 0.772,
+      "result": {
+        "adwin_or_page_hinkley_validated": true,
+        "detection_count": 84,
+        "psi_shift_example": 1.195915,
+        "status": {
+          "model_key": "fraud-hybrid-v2",
+          "prediction_count": 240,
+          "alert_count": 85,
+          "last_alert": {
+            "model_key": "fraud-hybrid-v2",
+            "detector": "psi",
+            "severity": "high",
+            "metric": "revenue_log",
+            "value": 0.35153553154629147,
+            "threshold": 0.25,
+            "message": "Feature PSI exceeded the retraining threshold.",
+            "timestamp": 1779328118.6309714,
+            "metadata": {
+              "psi_scores": {
+                "revenue_log": 0.35153553154629147
+              },
+              "simulation_index": 239
+            },
+            "timestamp_iso": "2026-05-21T01:48:38Z"
+          },
+          "adwin_window_size": 120,
+          "baseline_feature_count": {
+            "revenue_log": 40,
+            "invoice_velocity": 40
+          },
+          "recent_feature_count": {
+            "revenue_log": 200,
+            "invoice_velocity": 200
+          },
+          "psi_threshold": 0.25
+        }
+      }
+    },
+    "federated_learning": {
+      "status": "complete",
+      "elapsed_seconds": 0.181,
+      "result": {
+        "generated_at": "2026-05-21T01:48:38Z",
+        "rounds": 2,
+        "rows": 5000,
+        "epsilon": 1.0,
+        "delta": 1e-05,
+        "centralized_auc": 0.911217,
+        "federated_auc": 0.91175,
+        "federated_gap": 0.0,
+        "node_results": [
+          {
+            "node_id": "office_hcm",
+            "display_name": "Cuc Thue TP.HCM (finance-heavy)",
+            "n_samples": 1669,
+            "local_auc": 0.910854,
+            "industry_mix": {
+              "finance": 952,
+              "retail": 248,
+              "services": 245,
+              "construction": 224
+            },
+            "province_mix": {
+              "HCM": 962,
+              "HN": 237,
+              "DN": 235,
+              "CT": 235
+            }
+          },
+          {
+            "node_id": "office_hanoi",
+            "display_name": "Cuc Thue Ha Noi (construction-heavy)",
+            "n_samples": 1615,
+            "local_auc": 0.912454,
+            "industry_mix": {
+              "construction": 930,
+              "retail": 238,
+              "finance": 237,
+              "services": 210
+            },
+            "province_mix": {
+              "HN": 935,
+              "DN": 240,
+              "HCM": 224,
+              "CT": 216
+            }
+          },
+          {
+            "node_id": "office_danang",
+            "display_name": "Cuc Thue Da Nang (services)",
+            "n_samples": 1618,
+            "local_auc": 0.907382,
+            "industry_mix": {
+              "services": 907,
+              "construction": 240,
+              "retail": 236,
+              "finance": 235
+            },
+            "province_mix": {
+              "DN": 930,
+              "HCM": 245,
+              "CT": 233,
+              "HN": 210
+            }
+          },
+          {
+            "node_id": "office_cantho",
+            "display_name": "Cuc Thue Can Tho (retail/agriculture)",
+            "n_samples": 239,
+            "local_auc": 0.808885,
+            "industry_mix": {
+              "retail": 239
+            },
+            "province_mix": {
+              "CT": 239
+            }
+          }
+        ],
+        "communication_bytes_per_round": 768,
+        "total_communication_bytes": 1536,
+        "convergence_curve": [
+          {
+            "round": 1.0,
+            "auc": 0.912352
+          },
+          {
+            "round": 2.0,
+            "auc": 0.91175
+          }
+        ],
+        "privacy": {
+          "mechanism": "Gaussian coefficient noise for PoC",
+          "epsilon": 1.0,
+          "delta": 1e-05,
+          "noise_std": 0.002
+        }
+      }
+    },
+    "user_study": {
+      "status": "complete",
+      "elapsed_seconds": 0.006,
+      "result": {
+        "analysis": {
+          "participant_count": 10,
+          "sus_mean": 82.5,
+          "sus_std": 4.183,
+          "tam_mean": {
+            "PU": 4.35,
+            "PEOU": 4.333,
+            "BI": 4.1
+          },
+          "task_completion_rate": 0.82,
+          "task_accuracy_rate": 0.82,
+          "mean_time_seconds": 188.508,
+          "mode_accuracy": {
+            "delinquency": 0.6,
+            "fraud": 0.9,
+            "full": 0.7,
+            "legal": 0.9,
+            "macro": 0.6,
+            "vat": 0.9
+          }
+        },
+        "participant_count": 10
+      }
+    }
+  }
+}

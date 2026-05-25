@@ -29,7 +29,8 @@ DEFAULT_MANIFEST: Dict[str, Any] = {
             "expected_unit_count": 63,
             "geojson_path": "vietnam_admin_boundaries_63_official.geojson",
             "fallback": "centroid_tile",
-            "status": "fallback_only",
+            "status": "reviewed_legacy_geojson_loaded",
+            "source_name": "TaxInspector restored 63-province GeoJSON asset enriched with province codes",
         },
         "vn_34_2025": {
             "label": "Vietnam 34 provincial-level units after 2025 administrative reorganization",

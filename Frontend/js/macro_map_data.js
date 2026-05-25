@@ -17,6 +17,15 @@ const MacroMapData = (() => {
         return window.MACRO_BOUNDARY_VERSION || boundaryVersion || DEFAULT_BOUNDARY_VERSION;
     }
 
+    function setBoundaryVersion(nextBoundaryVersion) {
+        const normalized = nextBoundaryVersion === 'vn_63_legacy' ? 'vn_63_legacy' : DEFAULT_BOUNDARY_VERSION;
+        boundaryVersion = normalized;
+        window.MACRO_BOUNDARY_VERSION = normalized;
+        statePromise = null;
+        state = null;
+        return boundaryVersion;
+    }
+
     async function loadState(options = {}) {
         const force = Boolean(options.force);
         boundaryVersion = options.boundaryVersion || getBoundaryVersion();
@@ -210,6 +219,7 @@ const MacroMapData = (() => {
     return {
         loadState,
         getBoundaryVersion,
+        setBoundaryVersion,
         provinceForFeature,
         previewProvince,
         previewProvinces,

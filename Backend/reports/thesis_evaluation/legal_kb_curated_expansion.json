@@ -1,0 +1,194 @@
+[
+  {
+    "key": "ND_123_2020_NDCP_EINVOICE_DETAIL",
+    "title": "Nghi dinh 123/2020/ND-CP - hoa don, chung tu dien tu",
+    "doc_type": "decree",
+    "authority": "Chinh phu",
+    "authority_rank": 60,
+    "effective_from": "2022-07-01",
+    "topic": "einvoice",
+    "content": "Nghi dinh 123/2020/ND-CP quy dinh ve hoa don, chung tu. Noi dung can duoc uu tien trong RAG gom thoi diem lap hoa don, xu ly hoa don sai sot, hoa don thay the/dieu chinh, hoa don dien tu co ma cua co quan thue va trach nhiem luu tru chung tu phuc vu kiem tra sau nay.",
+    "relations": [
+      {
+        "target": "VB_78_2021_TT_BTC",
+        "type": "implemented_by"
+      }
+    ]
+  },
+  {
+    "key": "TT_78_2021_TT_BTC_EINVOICE_GUIDE",
+    "title": "Thong tu 78/2021/TT-BTC - huong dan hoa don dien tu",
+    "doc_type": "circular",
+    "authority": "Bo Tai chinh",
+    "authority_rank": 50,
+    "effective_from": "2021-07-01",
+    "topic": "einvoice",
+    "content": "Thong tu 78/2021/TT-BTC huong dan trien khai hoa don dien tu, bao gom ky hieu mau so hoa don, xu ly sai sot, chuyen du lieu hoa don den co quan thue va cach lap hoa don dieu chinh hoac thay the khi thong tin giao dich khong dung.",
+    "relations": [
+      {
+        "target": "ND_123_2020_NDCP_EINVOICE_DETAIL",
+        "type": "implements"
+      }
+    ]
+  },
+  {
+    "key": "ND_125_2020_NDCP_PENALTY_FAQ",
+    "title": "Nghi dinh 125/2020/ND-CP - xu phat vi pham ve thue va hoa don",
+    "doc_type": "decree",
+    "authority": "Chinh phu",
+    "authority_rank": 60,
+    "effective_from": "2020-12-05",
+    "topic": "penalty",
+    "content": "Nghi dinh 125/2020/ND-CP la can cu chinh cho cac cau hoi ve nop to khai tre, khai sai, cham nop tien thue, su dung hoa don khong hop phap va tinh tiet giam nhe khi nguoi nop thue tu phat hien, tu khac phuc truoc khi bi kiem tra.",
+    "relations": [
+      {
+        "target": "LUAT_38_2019",
+        "type": "implements"
+      }
+    ]
+  },
+  {
+    "key": "TT_40_2021_TT_BTC_HOUSEHOLD",
+    "title": "Thong tu 40/2021/TT-BTC - thue ho, ca nhan kinh doanh",
+    "doc_type": "circular",
+    "authority": "Bo Tai chinh",
+    "authority_rank": 50,
+    "effective_from": "2021-08-01",
+    "topic": "household_business",
+    "content": "Thong tu 40/2021/TT-BTC huong dan VAT, TNCN va quan ly thue doi voi ho kinh doanh, ca nhan kinh doanh, cho thue tai san, ban hang qua san thuong mai dien tu va phuong phap khai thue theo tung lan phat sinh hoac theo ky.",
+    "relations": [
+      {
+        "target": "LUAT_38_2019",
+        "type": "implements"
+      }
+    ]
+  },
+  {
+    "key": "TT_100_2021_TT_BTC_PLATFORM",
+    "title": "Thong tu 100/2021/TT-BTC - sua doi quy dinh san TMĐT",
+    "doc_type": "circular",
+    "authority": "Bo Tai chinh",
+    "authority_rank": 50,
+    "effective_from": "2022-01-01",
+    "topic": "ecommerce",
+    "content": "Thong tu 100/2021/TT-BTC bo sung nghia vu cung cap thong tin va co che khai thue thay, nop thue thay trong mot so truong hop ca nhan kinh doanh qua san thuong mai dien tu, dong thoi lam ro nguong doanh thu cho thue tai san.",
+    "relations": [
+      {
+        "target": "TT_40_2021_TT_BTC_HOUSEHOLD",
+        "type": "amends"
+      }
+    ]
+  },
+  {
+    "key": "NQ_954_2020_UBTVQH14_DEPENDENT",
+    "title": "Nghi quyet 954/2020/UBTVQH14 - muc giam tru gia canh",
+    "doc_type": "resolution",
+    "authority": "Uy ban Thuong vu Quoc hoi",
+    "authority_rank": 75,
+    "effective_from": "2020-07-01",
+    "topic": "pit",
+    "content": "Nghi quyet 954/2020/UBTVQH14 quy dinh muc giam tru ban than 11 trieu dong/thang va giam tru nguoi phu thuoc 4,4 trieu dong/thang, la can cu thuong gap khi tu van quyet toan thue TNCN, luong thang 13 va hoan thue.",
+    "relations": [
+      {
+        "target": "TT_111_2013_TT_BTC",
+        "type": "supplements"
+      }
+    ]
+  },
+  {
+    "key": "TT_111_2013_TT_BTC_PIT_SALARY",
+    "title": "Thong tu 111/2013/TT-BTC - thue TNCN tu tien luong",
+    "doc_type": "circular",
+    "authority": "Bo Tai chinh",
+    "authority_rank": 50,
+    "effective_from": "2013-10-01",
+    "topic": "pit",
+    "content": "Thong tu 111/2013/TT-BTC huong dan bieu thue luy tien tung phan, thu nhap tinh thue, giam tru gia canh, khau tru 10% voi hop dong duoi 3 thang va chung tu khau tru thue TNCN.",
+    "relations": [
+      {
+        "target": "NQ_954_2020_UBTVQH14_DEPENDENT",
+        "type": "related_to"
+      }
+    ]
+  },
+  {
+    "key": "TT_96_2015_TT_BTC_DEDUCTIBLE_COSTS",
+    "title": "Thong tu 96/2015/TT-BTC - chi phi duoc tru va thanh toan khong dung tien mat",
+    "doc_type": "circular",
+    "authority": "Bo Tai chinh",
+    "authority_rank": 50,
+    "effective_from": "2015-08-06",
+    "topic": "cit",
+    "content": "Thong tu 96/2015/TT-BTC huong dan chi phi duoc tru khi tinh thue TNDN, dieu kien hoa don chung tu hop phap va thanh toan khong dung tien mat voi hoa don tu nguong quy dinh, thuong dung cho cau hoi mua hang tien mat tren 20 trieu.",
+    "relations": [
+      {
+        "target": "TT_78_2014_TT_BTC",
+        "type": "amends"
+      }
+    ]
+  },
+  {
+    "key": "TT_103_2014_TT_BTC_FCT",
+    "title": "Thong tu 103/2014/TT-BTC - thue nha thau nuoc ngoai",
+    "doc_type": "circular",
+    "authority": "Bo Tai chinh",
+    "authority_rank": 50,
+    "effective_from": "2014-10-01",
+    "topic": "fct",
+    "content": "Thong tu 103/2014/TT-BTC huong dan thue nha thau nuoc ngoai, nghia vu khau tru nop thay VAT va TNDN/TNCN khi ben Viet Nam thanh toan dich vu cho to chuc, ca nhan nuoc ngoai khong co co so thuong tru tai Viet Nam.",
+    "relations": [
+      {
+        "target": "LUAT_38_2019",
+        "type": "related_to"
+      }
+    ]
+  },
+  {
+    "key": "ND_132_2020_NDCP_TRANSFER_PRICING",
+    "title": "Nghi dinh 132/2020/ND-CP - giao dich lien ket",
+    "doc_type": "decree",
+    "authority": "Chinh phu",
+    "authority_rank": 60,
+    "effective_from": "2020-12-20",
+    "topic": "transfer_pricing",
+    "content": "Nghi dinh 132/2020/ND-CP quy dinh ve quan ly thue doi voi doanh nghiep co giao dich lien ket, ho so xac dinh gia giao dich lien ket, nguyen tac doc lap va tran chi phi lai vay thuan duoc tru.",
+    "relations": [
+      {
+        "target": "LUAT_38_2019",
+        "type": "implements"
+      }
+    ]
+  },
+  {
+    "key": "ND_64_2024_NDCP_TAX_EXTENSION",
+    "title": "Nghi dinh 64/2024/ND-CP - gia han nop thue nam 2024",
+    "doc_type": "decree",
+    "authority": "Chinh phu",
+    "authority_rank": 60,
+    "effective_from": "2024-06-17",
+    "topic": "extension",
+    "content": "Nghi dinh 64/2024/ND-CP quy dinh gia han thoi han nop thue GTGT, TNDN tam nop, TNCN cua ho kinh doanh va tien thue dat cho cac doi tuong bi anh huong, khong dong nghia voi mien thue.",
+    "relations": [
+      {
+        "target": "LUAT_38_2019",
+        "type": "implements"
+      }
+    ]
+  },
+  {
+    "key": "LUAT_GTGT_48_2024_QH15_TRANSITION",
+    "title": "Luat Thue GTGT 48/2024/QH15 - diem moi tu 2025",
+    "doc_type": "law",
+    "authority": "Quoc hoi",
+    "authority_rank": 90,
+    "effective_from": "2025-07-01",
+    "topic": "vat_2025",
+    "content": "Luat Thue GTGT 48/2024/QH15 co hieu luc tu 01/07/2025. Khi tu van can tach ro quy dinh dang ap dung truoc ngay hieu luc va quy dinh moi sau ngay hieu luc, dac biet voi nguong doanh thu ho, ca nhan kinh doanh va nhom hang hoa dich vu.",
+    "relations": [
+      {
+        "target": "LUAT_GTGT_13_2008",
+        "type": "replaces"
+      }
+    ]
+  }
+]

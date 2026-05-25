@@ -420,7 +420,10 @@ Nguồn chuẩn kỹ thuật của danh mục model nằm tại `Backend/ml_engi
 | `audit-value-v1` | Audit | `audit_value_model.joblib`, `audit_value_calibrator.joblib` | `Backend/ml_engine/train_audit_value.py` | `/api/ai/*`, audit selection signals | `audit-value-heuristic` |
 | `invoice-risk-v1` | VAT/Fraud | `invoice_risk_model.joblib`, `invoice_risk_config.json` | `Backend/ml_engine/train_invoice_risk_model.py` | `/api/invoice/*`, `invoice_risk_scan` | `invoice-risk-heuristic-v1` |
 | `transfer-pricing-v1` | Transfer Pricing | `transfer_pricing_model.joblib`, `transfer_pricing_model_meta.json` | `Backend/ml_engine/train_transfer_pricing_model.py` | `/api/transfer-pricing/*` | z-score baseline |
-| `macro-simulation-v1` | Macro | `simulation_lgbm.joblib`, `simulation_config.json` | `Backend/ml_engine/train_simulation.py` | `/api/simulation/*`, `macro_forecast`, `revenue_forecast` | elasticity/ridge baseline |
+| `macro-simulation-v1` | Macro Legacy | `simulation_lgbm.joblib`, `simulation_config.json` | `Backend/ml_engine/train_simulation.py` | `/api/simulation/*`, `macro_forecast`, `revenue_forecast` | `macro-ensemble-v2`, elasticity baseline |
+| `macro-ensemble-v2` | Macro Research Lab | `simulation_lgbm.joblib`, `simulation_config.json`, `macro_research_evaluation.json` | `Backend/ml_engine/train_simulation.py`, `Backend/scripts/run_macro_research_evaluation.py` | `/api/simulation/forecast/run`, `/api/simulation/research/state`, `macro_forecast`, `revenue_forecast` | elasticity/ridge baseline |
+| `macro-shock-graph-v1` | Macro Graph | persisted `macro_shock_runs`, graph edge evidence | `Backend/ml_engine/macro_research_lab.py` | `/api/simulation/shock-propagation/run` | deterministic spatial diffusion |
+| `macro-causal-merger-v1` | Causal Macro | persisted `macro_causal_runs`, synthetic-control outputs | `Backend/ml_engine/macro_research_lab.py` | `/api/simulation/causal/merger-effect` | event-study proxy |
 | `revenue-forecast-v1` | Forecasting | code-native model | `Backend/ml_engine/revenue_forecast_model.py` | `revenue_forecast` | seasonal/statistical |
 | `causal-uplift-v1` | Collections | `uplift_model_treated.joblib`, `uplift_model_control.joblib`, `uplift_propensity.joblib` | `Backend/ml_engine/train_ops_uplift_models.py` | `/api/collections/*`, `causal_uplift_recommend` | policy NBA rules |
 | `audit-selection-v1` | Audit/Ops | `audit_selection_learned_model.joblib` | `Backend/ml_engine/train_ops_uplift_models.py` | `/api/audit/*`, `/api/case-triage/*` | hybrid priority formula |
@@ -439,6 +442,12 @@ Số liệu trong báo cáo luận văn (Ablation, Fairness, Concept Drift, Fede
 
 ```bash
 python Backend/scripts/run_comprehensive_thesis_evaluation.py --all --rows 120000 --folds 5
+```
+
+Macro-Fiscal Digital Twin Research Lab xuất riêng forecast/causal/shock report:
+
+```bash
+python Backend/scripts/run_macro_research_evaluation.py --boundary-version vn_34_2025
 ```
 
 Output chuẩn (Sẵn sàng đưa vào file doc.js/LaTeX):

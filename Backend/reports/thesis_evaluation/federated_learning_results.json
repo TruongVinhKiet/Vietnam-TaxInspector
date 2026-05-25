@@ -1,0 +1,96 @@
+{
+  "generated_at": "2026-05-21T01:48:38Z",
+  "rounds": 2,
+  "rows": 5000,
+  "epsilon": 1.0,
+  "delta": 1e-05,
+  "centralized_auc": 0.911217,
+  "federated_auc": 0.91175,
+  "federated_gap": 0.0,
+  "node_results": [
+    {
+      "node_id": "office_hcm",
+      "display_name": "Cuc Thue TP.HCM (finance-heavy)",
+      "n_samples": 1669,
+      "local_auc": 0.910854,
+      "industry_mix": {
+        "finance": 952,
+        "retail": 248,
+        "services": 245,
+        "construction": 224
+      },
+      "province_mix": {
+        "HCM": 962,
+        "HN": 237,
+        "DN": 235,
+        "CT": 235
+      }
+    },
+    {
+      "node_id": "office_hanoi",
+      "display_name": "Cuc Thue Ha Noi (construction-heavy)",
+      "n_samples": 1615,
+      "local_auc": 0.912454,
+      "industry_mix": {
+        "construction": 930,
+        "retail": 238,
+        "finance": 237,
+        "services": 210
+      },
+      "province_mix": {
+        "HN": 935,
+        "DN": 240,
+        "HCM": 224,
+        "CT": 216
+      }
+    },
+    {
+      "node_id": "office_danang",
+      "display_name": "Cuc Thue Da Nang (services)",
+      "n_samples": 1618,
+      "local_auc": 0.907382,
+      "industry_mix": {
+        "services": 907,
+        "construction": 240,
+        "retail": 236,
+        "finance": 235
+      },
+      "province_mix": {
+        "DN": 930,
+        "HCM": 245,
+        "CT": 233,
+        "HN": 210
+      }
+    },
+    {
+      "node_id": "office_cantho",
+      "display_name": "Cuc Thue Can Tho (retail/agriculture)",
+      "n_samples": 239,
+      "local_auc": 0.808885,
+      "industry_mix": {
+        "retail": 239
+      },
+      "province_mix": {
+        "CT": 239
+      }
+    }
+  ],
+  "communication_bytes_per_round": 768,
+  "total_communication_bytes": 1536,
+  "convergence_curve": [
+    {
+      "round": 1.0,
+      "auc": 0.912352
+    },
+    {
+      "round": 2.0,
+      "auc": 0.91175
+    }
+  ],
+  "privacy": {
+    "mechanism": "Gaussian coefficient noise for PoC",
+    "epsilon": 1.0,
+    "delta": 1e-05,
+    "noise_std": 0.002
+  }
+}

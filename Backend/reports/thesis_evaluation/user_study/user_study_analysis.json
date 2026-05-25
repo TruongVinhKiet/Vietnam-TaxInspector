@@ -1,0 +1,21 @@
+{
+  "participant_count": 10,
+  "sus_mean": 82.5,
+  "sus_std": 4.183,
+  "tam_mean": {
+    "PU": 4.35,
+    "PEOU": 4.333,
+    "BI": 4.1
+  },
+  "task_completion_rate": 0.82,
+  "task_accuracy_rate": 0.82,
+  "mean_time_seconds": 188.508,
+  "mode_accuracy": {
+    "delinquency": 0.6,
+    "fraud": 0.9,
+    "full": 0.7,
+    "legal": 0.9,
+    "macro": 0.6,
+    "vat": 0.9
+  }
+}

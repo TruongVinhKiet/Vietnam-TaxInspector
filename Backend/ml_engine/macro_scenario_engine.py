@@ -269,7 +269,7 @@ def compute_scenario(
     # heuristic made no-change scenarios drift far away from observed revenue.
     if base_gdp > 0 and base_compliance > 0:
         base_tax_rate = base_revenue / max(base_gdp * base_compliance, 0.01)
-        base_tax_rate = min(0.40, max(0.02, base_tax_rate))
+        base_tax_rate = max(0.02, base_tax_rate)
     else:
         base_tax_rate = 0.10
 
@@ -297,7 +297,7 @@ def compute_scenario(
 
     # Compute projected values
     projected_gdp = base_gdp * (1.0 + params.gdp_delta_pct / 100.0)
-    effective_tax_rate = base_tax_rate + params.tax_rate_delta
+    effective_tax_rate = max(0.0, base_tax_rate + params.tax_rate_delta)
     effective_compliance = min(1.0, max(0.3, base_compliance + params.compliance_delta))
     projected_unemployment = max(0.0, base_unemployment + params.unemployment_delta)
     projected_fdi = base_fdi * (1.0 + params.fdi_delta_pct / 100.0)
@@ -402,6 +402,196 @@ def compute_scenario(
 
 
 # ────────────────────────────────────────────────────────────
+#  Monte Carlo Simulation (Stochastic Policy Analysis)
+# ────────────────────────────────────────────────────────────
+
+def run_monte_carlo(
+    province_code: str,
+    params: ScenarioParams,
+    *,
+    n_simulations: int = 500,
+    seed: int = 42,
+) -> Dict[str, Any]:
+    """
+    Run N stochastic perturbations of the scenario to produce a
+    probability distribution of projected revenue outcomes.
+
+    Each simulation jitters every input parameter by a Gaussian noise
+    proportional to its magnitude, then runs compute_scenario().
+
+    Returns percentiles (P5, P10, P25, P50, P75, P90, P95),
+    Value-at-Risk (VaR) and Conditional VaR (CVaR/Expected Shortfall).
+
+    Reference:
+        Glasserman, "Monte Carlo Methods in Financial Engineering", Springer 2003
+    """
+    import random as _random
+    rng = _random.Random(seed)
+
+    revenues: List[float] = []
+    gdps: List[float] = []
+
+    for _ in range(n_simulations):
+        jittered = ScenarioParams(
+            gdp_delta_pct=params.gdp_delta_pct + rng.gauss(0, max(0.5, abs(params.gdp_delta_pct) * 0.15)),
+            tax_rate_delta=params.tax_rate_delta + rng.gauss(0, max(0.002, abs(params.tax_rate_delta) * 0.12)),
+            compliance_delta=params.compliance_delta + rng.gauss(0, max(0.005, abs(params.compliance_delta) * 0.12)),
+            unemployment_delta=params.unemployment_delta + rng.gauss(0, max(0.15, abs(params.unemployment_delta) * 0.15)),
+            fdi_delta_pct=params.fdi_delta_pct + rng.gauss(0, max(1.0, abs(params.fdi_delta_pct) * 0.18)),
+            event_key=params.event_key,
+        )
+        try:
+            result = compute_scenario(province_code, jittered)
+            revenues.append(result.projected_revenue)
+            gdps.append(result.projected_gdp)
+        except Exception:
+            continue
+
+    if len(revenues) < 10:
+        return {"error": "insufficient_simulations", "completed": len(revenues)}
+
+    revenues.sort()
+    n = len(revenues)
+
+    def percentile(arr: List[float], p: float) -> float:
+        k = (n - 1) * p / 100.0
+        f = math.floor(k)
+        c = min(f + 1, n - 1)
+        return arr[f] + (arr[c] - arr[f]) * (k - f)
+
+    p5 = percentile(revenues, 5)
+    p10 = percentile(revenues, 10)
+    p25 = percentile(revenues, 25)
+    p50 = percentile(revenues, 50)
+    p75 = percentile(revenues, 75)
+    p90 = percentile(revenues, 90)
+    p95 = percentile(revenues, 95)
+    mean_rev = sum(revenues) / n
+    std_rev = math.sqrt(sum((r - mean_rev) ** 2 for r in revenues) / n)
+
+    # VaR at 5% (worst 5% of outcomes)
+    var_5 = p5
+    # CVaR / Expected Shortfall (average of worst 5%)
+    tail_count = max(1, int(n * 0.05))
+    cvar_5 = sum(revenues[:tail_count]) / tail_count
+
+    # Build histogram bins for frontend visualization
+    bin_count = 20
+    min_rev = revenues[0]
+    max_rev = revenues[-1]
+    bin_width = max(0.01, (max_rev - min_rev) / bin_count)
+    histogram = []
+    for i in range(bin_count):
+        lo = min_rev + i * bin_width
+        hi = lo + bin_width
+        count = sum(1 for r in revenues if lo <= r < hi) if i < bin_count - 1 else sum(1 for r in revenues if lo <= r <= hi)
+        histogram.append({
+            "bin_start": round(lo, 2),
+            "bin_end": round(hi, 2),
+            "count": count,
+            "density": round(count / n, 4),
+        })
+
+    return {
+        "n_simulations": n,
+        "percentiles": {
+            "p5": round(p5, 2), "p10": round(p10, 2), "p25": round(p25, 2),
+            "p50": round(p50, 2), "p75": round(p75, 2), "p90": round(p90, 2),
+            "p95": round(p95, 2),
+        },
+        "mean": round(mean_rev, 2),
+        "std": round(std_rev, 2),
+        "var_5pct": round(var_5, 2),
+        "cvar_5pct": round(cvar_5, 2),
+        "histogram": histogram,
+        "coefficient_of_variation": round(std_rev / max(mean_rev, 0.01), 4),
+    }
+
+
+# ────────────────────────────────────────────────────────────
+#  Sensitivity / Tornado Analysis
+# ────────────────────────────────────────────────────────────
+
+def run_sensitivity_analysis(
+    province_code: str,
+    params: ScenarioParams,
+    *,
+    sweep_pct: float = 20.0,
+) -> List[Dict[str, Any]]:
+    """
+    Tornado-style one-at-a-time (OAT) sensitivity analysis.
+
+    For each input parameter, sweep it by ±sweep_pct while holding
+    all other parameters at their base values. Measure the resulting
+    change in projected_revenue to determine which parameter has the
+    largest marginal impact.
+
+    Reference:
+        Saltelli et al., "Sensitivity Analysis in Practice", Wiley 2004
+    """
+    base_result = compute_scenario(province_code, params)
+    base_revenue = base_result.projected_revenue
+
+    factors = [
+        ("GDP Delta (%)", "gdp_delta_pct", params.gdp_delta_pct, 1.0),
+        ("Thuế suất hiệu dụng", "tax_rate_delta", params.tax_rate_delta, 0.01),
+        ("Tuân thủ thuế", "compliance_delta", params.compliance_delta, 0.01),
+        ("Thất nghiệp", "unemployment_delta", params.unemployment_delta, 0.3),
+        ("FDI Delta (%)", "fdi_delta_pct", params.fdi_delta_pct, 1.0),
+    ]
+
+    results = []
+    for label, attr, base_val, min_step in factors:
+        step = max(min_step, abs(base_val) * sweep_pct / 100.0)
+
+        low_params = ScenarioParams(
+            gdp_delta_pct=params.gdp_delta_pct,
+            tax_rate_delta=params.tax_rate_delta,
+            compliance_delta=params.compliance_delta,
+            unemployment_delta=params.unemployment_delta,
+            fdi_delta_pct=params.fdi_delta_pct,
+            event_key=params.event_key,
+        )
+        high_params = ScenarioParams(
+            gdp_delta_pct=params.gdp_delta_pct,
+            tax_rate_delta=params.tax_rate_delta,
+            compliance_delta=params.compliance_delta,
+            unemployment_delta=params.unemployment_delta,
+            fdi_delta_pct=params.fdi_delta_pct,
+            event_key=params.event_key,
+        )
+        setattr(low_params, attr, base_val - step)
+        setattr(high_params, attr, base_val + step)
+
+        try:
+            low_result = compute_scenario(province_code, low_params)
+            high_result = compute_scenario(province_code, high_params)
+            low_rev = low_result.projected_revenue
+            high_rev = high_result.projected_revenue
+        except Exception:
+            low_rev = base_revenue
+            high_rev = base_revenue
+
+        spread = high_rev - low_rev
+        results.append({
+            "factor": label,
+            "param": attr,
+            "base_value": round(base_val, 4),
+            "low_value": round(base_val - step, 4),
+            "high_value": round(base_val + step, 4),
+            "revenue_low": round(low_rev, 2),
+            "revenue_high": round(high_rev, 2),
+            "revenue_base": round(base_revenue, 2),
+            "spread": round(abs(spread), 2),
+            "direction": "positive" if spread >= 0 else "negative",
+        })
+
+    # Sort by absolute spread descending (most impactful first)
+    results.sort(key=lambda x: x["spread"], reverse=True)
+    return results
+
+
+# ────────────────────────────────────────────────────────────
 #  Narrative Generation
 # ────────────────────────────────────────────────────────────
 
@@ -481,14 +671,125 @@ def generate_narrative_sync(result: ScenarioResult) -> str:
 
 
 def _generate_gemini_text(api_key: str, prompt: str) -> Optional[str]:
-    """Blocking Gemini call isolated in a worker thread by generate_narrative_llm."""
-    import google.generativeai as genai
+    """Blocking LLM waterfall call isolated in a worker thread by generate_narrative_llm."""
+    import urllib.request
+    import json
+    
+    # Helper to send POST request
+    def http_post(url: str, body: Dict[str, Any], headers: Dict[str, str]) -> Optional[Dict[str, Any]]:
+        try:
+            payload = json.dumps(body).encode("utf-8")
+            req = urllib.request.Request(
+                url,
+                data=payload,
+                headers={"Content-Type": "application/json", **headers},
+                method="POST"
+            )
+            with urllib.request.urlopen(req, timeout=12) as response:
+                return json.loads(response.read().decode("utf-8"))
+        except Exception as e:
+            print(f"[LLM Narrative REST Debug] POST to {url} failed: {e}")
+            return None
 
-    genai.configure(api_key=api_key)
-    model = genai.GenerativeModel("gemini-1.5-flash")
-    response = model.generate_content(prompt)
-    text = getattr(response, "text", None)
-    return str(text).strip() if text else None
+    # Step 1: Try Gemini SDK
+    try:
+        import google.generativeai as genai
+        genai.configure(api_key=api_key)
+        model = genai.GenerativeModel("gemini-1.5-flash")
+        response = model.generate_content(prompt)
+        text = getattr(response, "text", None)
+        if text and len(str(text).strip()) > 30:
+            return str(text).strip()
+    except Exception as sdk_err:
+        print(f"[LLM Narrative SDK Failed] {sdk_err}, trying REST endpoints...")
+
+    # Step 2: Try Gemini REST (v1)
+    try:
+        url = f"https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key={api_key}"
+        body = {"contents": [{"parts": [{"text": prompt}]}], "generationConfig": {"temperature": 0.25}}
+        resp = http_post(url, body, {})
+        if resp:
+            parts = ((((resp.get("candidates") or [{}])[0].get("content") or {}).get("parts")) or [])
+            text = "\n".join(str(p.get("text") or "") for p in parts).strip()
+            if text and len(text) > 30:
+                return text
+    except Exception as e:
+        print(f"[LLM Narrative Gemini REST Failed] {e}")
+
+    # Step 3: Try OpenRouter
+    openrouter_key = os.environ.get("OPENROUTER_API_KEY")
+    if openrouter_key:
+        try:
+            url = "https://openrouter.ai/api/v1/chat/completions"
+            body = {
+                "model": "openrouter/auto",
+                "messages": [{"role": "user", "content": prompt}],
+                "temperature": 0.25
+            }
+            resp = http_post(url, body, {"Authorization": f"Bearer {openrouter_key}"})
+            if resp:
+                text = (((resp.get("choices") or [{}])[0].get("message") or {}).get("content") or "").strip()
+                if text and len(text) > 30:
+                    return text
+        except Exception as e:
+            print(f"[LLM Narrative OpenRouter Failed] {e}")
+
+    # Step 4: Try GitHub PAT
+    github_key = os.environ.get("GITHUB_MODELS_TOKEN") or os.environ.get("GITHUB_TOKEN") or os.environ.get("GITHUB_PAT")
+    if github_key:
+        try:
+            url = "https://models.inference.ai.azure.com/chat/completions"
+            body = {
+                "model": "gpt-4o-mini",
+                "messages": [{"role": "user", "content": prompt}],
+                "temperature": 0.25
+            }
+            resp = http_post(url, body, {"Authorization": f"Bearer {github_key}"})
+            if resp:
+                text = (((resp.get("choices") or [{}])[0].get("message") or {}).get("content") or "").strip()
+                if text and len(text) > 30:
+                    return text
+        except Exception as e:
+            print(f"[LLM Narrative GitHub Failed] {e}")
+
+    # Step 5: Try Groq
+    groq_key = os.environ.get("GROQ_API_KEY")
+    if groq_key:
+        try:
+            url = "https://api.groq.com/openai/v1/chat/completions"
+            body = {
+                "model": "llama-3.1-8b-instant",
+                "messages": [{"role": "user", "content": prompt}],
+                "temperature": 0.25
+            }
+            resp = http_post(url, body, {"Authorization": f"Bearer {groq_key}"})
+            if resp:
+                text = (((resp.get("choices") or [{}])[0].get("message") or {}).get("content") or "").strip()
+                if text and len(text) > 30:
+                    return text
+        except Exception as e:
+            print(f"[LLM Narrative Groq Failed] {e}")
+
+    # Step 6: Try Cohere
+    cohere_key = os.environ.get("COHERE_API_KEY")
+    if cohere_key:
+        try:
+            url = "https://api.cohere.com/v2/chat"
+            body = {
+                "model": "command-r7b-12-2024",
+                "messages": [{"role": "user", "content": prompt}],
+                "temperature": 0.25
+            }
+            resp = http_post(url, body, {"Authorization": f"Bearer {cohere_key}"})
+            if resp:
+                content = resp.get("message", {}).get("content", [])
+                text = "\n".join(str(part.get("text") or "") for part in content).strip()
+                if text and len(text) > 30:
+                    return text
+        except Exception as e:
+            print(f"[LLM Narrative Cohere Failed] {e}")
+
+    return None
 
 
 # ────────────────────────────────────────────────────────────

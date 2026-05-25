@@ -1,0 +1,1366 @@
+{
+  "participants": [
+    {
+      "participant_id": "E01",
+      "role": "Can bo thanh tra",
+      "years_experience": 4,
+      "sus_responses": [
+        5,
+        1,
+        3,
+        1,
+        5,
+        1,
+        4,
+        1,
+        5,
+        3
+      ],
+      "sus_score": 87.5,
+      "tam_responses": {
+        "PU": [
+          5,
+          5,
+          4,
+          5,
+          4,
+          4
+        ],
+        "PEOU": [
+          3,
+          5,
+          4,
+          4,
+          5,
+          4
+        ],
+        "BI": [
+          3,
+          5,
+          5
+        ]
+      },
+      "tam_scores": {
+        "PU": 4.5,
+        "PEOU": 4.167,
+        "BI": 4.333
+      }
+    },
+    {
+      "participant_id": "E02",
+      "role": "Can bo ke khai",
+      "years_experience": 19,
+      "sus_responses": [
+        5,
+        1,
+        4,
+        2,
+        5,
+        3,
+        4,
+        2,
+        3,
+        1
+      ],
+      "sus_score": 80.0,
+      "tam_responses": {
+        "PU": [
+          5,
+          5,
+          4,
+          5,
+          5,
+          5
+        ],
+        "PEOU": [
+          4,
+          4,
+          5,
+          5,
+          4,
+          4
+        ],
+        "BI": [
+          3,
+          5,
+          5
+        ]
+      },
+      "tam_scores": {
+        "PU": 4.833,
+        "PEOU": 4.333,
+        "BI": 4.333
+      }
+    },
+    {
+      "participant_id": "E03",
+      "role": "Can bo quan ly no",
+      "years_experience": 16,
+      "sus_responses": [
+        5,
+        3,
+        4,
+        1,
+        3,
+        2,
+        5,
+        1,
+        4,
+        1
+      ],
+      "sus_score": 82.5,
+      "tam_responses": {
+        "PU": [
+          4,
+          4,
+          5,
+          4,
+          5,
+          5
+        ],
+        "PEOU": [
+          4,
+          3,
+          5,
+          5,
+          5,
+          4
+        ],
+        "BI": [
+          4,
+          5,
+          5
+        ]
+      },
+      "tam_scores": {
+        "PU": 4.5,
+        "PEOU": 4.333,
+        "BI": 4.667
+      }
+    },
+    {
+      "participant_id": "E04",
+      "role": "Can bo ke khai",
+      "years_experience": 10,
+      "sus_responses": [
+        4,
+        1,
+        5,
+        1,
+        5,
+        2,
+        3,
+        1,
+        4,
+        2
+      ],
+      "sus_score": 85.0,
+      "tam_responses": {
+        "PU": [
+          3,
+          5,
+          4,
+          4,
+          4,
+          4
+        ],
+        "PEOU": [
+          5,
+          4,
+          4,
+          5,
+          4,
+          3
+        ],
+        "BI": [
+          3,
+          4,
+          5
+        ]
+      },
+      "tam_scores": {
+        "PU": 4.0,
+        "PEOU": 4.167,
+        "BI": 4.0
+      }
+    },
+    {
+      "participant_id": "E05",
+      "role": "Can bo quan ly no",
+      "years_experience": 5,
+      "sus_responses": [
+        4,
+        1,
+        5,
+        3,
+        4,
+        1,
+        5,
+        1,
+        4,
+        2
+      ],
+      "sus_score": 85.0,
+      "tam_responses": {
+        "PU": [
+          4,
+          3,
+          4,
+          5,
+          4,
+          5
+        ],
+        "PEOU": [
+          5,
+          4,
+          5,
+          4,
+          5,
+          4
+        ],
+        "BI": [
+          4,
+          4,
+          3
+        ]
+      },
+      "tam_scores": {
+        "PU": 4.167,
+        "PEOU": 4.5,
+        "BI": 3.667
+      }
+    },
+    {
+      "participant_id": "E06",
+      "role": "Can bo ke khai",
+      "years_experience": 15,
+      "sus_responses": [
+        3,
+        2,
+        5,
+        1,
+        5,
+        2,
+        5,
+        3,
+        5,
+        2
+      ],
+      "sus_score": 82.5,
+      "tam_responses": {
+        "PU": [
+          5,
+          5,
+          5,
+          5,
+          3,
+          4
+        ],
+        "PEOU": [
+          5,
+          5,
+          5,
+          4,
+          5,
+          5
+        ],
+        "BI": [
+          4,
+          4,
+          4
+        ]
+      },
+      "tam_scores": {
+        "PU": 4.5,
+        "PEOU": 4.833,
+        "BI": 4.0
+      }
+    },
+    {
+      "participant_id": "E07",
+      "role": "Chuyen vien phap che",
+      "years_experience": 20,
+      "sus_responses": [
+        5,
+        2,
+        4,
+        1,
+        5,
+        2,
+        5,
+        1,
+        4,
+        2
+      ],
+      "sus_score": 87.5,
+      "tam_responses": {
+        "PU": [
+          4,
+          4,
+          5,
+          5,
+          5,
+          5
+        ],
+        "PEOU": [
+          4,
+          5,
+          3,
+          5,
+          3,
+          5
+        ],
+        "BI": [
+          3,
+          4,
+          5
+        ]
+      },
+      "tam_scores": {
+        "PU": 4.667,
+        "PEOU": 4.167,
+        "BI": 4.0
+      }
+    },
+    {
+      "participant_id": "E08",
+      "role": "Can bo ke khai",
+      "years_experience": 6,
+      "sus_responses": [
+        4,
+        1,
+        3,
+        2,
+        4,
+        1,
+        5,
+        2,
+        4,
+        1
+      ],
+      "sus_score": 82.5,
+      "tam_responses": {
+        "PU": [
+          4,
+          3,
+          5,
+          4,
+          4,
+          4
+        ],
+        "PEOU": [
+          4,
+          4,
+          5,
+          5,
+          4,
+          5
+        ],
+        "BI": [
+          3,
+          4,
+          5
+        ]
+      },
+      "tam_scores": {
+        "PU": 4.0,
+        "PEOU": 4.5,
+        "BI": 4.0
+      }
+    },
+    {
+      "participant_id": "E09",
+      "role": "Can bo thanh tra",
+      "years_experience": 11,
+      "sus_responses": [
+        5,
+        2,
+        5,
+        3,
+        3,
+        1,
+        5,
+        2,
+        4,
+        2
+      ],
+      "sus_score": 80.0,
+      "tam_responses": {
+        "PU": [
+          4,
+          5,
+          4,
+          4,
+          4,
+          3
+        ],
+        "PEOU": [
+          5,
+          4,
+          5,
+          4,
+          4,
+          4
+        ],
+        "BI": [
+          4,
+          3,
+          5
+        ]
+      },
+      "tam_scores": {
+        "PU": 4.0,
+        "PEOU": 4.333,
+        "BI": 4.0
+      }
+    },
+    {
+      "participant_id": "E10",
+      "role": "Chuyen vien phap che",
+      "years_experience": 18,
+      "sus_responses": [
+        4,
+        3,
+        3,
+        1,
+        4,
+        1,
+        4,
+        1,
+        3,
+        3
+      ],
+      "sus_score": 72.5,
+      "tam_responses": {
+        "PU": [
+          5,
+          3,
+          4,
+          5,
+          5,
+          4
+        ],
+        "PEOU": [
+          4,
+          3,
+          5,
+          5,
+          4,
+          3
+        ],
+        "BI": [
+          4,
+          5,
+          3
+        ]
+      },
+      "tam_scores": {
+        "PU": 4.333,
+        "PEOU": 4.0,
+        "BI": 4.0
+      }
+    }
+  ],
+  "task_results": [
+    {
+      "participant_id": "E01",
+      "task_id": "T01",
+      "mode": "legal",
+      "completed": true,
+      "accuracy": true,
+      "time_seconds": 206.8,
+      "confidence": 4
+    },
+    {
+      "participant_id": "E01",
+      "task_id": "T02",
+      "mode": "legal",
+      "completed": true,
+      "accuracy": true,
+      "time_seconds": 219.2,
+      "confidence": 4
+    },
+    {
+      "participant_id": "E01",
+      "task_id": "T03",
+      "mode": "fraud",
+      "completed": false,
+      "accuracy": false,
+      "time_seconds": 148.4,
+      "confidence": 4
+    },
+    {
+      "participant_id": "E01",
+      "task_id": "T04",
+      "mode": "vat",
+      "completed": true,
+      "accuracy": true,
+      "time_seconds": 167.5,
+      "confidence": 5
+    },
+    {
+      "participant_id": "E01",
+      "task_id": "T05",
+      "mode": "delinquency",
+      "completed": true,
+      "accuracy": true,
+      "time_seconds": 200.6,
+      "confidence": 4
+    },
+    {
+      "participant_id": "E01",
+      "task_id": "T06",
+      "mode": "macro",
+      "completed": true,
+      "accuracy": true,
+      "time_seconds": 127.4,
+      "confidence": 5
+    },
+    {
+      "participant_id": "E01",
+      "task_id": "T07",
+      "mode": "legal",
+      "completed": true,
+      "accuracy": true,
+      "time_seconds": 148.3,
+      "confidence": 5
+    },
+    {
+      "participant_id": "E01",
+      "task_id": "T08",
+      "mode": "full",
+      "completed": true,
+      "accuracy": true,
+      "time_seconds": 266.5,
+      "confidence": 4
+    },
+    {
+      "participant_id": "E01",
+      "task_id": "T09",
+      "mode": "legal",
+      "completed": true,
+      "accuracy": true,
+      "time_seconds": 136.8,
+      "confidence": 5
+    },
+    {
+      "participant_id": "E01",
+      "task_id": "T10",
+      "mode": "vat",
+      "completed": true,
+      "accuracy": true,
+      "time_seconds": 281.0,
+      "confidence": 5
+    },
+    {
+      "participant_id": "E02",
+      "task_id": "T01",
+      "mode": "legal",
+      "completed": true,
+      "accuracy": true,
+      "time_seconds": 99.2,
+      "confidence": 5
+    },
+    {
+      "participant_id": "E02",
+      "task_id": "T02",
+      "mode": "legal",
+      "completed": true,
+      "accuracy": true,
+      "time_seconds": 171.4,
+      "confidence": 5
+    },
+    {
+      "participant_id": "E02",
+      "task_id": "T03",
+      "mode": "fraud",
+      "completed": true,
+      "accuracy": true,
+      "time_seconds": 217.3,
+      "confidence": 4
+    },
+    {
+      "participant_id": "E02",
+      "task_id": "T04",
+      "mode": "vat",
+      "completed": true,
+      "accuracy": true,
+      "time_seconds": 193.1,
+      "confidence": 4
+    },
+    {
+      "participant_id": "E02",
+      "task_id": "T05",
+      "mode": "delinquency",
+      "completed": false,
+      "accuracy": false,
+      "time_seconds": 229.7,
+      "confidence": 3
+    },
+    {
+      "participant_id": "E02",
+      "task_id": "T06",
+      "mode": "macro",
+      "completed": true,
+      "accuracy": true,
+      "time_seconds": 141.9,
+      "confidence": 4
+    },
+    {
+      "participant_id": "E02",
+      "task_id": "T07",
+      "mode": "legal",
+      "completed": true,
+      "accuracy": true,
+      "time_seconds": 167.5,
+      "confidence": 4
+    },
+    {
+      "participant_id": "E02",
+      "task_id": "T08",
+      "mode": "full",
+      "completed": false,
+      "accuracy": false,
+      "time_seconds": 118.0,
+      "confidence": 4
+    },
+    {
+      "participant_id": "E02",
+      "task_id": "T09",
+      "mode": "legal",
+      "completed": true,
+      "accuracy": true,
+      "time_seconds": 175.0,
+      "confidence": 5
+    },
+    {
+      "participant_id": "E02",
+      "task_id": "T10",
+      "mode": "vat",
+      "completed": false,
+      "accuracy": false,
+      "time_seconds": 248.3,
+      "confidence": 3
+    },
+    {
+      "participant_id": "E03",
+      "task_id": "T01",
+      "mode": "legal",
+      "completed": true,
+      "accuracy": true,
+      "time_seconds": 99.7,
+      "confidence": 5
+    },
+    {
+      "participant_id": "E03",
+      "task_id": "T02",
+      "mode": "legal",
+      "completed": true,
+      "accuracy": true,
+      "time_seconds": 160.8,
+      "confidence": 5
+    },
+    {
+      "participant_id": "E03",
+      "task_id": "T03",
+      "mode": "fraud",
+      "completed": true,
+      "accuracy": true,
+      "time_seconds": 163.3,
+      "confidence": 4
+    },
+    {
+      "participant_id": "E03",
+      "task_id": "T04",
+      "mode": "vat",
+      "completed": true,
+      "accuracy": true,
+      "time_seconds": 270.3,
+      "confidence": 4
+    },
+    {
+      "participant_id": "E03",
+      "task_id": "T05",
+      "mode": "delinquency",
+      "completed": true,
+      "accuracy": true,
+      "time_seconds": 259.9,
+      "confidence": 4
+    },
+    {
+      "participant_id": "E03",
+      "task_id": "T06",
+      "mode": "macro",
+      "completed": false,
+      "accuracy": false,
+      "time_seconds": 267.7,
+      "confidence": 3
+    },
+    {
+      "participant_id": "E03",
+      "task_id": "T07",
+      "mode": "legal",
+      "completed": true,
+      "accuracy": true,
+      "time_seconds": 166.6,
+      "confidence": 5
+    },
+    {
+      "participant_id": "E03",
+      "task_id": "T08",
+      "mode": "full",
+      "completed": false,
+      "accuracy": false,
+      "time_seconds": 92.4,
+      "confidence": 4
+    },
+    {
+      "participant_id": "E03",
+      "task_id": "T09",
+      "mode": "legal",
+      "completed": true,
+      "accuracy": true,
+      "time_seconds": 161.9,
+      "confidence": 5
+    },
+    {
+      "participant_id": "E03",
+      "task_id": "T10",
+      "mode": "vat",
+      "completed": true,
+      "accuracy": true,
+      "time_seconds": 243.2,
+      "confidence": 5
+    },
+    {
+      "participant_id": "E04",
+      "task_id": "T01",
+      "mode": "legal",
+      "completed": true,
+      "accuracy": true,
+      "time_seconds": 142.8,
+      "confidence": 4
+    },
+    {
+      "participant_id": "E04",
+      "task_id": "T02",
+      "mode": "legal",
+      "completed": true,
+      "accuracy": true,
+      "time_seconds": 146.5,
+      "confidence": 5
+    },
+    {
+      "participant_id": "E04",
+      "task_id": "T03",
+      "mode": "fraud",
+      "completed": true,
+      "accuracy": true,
+      "time_seconds": 177.8,
+      "confidence": 5
+    },
+    {
+      "participant_id": "E04",
+      "task_id": "T04",
+      "mode": "vat",
+      "completed": true,
+      "accuracy": true,
+      "time_seconds": 296.4,
+      "confidence": 4
+    },
+    {
+      "participant_id": "E04",
+      "task_id": "T05",
+      "mode": "delinquency",
+      "completed": true,
+      "accuracy": true,
+      "time_seconds": 179.8,
+      "confidence": 4
+    },
+    {
+      "participant_id": "E04",
+      "task_id": "T06",
+      "mode": "macro",
+      "completed": false,
+      "accuracy": false,
+      "time_seconds": 115.9,
+      "confidence": 2
+    },
+    {
+      "participant_id": "E04",
+      "task_id": "T07",
+      "mode": "legal",
+      "completed": true,
+      "accuracy": true,
+      "time_seconds": 108.0,
+      "confidence": 5
+    },
+    {
+      "participant_id": "E04",
+      "task_id": "T08",
+      "mode": "full",
+      "completed": true,
+      "accuracy": true,
+      "time_seconds": 240.5,
+      "confidence": 5
+    },
+    {
+      "participant_id": "E04",
+      "task_id": "T09",
+      "mode": "legal",
+      "completed": true,
+      "accuracy": true,
+      "time_seconds": 171.0,
+      "confidence": 5
+    },
+    {
+      "participant_id": "E04",
+      "task_id": "T10",
+      "mode": "vat",
+      "completed": false,
+      "accuracy": false,
+      "time_seconds": 111.1,
+      "confidence": 4
+    },
+    {
+      "participant_id": "E05",
+      "task_id": "T01",
+      "mode": "legal",
+      "completed": true,
+      "accuracy": true,
+      "time_seconds": 120.0,
+      "confidence": 5
+    },
+    {
+      "participant_id": "E05",
+      "task_id": "T02",
+      "mode": "legal",
+      "completed": true,
+      "accuracy": true,
+      "time_seconds": 227.7,
+      "confidence": 5
+    },
+    {
+      "participant_id": "E05",
+      "task_id": "T03",
+      "mode": "fraud",
+      "completed": true,
+      "accuracy": true,
+      "time_seconds": 198.8,
+      "confidence": 5
+    },
+    {
+      "participant_id": "E05",
+      "task_id": "T04",
+      "mode": "vat",
+      "completed": true,
+      "accuracy": true,
+      "time_seconds": 270.9,
+      "confidence": 5
+    },
+    {
+      "participant_id": "E05",
+      "task_id": "T05",
+      "mode": "delinquency",
+      "completed": true,
+      "accuracy": true,
+      "time_seconds": 171.7,
+      "confidence": 5
+    },
+    {
+      "participant_id": "E05",
+      "task_id": "T06",
+      "mode": "macro",
+      "completed": false,
+      "accuracy": false,
+      "time_seconds": 292.9,
+      "confidence": 3
+    },
+    {
+      "participant_id": "E05",
+      "task_id": "T07",
+      "mode": "legal",
+      "completed": true,
+      "accuracy": true,
+      "time_seconds": 257.0,
+      "confidence": 4
+    },
+    {
+      "participant_id": "E05",
+      "task_id": "T08",
+      "mode": "full",
+      "completed": true,
+      "accuracy": true,
+      "time_seconds": 182.0,
+      "confidence": 5
+    },
+    {
+      "participant_id": "E05",
+      "task_id": "T09",
+      "mode": "legal",
+      "completed": false,
+      "accuracy": false,
+      "time_seconds": 241.9,
+      "confidence": 3
+    },
+    {
+      "participant_id": "E05",
+      "task_id": "T10",
+      "mode": "vat",
+      "completed": true,
+      "accuracy": true,
+      "time_seconds": 238.7,
+      "confidence": 4
+    },
+    {
+      "participant_id": "E06",
+      "task_id": "T01",
+      "mode": "legal",
+      "completed": true,
+      "accuracy": true,
+      "time_seconds": 120.4,
+      "confidence": 5
+    },
+    {
+      "participant_id": "E06",
+      "task_id": "T02",
+      "mode": "legal",
+      "completed": true,
+      "accuracy": true,
+      "time_seconds": 88.3,
+      "confidence": 5
+    },
+    {
+      "participant_id": "E06",
+      "task_id": "T03",
+      "mode": "fraud",
+      "completed": true,
+      "accuracy": true,
+      "time_seconds": 218.3,
+      "confidence": 5
+    },
+    {
+      "participant_id": "E06",
+      "task_id": "T04",
+      "mode": "vat",
+      "completed": true,
+      "accuracy": true,
+      "time_seconds": 222.4,
+      "confidence": 5
+    },
+    {
+      "participant_id": "E06",
+      "task_id": "T05",
+      "mode": "delinquency",
+      "completed": true,
+      "accuracy": true,
+      "time_seconds": 149.1,
+      "confidence": 5
+    },
+    {
+      "participant_id": "E06",
+      "task_id": "T06",
+      "mode": "macro",
+      "completed": true,
+      "accuracy": true,
+      "time_seconds": 227.8,
+      "confidence": 4
+    },
+    {
+      "participant_id": "E06",
+      "task_id": "T07",
+      "mode": "legal",
+      "completed": false,
+      "accuracy": false,
+      "time_seconds": 239.4,
+      "confidence": 4
+    },
+    {
+      "participant_id": "E06",
+      "task_id": "T08",
+      "mode": "full",
+      "completed": true,
+      "accuracy": true,
+      "time_seconds": 258.5,
+      "confidence": 5
+    },
+    {
+      "participant_id": "E06",
+      "task_id": "T09",
+      "mode": "legal",
+      "completed": true,
+      "accuracy": true,
+      "time_seconds": 232.7,
+      "confidence": 5
+    },
+    {
+      "participant_id": "E06",
+      "task_id": "T10",
+      "mode": "vat",
+      "completed": true,
+      "accuracy": true,
+      "time_seconds": 188.2,
+      "confidence": 5
+    },
+    {
+      "participant_id": "E07",
+      "task_id": "T01",
+      "mode": "legal",
+      "completed": true,
+      "accuracy": true,
+      "time_seconds": 212.2,
+      "confidence": 5
+    },
+    {
+      "participant_id": "E07",
+      "task_id": "T02",
+      "mode": "legal",
+      "completed": true,
+      "accuracy": true,
+      "time_seconds": 129.1,
+      "confidence": 5
+    },
+    {
+      "participant_id": "E07",
+      "task_id": "T03",
+      "mode": "fraud",
+      "completed": true,
+      "accuracy": true,
+      "time_seconds": 140.5,
+      "confidence": 5
+    },
+    {
+      "participant_id": "E07",
+      "task_id": "T04",
+      "mode": "vat",
+      "completed": true,
+      "accuracy": true,
+      "time_seconds": 266.0,
+      "confidence": 5
+    },
+    {
+      "participant_id": "E07",
+      "task_id": "T05",
+      "mode": "delinquency",
+      "completed": false,
+      "accuracy": false,
+      "time_seconds": 243.2,
+      "confidence": 2
+    },
+    {
+      "participant_id": "E07",
+      "task_id": "T06",
+      "mode": "macro",
+      "completed": true,
+      "accuracy": true,
+      "time_seconds": 180.7,
+      "confidence": 5
+    },
+    {
+      "participant_id": "E07",
+      "task_id": "T07",
+      "mode": "legal",
+      "completed": true,
+      "accuracy": true,
+      "time_seconds": 126.8,
+      "confidence": 5
+    },
+    {
+      "participant_id": "E07",
+      "task_id": "T08",
+      "mode": "full",
+      "completed": true,
+      "accuracy": true,
+      "time_seconds": 159.7,
+      "confidence": 5
+    },
+    {
+      "participant_id": "E07",
+      "task_id": "T09",
+      "mode": "legal",
+      "completed": false,
+      "accuracy": false,
+      "time_seconds": 230.3,
+      "confidence": 4
+    },
+    {
+      "participant_id": "E07",
+      "task_id": "T10",
+      "mode": "vat",
+      "completed": true,
+      "accuracy": true,
+      "time_seconds": 203.7,
+      "confidence": 5
+    },
+    {
+      "participant_id": "E08",
+      "task_id": "T01",
+      "mode": "legal",
+      "completed": true,
+      "accuracy": true,
+      "time_seconds": 158.4,
+      "confidence": 5
+    },
+    {
+      "participant_id": "E08",
+      "task_id": "T02",
+      "mode": "legal",
+      "completed": true,
+      "accuracy": true,
+      "time_seconds": 245.5,
+      "confidence": 5
+    },
+    {
+      "participant_id": "E08",
+      "task_id": "T03",
+      "mode": "fraud",
+      "completed": true,
+      "accuracy": true,
+      "time_seconds": 228.6,
+      "confidence": 5
+    },
+    {
+      "participant_id": "E08",
+      "task_id": "T04",
+      "mode": "vat",
+      "completed": true,
+      "accuracy": true,
+      "time_seconds": 142.8,
+      "confidence": 4
+    },
+    {
+      "participant_id": "E08",
+      "task_id": "T05",
+      "mode": "delinquency",
+      "completed": true,
+      "accuracy": true,
+      "time_seconds": 161.1,
+      "confidence": 5
+    },
+    {
+      "participant_id": "E08",
+      "task_id": "T06",
+      "mode": "macro",
+      "completed": true,
+      "accuracy": true,
+      "time_seconds": 230.3,
+      "confidence": 5
+    },
+    {
+      "participant_id": "E08",
+      "task_id": "T07",
+      "mode": "legal",
+      "completed": true,
+      "accuracy": true,
+      "time_seconds": 233.2,
+      "confidence": 5
+    },
+    {
+      "participant_id": "E08",
+      "task_id": "T08",
+      "mode": "full",
+      "completed": true,
+      "accuracy": true,
+      "time_seconds": 165.4,
+      "confidence": 5
+    },
+    {
+      "participant_id": "E08",
+      "task_id": "T09",
+      "mode": "legal",
+      "completed": true,
+      "accuracy": true,
+      "time_seconds": 206.2,
+      "confidence": 5
+    },
+    {
+      "participant_id": "E08",
+      "task_id": "T10",
+      "mode": "vat",
+      "completed": true,
+      "accuracy": true,
+      "time_seconds": 198.9,
+      "confidence": 5
+    },
+    {
+      "participant_id": "E09",
+      "task_id": "T01",
+      "mode": "legal",
+      "completed": true,
+      "accuracy": true,
+      "time_seconds": 255.4,
+      "confidence": 5
+    },
+    {
+      "participant_id": "E09",
+      "task_id": "T02",
+      "mode": "legal",
+      "completed": true,
+      "accuracy": true,
+      "time_seconds": 102.7,
+      "confidence": 5
+    },
+    {
+      "participant_id": "E09",
+      "task_id": "T03",
+      "mode": "fraud",
+      "completed": true,
+      "accuracy": true,
+      "time_seconds": 82.2,
+      "confidence": 5
+    },
+    {
+      "participant_id": "E09",
+      "task_id": "T04",
+      "mode": "vat",
+      "completed": true,
+      "accuracy": true,
+      "time_seconds": 183.2,
+      "confidence": 5
+    },
+    {
+      "participant_id": "E09",
+      "task_id": "T05",
+      "mode": "delinquency",
+      "completed": false,
+      "accuracy": false,
+      "time_seconds": 235.1,
+      "confidence": 2
+    },
+    {
+      "participant_id": "E09",
+      "task_id": "T06",
+      "mode": "macro",
+      "completed": true,
+      "accuracy": true,
+      "time_seconds": 174.9,
+      "confidence": 4
+    },
+    {
+      "participant_id": "E09",
+      "task_id": "T07",
+      "mode": "legal",
+      "completed": true,
+      "accuracy": true,
+      "time_seconds": 203.6,
+      "confidence": 5
+    },
+    {
+      "participant_id": "E09",
+      "task_id": "T08",
+      "mode": "full",
+      "completed": true,
+      "accuracy": true,
+      "time_seconds": 208.5,
+      "confidence": 5
+    },
+    {
+      "participant_id": "E09",
+      "task_id": "T09",
+      "mode": "legal",
+      "completed": true,
+      "accuracy": true,
+      "time_seconds": 180.5,
+      "confidence": 5
+    },
+    {
+      "participant_id": "E09",
+      "task_id": "T10",
+      "mode": "vat",
+      "completed": true,
+      "accuracy": true,
+      "time_seconds": 255.7,
+      "confidence": 5
+    },
+    {
+      "participant_id": "E10",
+      "task_id": "T01",
+      "mode": "legal",
+      "completed": true,
+      "accuracy": true,
+      "time_seconds": 134.7,
+      "confidence": 5
+    },
+    {
+      "participant_id": "E10",
+      "task_id": "T02",
+      "mode": "legal",
+      "completed": false,
+      "accuracy": false,
+      "time_seconds": 168.9,
+      "confidence": 2
+    },
+    {
+      "participant_id": "E10",
+      "task_id": "T03",
+      "mode": "fraud",
+      "completed": true,
+      "accuracy": true,
+      "time_seconds": 240.1,
+      "confidence": 5
+    },
+    {
+      "participant_id": "E10",
+      "task_id": "T04",
+      "mode": "vat",
+      "completed": true,
+      "accuracy": true,
+      "time_seconds": 97.4,
+      "confidence": 5
+    },
+    {
+      "participant_id": "E10",
+      "task_id": "T05",
+      "mode": "delinquency",
+      "completed": false,
+      "accuracy": false,
+      "time_seconds": 183.5,
+      "confidence": 2
+    },
+    {
+      "participant_id": "E10",
+      "task_id": "T06",
+      "mode": "macro",
+      "completed": false,
+      "accuracy": false,
+      "time_seconds": 147.8,
+      "confidence": 2
+    },
+    {
+      "participant_id": "E10",
+      "task_id": "T07",
+      "mode": "legal",
+      "completed": true,
+      "accuracy": true,
+      "time_seconds": 111.5,
+      "confidence": 5
+    },
+    {
+      "participant_id": "E10",
+      "task_id": "T08",
+      "mode": "full",
+      "completed": false,
+      "accuracy": false,
+      "time_seconds": 213.2,
+      "confidence": 4
+    },
+    {
+      "participant_id": "E10",
+      "task_id": "T09",
+      "mode": "legal",
+      "completed": true,
+      "accuracy": true,
+      "time_seconds": 153.5,
+      "confidence": 5
+    },
+    {
+      "participant_id": "E10",
+      "task_id": "T10",
+      "mode": "vat",
+      "completed": true,
+      "accuracy": true,
+      "time_seconds": 269.6,
+      "confidence": 5
+    }
+  ]
+}

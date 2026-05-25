@@ -27,7 +27,59 @@ DATA_DIR = Path(__file__).resolve().parent.parent / "data" / "data"
 MEMORY_PATH = DATA_DIR / "macro_text_scenario_memory.jsonl"
 
 
-PROVIDER_PRIORITY = ("openrouter", "gemini", "github", "groq", "cohere")
+PROVIDER_PRIORITY = ("gemini", "openrouter", "github", "groq", "cohere")
+
+
+def try_llm_interpretation(prompt: str) -> Optional[Dict[str, Any]]:
+    for provider in PROVIDER_PRIORITY:
+        try:
+            payload = _call_provider(provider, prompt)
+            if payload:
+                payload["llm_provider"] = provider
+                return payload
+        except Exception as e:
+            print(f"[LLM Waterfall] Provider {provider} failed: {e}")
+            continue
+    return None
+
+
+def _call_provider(provider: str, prompt: str) -> Optional[Dict[str, Any]]:
+    if provider == "gemini" and os.environ.get("GEMINI_API_KEY"):
+        return _post_gemini(os.environ["GEMINI_API_KEY"], prompt)
+    if provider == "openrouter" and os.environ.get("OPENROUTER_API_KEY"):
+        return _post_openai_compatible(
+            "https://openrouter.ai/api/v1/chat/completions",
+            os.environ["OPENROUTER_API_KEY"],
+            "openrouter/auto",
+            prompt,
+        )
+    if provider == "groq" and os.environ.get("GROQ_API_KEY"):
+        return _post_openai_compatible(
+            "https://api.groq.com/openai/v1/chat/completions",
+            os.environ["GROQ_API_KEY"],
+            "llama-3.1-8b-instant",
+            prompt,
+        )
+    if provider == "github" and (os.environ.get("GITHUB_TOKEN") or os.environ.get("GITHUB_MODELS_TOKEN") or os.environ.get("GITHUB_PAT")):
+        token = os.environ.get("GITHUB_MODELS_TOKEN") or os.environ.get("GITHUB_TOKEN") or os.environ.get("GITHUB_PAT")
+        return _post_openai_compatible(
+            "https://models.inference.ai.azure.com/chat/completions",
+            token,
+            "gpt-4o-mini",
+            prompt,
+        )
+    if provider == "cohere" and os.environ.get("COHERE_API_KEY"):
+        return _post_cohere(os.environ["COHERE_API_KEY"], prompt)
+    return None
+
+
+def try_trained_model_interpretation(text: str) -> Optional[Dict[str, Any]]:
+    """Use the reviewed local model before paying an LLM call."""
+    try:
+        from ml_engine.macro_retrain_pipeline import predict_scenario_from_trained_model
+        return predict_scenario_from_trained_model(text)
+    except Exception:
+        return None
 
 
 @dataclass
@@ -195,55 +247,8 @@ Quy tắc:
 """
 
 
-def try_llm_interpretation(prompt: str) -> Optional[Dict[str, Any]]:
-    for provider in PROVIDER_PRIORITY:
-        try:
-            payload = _call_provider(provider, prompt)
-            if payload:
-                payload["llm_provider"] = provider
-                return payload
-        except Exception:
-            continue
-    return None
-
-
-def try_trained_model_interpretation(text: str) -> Optional[Dict[str, Any]]:
-    """Use the reviewed local model before paying an LLM call."""
-    try:
-        from ml_engine.macro_retrain_pipeline import predict_scenario_from_trained_model
-
-        return predict_scenario_from_trained_model(text)
-    except Exception:
-        return None
-
-
-def _call_provider(provider: str, prompt: str) -> Optional[Dict[str, Any]]:
-    if provider == "openrouter" and os.environ.get("OPENROUTER_API_KEY"):
-        return _post_openai_compatible(
-            "https://openrouter.ai/api/v1/chat/completions",
-            os.environ["OPENROUTER_API_KEY"],
-            "google/gemini-2.0-flash-exp:free",
-            prompt,
-        )
-    if provider == "groq" and os.environ.get("GROQ_API_KEY"):
-        return _post_openai_compatible(
-            "https://api.groq.com/openai/v1/chat/completions",
-            os.environ["GROQ_API_KEY"],
-            "llama-3.1-8b-instant",
-            prompt,
-        )
-    if provider == "github" and (os.environ.get("GITHUB_TOKEN") or os.environ.get("GITHUB_MODELS_TOKEN")):
-        return _post_openai_compatible(
-            "https://models.inference.ai.azure.com/chat/completions",
-            os.environ.get("GITHUB_MODELS_TOKEN") or os.environ["GITHUB_TOKEN"],
-            "gpt-4o-mini",
-            prompt,
-        )
-    if provider == "gemini" and os.environ.get("GEMINI_API_KEY"):
-        return _post_gemini(os.environ["GEMINI_API_KEY"], prompt)
-    if provider == "cohere" and os.environ.get("COHERE_API_KEY"):
-        return _post_cohere(os.environ["COHERE_API_KEY"], prompt)
-    return None
+# Forward to providers defined above
+# The actual functions try_llm_interpretation and _call_provider are declared at the top of the file.
 
 
 def _post_openai_compatible(url: str, api_key: str, model: str, prompt: str) -> Optional[Dict[str, Any]]:
@@ -262,6 +267,20 @@ def _post_openai_compatible(url: str, api_key: str, model: str, prompt: str) -> 
 
 
 def _post_gemini(api_key: str, prompt: str) -> Optional[Dict[str, Any]]:
+    # Try production v1 endpoint first
+    try:
+        url = f"https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key={api_key}"
+        body = {"contents": [{"parts": [{"text": prompt}]}], "generationConfig": {"temperature": 0.15}}
+        data = _http_json(url, body, {})
+        parts = ((((data.get("candidates") or [{}])[0].get("content") or {}).get("parts")) or [])
+        text = "\n".join(str(p.get("text") or "") for p in parts).strip()
+        result = extract_json(text)
+        if result:
+            return result
+    except Exception as e:
+        print(f"[Gemini v1 REST Failed] {e}, trying v1beta...")
+        
+    # Fallback to v1beta
     url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={api_key}"
     body = {"contents": [{"parts": [{"text": prompt}]}], "generationConfig": {"temperature": 0.15}}
     data = _http_json(url, body, {})

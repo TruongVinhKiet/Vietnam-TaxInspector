@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-05-20T04:19:41.173557+00:00",
+  "generated_at": "2026-05-20T09:16:55.749677+00:00",
   "status": "pass",
   "hard_failures": [],
   "warnings": [],
@@ -51,14 +51,14 @@
         "effective_to": "2025-06-11",
         "geojson_path": "vietnam_admin_boundaries_63_official.geojson",
         "fallback": "centroid_tile",
-        "status": "fallback_only",
-        "source_name": "TaxInspector synthetic province baseline",
+        "status": "reviewed_legacy_geojson_loaded",
+        "source_name": "TaxInspector restored 63-province GeoJSON asset enriched with province codes",
         "source_url": null,
-        "notes": "Kept for backward-compatible experiments, dashboards, and historical synthetic data.",
-        "geojson_exists": false,
-        "geojson_feature_count": 0,
-        "geojson_sha256": null,
-        "readiness": "fallback_available"
+        "notes": "Kept for pre/post-merger comparison, backward-compatible experiments, dashboards, and historical synthetic data.",
+        "geojson_exists": true,
+        "geojson_feature_count": 63,
+        "geojson_sha256": "d36cf08ebe69552f77dff308d0c44867f5e8328a2a5fdb0352e49d17d0e9d760",
+        "readiness": "ready"
       },
       "vn_34_2025": {
         "label": "Vietnam 34 provincial-level units after 2025 administrative reorganization",

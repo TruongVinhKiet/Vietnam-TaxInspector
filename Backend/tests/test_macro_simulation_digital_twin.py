@@ -86,6 +86,28 @@ def test_simulation_map_state_contract_uses_vn34():
     assert all("risk_score" in province for province in payload["provinces"])
 
 
+def test_simulation_map_state_contract_supports_legacy_63_polygons():
+    from app.routers.simulation import get_map_state
+
+    payload = get_map_state(boundary_version="vn_63_legacy", include_geojson=True, event_limit=1)
+    assert payload["boundary_version"] == "vn_63_legacy"
+    assert payload["total"] == 63
+    assert payload["data_quality"]["profile_polygon_coverage_ok"] is True
+    assert len(payload["geojson"]["features"]) == 63
+    assert all((feature.get("properties") or {}).get("province_code") for feature in payload["geojson"]["features"])
+
+
+def test_merger_analysis_returns_member_grdp_series_for_legacy_member():
+    from app.routers.simulation import get_merger_analysis
+
+    payload = get_merger_analysis("96", boundary_version="vn_63_legacy")
+    assert payload["new_unit"]["province_name"] == "Cà Mau"
+    assert set(payload["new_unit"]["member_codes"]) == {"95", "96"}
+    assert len(payload["member_rows"]) == 2
+    assert all(row["time_series"] for row in payload["member_rows"])
+    assert payload["merged_growth"]["growth_pct"] is not None
+
+
 def test_macro_event_ingest_deduplicates_review_queue(tmp_path):
     candidate = MacroEventCandidate(
         title="Xuất khẩu Việt Nam tăng mạnh nhờ đơn hàng điện tử",

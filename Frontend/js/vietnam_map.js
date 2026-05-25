@@ -4,6 +4,7 @@
 const VietnamMap = (() => {
     let leafletMap = null;
     let leafletLayer = null;
+    let legacyBoundaryLayer = null;
     let selectedProvinceCode = null;
     let containerId = 'vietnam-map';
 
@@ -23,7 +24,7 @@ const VietnamMap = (() => {
 
         showStatus(container, 'Đang tải ranh giới hành chính 34 đơn vị...');
         try {
-            const mapState = await window.MacroMapData.loadState();
+            const mapState = await window.MacroMapData.loadState({ force: true });
             renderLeaflet(container, mapState);
         } catch (error) {
             console.error('[VietnamMap] init failed', error);
@@ -67,6 +68,8 @@ const VietnamMap = (() => {
             onEachFeature: bindLeafletFeature,
         }).addTo(leafletMap);
 
+        setupLegacyOverlayControl();
+
         const bounds = leafletLayer.getBounds();
         if (bounds.isValid()) {
             leafletMap.fitBounds(bounds, { padding: [18, 18], animate: false });
@@ -83,13 +86,44 @@ const VietnamMap = (() => {
     function leafletFeatureStyle(feature) {
         const province = window.MacroMapData.provinceForFeature(feature);
         const selected = selectedProvinceCode && String(province.province_code) === String(selectedProvinceCode);
+        const layer = window.MapEnhancements?.getChoroplethLayer?.() || 'risk';
         return {
             color: selected ? '#002147' : '#ffffff',
             weight: selected ? 2.6 : 1,
-            fillColor: window.MacroMapData.riskColor(province.risk_score),
+            fillColor: choroplethColor(province, layer),
             fillOpacity: selected ? 0.92 : 0.78,
             opacity: 1,
         };
+    }
+
+    function choroplethColor(province, layer) {
+        if (layer === 'gdp') {
+            const gdp = Number(province.gdp_billion_vnd || 0);
+            if (gdp >= 500000) return '#1e3a5f';
+            if (gdp >= 200000) return '#2563eb';
+            if (gdp >= 100000) return '#60a5fa';
+            if (gdp >= 50000) return '#93c5fd';
+            return '#dbeafe';
+        }
+        if (layer === 'tax_efficiency') {
+            const gdp = Number(province.gdp_billion_vnd || 1);
+            const tax = Number(province.tax_revenue_billion_vnd || 0);
+            const eff = (tax / Math.max(gdp, 1)) * 100;
+            if (eff >= 20) return '#065f46';
+            if (eff >= 15) return '#059669';
+            if (eff >= 10) return '#34d399';
+            if (eff >= 5) return '#a7f3d0';
+            return '#ecfdf5';
+        }
+        if (layer === 'compliance') {
+            const c = Number(province.compliance_rate || 0);
+            if (c >= 0.88) return '#1e40af';
+            if (c >= 0.84) return '#3b82f6';
+            if (c >= 0.80) return '#93c5fd';
+            if (c >= 0.76) return '#fbbf24';
+            return '#f87171';
+        }
+        return window.MacroMapData.riskColor(province.risk_score);
     }
 
     function bindLeafletFeature(feature, layer) {
@@ -130,6 +164,9 @@ const VietnamMap = (() => {
         if (window.loadProvinceScenario) {
             window.loadProvinceScenario(province.province_code, name || province.province_name);
         }
+        window.dispatchEvent(new CustomEvent('macro:province-selected', {
+            detail: { provinceCode: province.province_code, provinceName: name || province.province_name },
+        }));
     }
 
     function leafletPopupHtml(province) {
@@ -170,6 +207,45 @@ const VietnamMap = (() => {
         leafletLayer.setStyle(leafletFeatureStyle);
     }
 
+    async function setupLegacyOverlayControl() {
+        const toggle = document.getElementById('legacy-boundary-overlay-toggle');
+        if (!toggle || !leafletMap) return;
+        toggle.onchange = () => toggleLegacyBoundaryOverlay(toggle.checked);
+        if (window.MACRO_BOUNDARY_VERSION === 'vn_63_legacy') {
+            toggle.checked = false;
+            await toggleLegacyBoundaryOverlay(false);
+        } else if (toggle.checked) {
+            await toggleLegacyBoundaryOverlay(true);
+        }
+    }
+
+    async function toggleLegacyBoundaryOverlay(enabled) {
+        if (!leafletMap) return;
+        if (legacyBoundaryLayer) {
+            leafletMap.removeLayer(legacyBoundaryLayer);
+            legacyBoundaryLayer = null;
+        }
+        if (!enabled || window.MACRO_BOUNDARY_VERSION === 'vn_63_legacy') return;
+        try {
+            const apiBase = window.API_BASE || 'http://localhost:8000/api';
+            const response = await fetch(`${apiBase}/simulation/geojson-vietnam?boundary_version=vn_63_legacy`, { cache: 'no-store' });
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            const geojson = await response.json();
+            legacyBoundaryLayer = L.geoJSON(geojson, {
+                interactive: false,
+                style: {
+                    color: '#0f172a',
+                    weight: 1.2,
+                    opacity: 0.45,
+                    fillOpacity: 0,
+                    dashArray: '4 4',
+                },
+            }).addTo(leafletMap);
+        } catch (error) {
+            console.warn('[VietnamMap] Could not load legacy boundary overlay:', error);
+        }
+    }
+
     function updateProvinceRisk(provinceCode, newRiskLevel) {
         window.MacroMapData?.setProvinceRisk(provinceCode, newRiskLevel);
         refreshLeafletStyles();
@@ -203,11 +279,47 @@ const VietnamMap = (() => {
         }
     }
 
+    async function switchBoundary(boundaryVersion) {
+        if (!window.MacroMapData) return;
+        selectedProvinceCode = null;
+        const normalized = window.MacroMapData.setBoundaryVersion(boundaryVersion);
+        const container = document.getElementById(containerId);
+        if (!container) return;
+        showStatus(container, normalized === 'vn_63_legacy' ? 'Đang tải bản đồ 63 tỉnh/thành...' : 'Đang tải bản đồ 34 đơn vị...');
+        const mapState = await window.MacroMapData.loadState({ boundaryVersion: normalized, force: true });
+        renderLeaflet(container, mapState);
+    }
+
     function showStatus(container, message) {
         container.innerHTML = `<div class="flex h-full min-h-[420px] items-center justify-center text-sm font-semibold text-slate-500 text-center px-6">${window.MacroMapData?.escapeHtml ? window.MacroMapData.escapeHtml(message) : message}</div>`;
     }
 
-    return { init, updateProvinceRisk, simulateNationalRisk, applyMacroParams, applyProvinceImpacts, onVisible };
+    function refreshChoropleth(layer) {
+        refreshLeafletStyles();
+    }
+
+    window.addEventListener('macro:boundary-change', (event) => {
+        const boundaryVersion = event.detail?.boundaryVersion || 'vn_34_2025';
+        switchBoundary(boundaryVersion);
+    });
+
+    window.addEventListener('macro:province-selected', (event) => {
+        const code = event.detail?.provinceCode;
+        if (code && String(code) !== String(selectedProvinceCode)) {
+            selectedProvinceCode = code;
+            refreshLeafletStyles();
+        }
+    });
+
+    window.addEventListener('macro:province-resolved-code', (event) => {
+        const code = event.detail?.provinceCode;
+        if (code && String(code) !== String(selectedProvinceCode)) {
+            selectedProvinceCode = code;
+            refreshLeafletStyles();
+        }
+    });
+
+    return { init, updateProvinceRisk, simulateNationalRisk, applyMacroParams, applyProvinceImpacts, switchBoundary, refreshChoropleth, onVisible };
 })();
 
 window.VietnamMap = VietnamMap;

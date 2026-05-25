@@ -84,6 +84,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     initSliders();
     await loadPresets();
     await loadBaseline();
+    runSimulation("Mặc định");
     
     const resetBtn = document.getElementById('preset-reset-btn');
     if (resetBtn) {
@@ -319,7 +320,7 @@ async function loadAdvancedChartData(params, requestToken) {
         }
         if (sensitivityRes.ok) {
             sensitivityData = await sensitivityRes.json();
-            renderTornadoChart(sensitivityData);
+            renderNationalTornadoChart(sensitivityData);
         }
         if (heatmapRes.ok) {
             heatmapData = await heatmapRes.json();
@@ -328,7 +329,7 @@ async function loadAdvancedChartData(params, requestToken) {
         if (monteCarloRes.ok) {
             const mcData = await monteCarloRes.json();
             if (mcCanvas) mcCanvas.style.opacity = "1";
-            renderMonteCarloChart(mcData);
+            renderNationalMonteCarloChart(mcData);
         }
     } catch (e) {
         console.error("[Simulation] Advanced chart data error:", e);
@@ -339,12 +340,14 @@ async function loadAdvancedChartData(params, requestToken) {
 
 // ── Render KPIs ────────────────────────────────────────────
 function renderKPIs(baseline, scenario) {
+    const kpi0 = document.querySelector('[data-kpi="sim-total-companies"]');
     const kpi1 = document.querySelector('[data-kpi="sim-high-risk"]');
     const kpi2 = document.querySelector('[data-kpi="sim-loss"]');
     const kpi3 = document.querySelector('[data-kpi="sim-revenue"]');
     const kpi4 = document.querySelector('[data-kpi="sim-delinq-rate"]');
 
     if (baseline && !scenario) {
+        if (kpi0) kpi0.innerHTML = `${baseline.baseline_total_companies.toLocaleString()}`;
         if (kpi1) kpi1.innerHTML = `${baseline.baseline_high_risk_count.toLocaleString()}`;
         if (kpi2) kpi2.innerHTML = `${formatCurrencyCode(baseline.baseline_estimated_loss)} <span class="text-lg">VNĐ</span>`;
         if (kpi3) kpi3.innerHTML = `${formatCurrencyCode(baseline.baseline_total_revenue)} <span class="text-lg">VNĐ</span>`;
@@ -356,6 +359,7 @@ function renderKPIs(baseline, scenario) {
         const deltaIcon = (v) => v > 0 ? "arrow_upward" : v < 0 ? "arrow_downward" : "remove";
         const deltaSign = (v) => v > 0 ? "+" : "";
 
+        if (kpi0) kpi0.innerHTML = `${scenario.baseline_total_companies.toLocaleString()}`;
         if (kpi1) kpi1.innerHTML = `${scenario.simulated_high_risk_count.toLocaleString()} <span class="text-sm ${deltaClass(scenario.delta_high_risk)}"><span class="material-symbols-outlined text-[14px]">${deltaIcon(scenario.delta_high_risk)}</span>${deltaSign(scenario.delta_high_risk)}${scenario.delta_high_risk}</span>`;
         if (kpi2) kpi2.innerHTML = `${formatCurrencyCode(scenario.simulated_estimated_loss)} <span class="text-sm ${deltaClass(scenario.delta_estimated_loss)}">${deltaSign(scenario.delta_estimated_loss)}${formatCurrencyCode(Math.abs(scenario.delta_estimated_loss))}</span>`;
         if (kpi3) kpi3.innerHTML = `${formatCurrencyCode(scenario.simulated_total_revenue)} <span class="text-sm ${deltaClass(-scenario.delta_revenue_pct)}">${deltaSign(scenario.delta_revenue_pct)}${scenario.delta_revenue_pct}%</span>`;
@@ -889,7 +893,7 @@ function renderWaterfallChart(data) {
 // ────────────────────────────────────────────────────────────
 //  CHART 4: Tornado – Sensitivity Analysis
 // ────────────────────────────────────────────────────────────
-function renderTornadoChart(data) {
+function renderNationalTornadoChart(data) {
     const canvas = document.getElementById("sim-tornado-chart");
     if (!canvas || !data?.items) return;
 
@@ -1496,7 +1500,7 @@ function bindEvents() {
             renderHealthGauge(currentScenario.scenario_health_score);
             renderStackedAreaChart(currentScenario);
             if (contributionsData) renderWaterfallChart(contributionsData);
-            if (sensitivityData) renderTornadoChart(sensitivityData);
+            if (sensitivityData) renderNationalTornadoChart(sensitivityData);
             if (heatmapData) renderHeatmap(heatmapData);
             // Historical is static sizing, handled by its render function
         }
@@ -1578,7 +1582,7 @@ function renderHealthGauge(score) {
 // ────────────────────────────────────────────────────────────
 //  CHART 12: Monte Carlo Fan Chart
 // ────────────────────────────────────────────────────────────
-function renderMonteCarloChart(data) {
+function renderNationalMonteCarloChart(data) {
     const canvas = document.getElementById("sim-montecarlo-chart");
     if (!canvas || !data.bands) return;
     if (!hasChartJs()) {
