@@ -1,0 +1,849 @@
+<!DOCTYPE html>
+<html class="light" lang="vi">
+<head>
+    <meta charset="utf-8"/>
+    <meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+    <title>Vietnam Taxpayer - Tài khoản Người nộp thuế</title>
+    <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&amp;display=swap" rel="stylesheet"/>
+    <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+    <script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "surface-dim": "#d9dadb",
+                        "on-primary-container": "#708ab5",
+                        "primary-fixed-dim": "#aec7f6",
+                        "on-secondary-fixed-variant": "#3e4758",
+                        "secondary-fixed": "#dae3f8",
+                        "tertiary-fixed": "#ffdbcb",
+                        "surface-tint": "#465f88",
+                        "on-primary-fixed-variant": "#2d476f",
+                        "surface-bright": "#f8f9fa",
+                        "outline-variant": "#c4c6cf",
+                        "on-primary": "#ffffff",
+                        "on-tertiary": "#ffffff",
+                        "tertiary": "#180500",
+                        "surface-container-high": "#e7e8e9",
+                        "on-error": "#ffffff",
+                        "secondary-container": "#d7e0f5",
+                        "surface-container-low": "#f3f4f5",
+                        "surface-container-highest": "#e1e3e4",
+                        "tertiary-container": "#3d1500",
+                        "on-secondary": "#ffffff",
+                        "surface-container-lowest": "#ffffff",
+                        "inverse-on-surface": "#f0f1f2",
+                        "on-secondary-container": "#5a6375",
+                        "surface-container": "#edeeef",
+                        "secondary-fixed-dim": "#bec7db",
+                        "primary-container": "#002147",
+                        "inverse-surface": "#2e3132",
+                        "primary-fixed": "#d6e3ff",
+                        "on-secondary-fixed": "#131c2b",
+                        "error": "#ba1a1a",
+                        "primary": "#000a1e",
+                        "on-surface-variant": "#44474e",
+                        "on-surface": "#191c1d",
+                        "background": "#f8f9fa",
+                        "inverse-primary": "#aec7f6",
+                        "tertiary-fixed-dim": "#ffb691",
+                        "on-tertiary-fixed": "#341100",
+                        "on-background": "#191c1d",
+                        "on-primary-fixed": "#001b3d",
+                        "on-error-container": "#93000a",
+                        "surface-variant": "#e1e3e4",
+                        "on-tertiary-fixed-variant": "#6c391d",
+                        "surface": "#f8f9fa",
+                        "error-container": "#ffdad6",
+                        "secondary": "#565f70",
+                        "outline": "#74777f",
+                        "on-tertiary-container": "#b97958"
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "0.125rem",
+                        "lg": "0.25rem",
+                        "xl": "0.5rem",
+                        "full": "0.75rem"
+                    },
+                    "fontFamily": {
+                        "headline": ["Inter"],
+                        "body": ["Inter"],
+                        "label": ["Inter"]
+                    }
+                },
+            },
+        }
+    </script>
+    <style>
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+            vertical-align: middle;
+        }
+        /* Font is globally set in global.css to Outfit */
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        .profile-card {
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+        }
+        .profile-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 20px 40px rgba(0,33,71,0.08);
+        }
+        .verification-toggle {
+            position: relative;
+            width: 44px; height: 24px;
+            background: #c4c6cf;
+            border-radius: 9999px;
+            cursor: pointer;
+            transition: background 0.25s ease;
+        }
+        .verification-toggle.active { background: #002147; }
+        .verification-toggle::after {
+            content: '';
+            position: absolute;
+            top: 2px; left: 2px;
+            width: 20px; height: 20px;
+            background: white;
+            border-radius: 9999px;
+            transition: transform 0.25s ease;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.15);
+        }
+        .verification-toggle.active::after { transform: translateX(20px); }
+
+        /* Biometric scan overlay */
+        .bio-overlay {
+            position: fixed; inset: 0; z-index: 100;
+            background: rgba(0,10,30,0.92);
+            backdrop-filter: blur(12px);
+            display: flex; align-items: center; justify-content: center;
+            flex-direction: column;
+            opacity: 0; pointer-events: none;
+            transition: opacity 400ms cubic-bezier(0.16,1,0.3,1);
+        }
+        .bio-overlay.active { opacity: 1; pointer-events: auto; }
+        .scan-frame {
+            width: 320px; height: 320px;
+            border: 3px solid rgba(174,199,246,0.4);
+            border-radius: 24px;
+            position: relative; overflow: hidden;
+            box-shadow: 0 0 60px rgba(70,95,136,0.2), inset 0 0 40px rgba(0,33,71,0.15);
+        }
+        .scan-frame video { width: 100%; height: 100%; object-fit: cover; border-radius: 21px; }
+        .scan-line {
+            position: absolute; left: 0; right: 0; height: 3px;
+            background: linear-gradient(90deg, transparent, #aec7f6, transparent);
+            animation: scanMove 2.2s ease-in-out infinite;
+            box-shadow: 0 0 20px rgba(174,199,246,0.6);
+        }
+        @keyframes scanMove { 0%, 100% { top: 10%; } 50% { top: 85%; } }
+        .scan-corner { position: absolute; width: 28px; height: 28px; border-color: #aec7f6; border-style: solid; border-width: 0; }
+        .scan-corner.tl { top: 8px; left: 8px; border-top-width: 3px; border-left-width: 3px; border-top-left-radius: 12px; }
+        .scan-corner.tr { top: 8px; right: 8px; border-top-width: 3px; border-right-width: 3px; border-top-right-radius: 12px; }
+        .scan-corner.bl { bottom: 8px; left: 8px; border-bottom-width: 3px; border-left-width: 3px; border-bottom-left-radius: 12px; }
+        .scan-corner.br { bottom: 8px; right: 8px; border-bottom-width: 3px; border-right-width: 3px; border-bottom-right-radius: 12px; }
+        .bio-status-text { margin-top: 24px; color: #aec7f6; font-size: 13px; font-weight: 700; text-align: center; letter-spacing: 0.05em; }
+        .cccd-modal, .sig-modal, .avatar-modal {
+            position: fixed; inset: 0; z-index: 100;
+            background: rgba(0,10,30,0.85); backdrop-filter: blur(12px);
+            display: flex; align-items: center; justify-content: center;
+            opacity: 0; pointer-events: none; transition: opacity 400ms ease;
+        }
+        .cccd-modal.active, .sig-modal.active, .avatar-modal.active { opacity: 1; pointer-events: auto; }
+        .avatar-modal-panel {
+            transform: translateY(10px) scale(0.98);
+            opacity: 0;
+            transition: transform 260ms cubic-bezier(0.16, 1, 0.3, 1), opacity 220ms ease;
+        }
+        .avatar-modal.active .avatar-modal-panel {
+            transform: translateY(0) scale(1);
+            opacity: 1;
+        }
+        .avatar-choice-btn {
+            transition: transform 180ms ease, border-color 180ms ease, background-color 180ms ease;
+        }
+        .avatar-choice-btn:hover {
+            transform: translateY(-2px);
+            border-color: rgba(0, 33, 71, 0.25);
+            background: #f7f9fc;
+        }
+        .avatar-preview-frame {
+            width: 280px;
+            height: 280px;
+            border-radius: 20px;
+            overflow: hidden;
+            background: #eef2f8;
+            border: 2px solid rgba(0, 33, 71, 0.12);
+            box-shadow: inset 0 0 0 1px rgba(255,255,255,0.5);
+        }
+        .sig-canvas-wrap {
+            background: white; border-radius: 12px; position: relative;
+            box-shadow: inset 0 2px 8px rgba(0,0,0,0.06);
+            border: 2px solid #e2e4e9; cursor: crosshair;
+        }
+        .sig-canvas-wrap canvas {
+            display: block; border-radius: 10px;
+        }
+        .sig-baseline {
+            position: absolute; bottom: 40px; left: 24px; right: 24px;
+            border-bottom: 1px dashed #c4c6cf; pointer-events: none;
+        }
+        .profile-toast {
+            position: fixed;
+            top: 18px;
+            left: 50%;
+            transform: translate(-50%, -12px);
+            min-width: 280px;
+            max-width: 560px;
+            padding: 12px 16px;
+            border-radius: 12px;
+            font-size: 13px;
+            font-weight: 700;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 220ms ease, transform 220ms ease;
+            box-shadow: 0 12px 30px rgba(2, 16, 43, 0.18);
+            z-index: 120;
+        }
+        .profile-toast.show { opacity: 1; transform: translate(-50%, 0); }
+        .profile-toast-success { background: #0e7a3c; color: #fff; }
+        .profile-toast-error { background: #ba1a1a; color: #fff; }
+    </style>
+    <script defer src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
+    <link rel="stylesheet" href="../css/global.css?v=3.2">
+    <link rel="icon" type="image/png" href="../assets/logo.png">
+</head>
+<body class="bg-slate-50 text-slate-800 selection:bg-emerald-500/25 font-sans antialiased">
+<div id="profile-toast" class="profile-toast" aria-live="polite"></div>
+
+<div class="min-h-screen flex">
+    <!-- Sidebar -->
+    <aside class="fixed left-0 top-0 bottom-0 w-64 bg-slate-900 dark:bg-[#000a1e] text-white font-inter tracking-tight shadow-2xl flex flex-col py-6 z-50">
+        <!-- Brand Logo -->
+        <div class="px-6 mb-10 flex items-center gap-3">
+            <div class="w-10 h-10 bg-white/10 rounded flex items-center justify-center p-1.5 shadow-inner">
+                <img src="../assets/logo.png" alt="Taxpayer Logo" class="w-full h-full object-contain rounded" />
+            </div>
+            <div>
+                <h1 class="text-xl font-bold tracking-tighter text-white">Taxpayer</h1>
+                <p class="text-[10px] uppercase tracking-widest text-slate-400 font-semibold" id="sidebar-subtitle">Người Nộp Thuế</p>
+            </div>
+        </div>
+
+        <!-- Navigation Items -->
+        <nav class="flex-1 px-2 space-y-1 overflow-y-auto no-scrollbar" id="sidebar-nav">
+            <!-- Dashboard Overview -->
+            <a href="business_dashboard.html" class="nav-item text-slate-400 hover:text-white transition-colors hover:bg-white/5 flex items-center gap-3 px-4 py-3 scale-95 active:scale-90 transition-transform rounded-lg" data-page="business_dashboard.html" data-title="Tổng quan Hộ kinh doanh">
+                <span class="material-symbols-outlined">dashboard</span>
+                <span class="text-sm">Tổng quan</span>
+            </a>
+            
+            <div class="pt-3 pb-1.5 px-3 text-[9px] font-black text-slate-500 uppercase tracking-widest">Nhóm Nghiệp Vụ</div>
+            
+            <!-- Nhóm 1: Nhận diện & Đăng ký -->
+            <a href="business_registration.html" class="nav-item text-slate-400 hover:text-white transition-colors hover:bg-white/5 flex items-center gap-3 px-4 py-3 scale-95 active:scale-90 transition-transform rounded-lg" data-page="business_registration.html" data-title="Nhận diện & Đăng ký Thuế">
+                <span class="material-symbols-outlined">app_registration</span>
+                <span class="text-sm">Nhận diện & Đăng ký</span>
+            </a>
+            
+            <!-- Nhóm 2: Tính thuế tự động -->
+            <a href="business_calculator.html" class="nav-item text-slate-400 hover:text-white transition-colors hover:bg-white/5 flex items-center gap-3 px-4 py-3 scale-95 active:scale-90 transition-transform rounded-lg" data-page="business_calculator.html" data-title="Tính toán Thuế tự động">
+                <span class="material-symbols-outlined">calculate</span>
+                <span class="text-sm">Tính thuế tự động</span>
+            </a>
+            
+            <!-- Nhóm 3: Lịch & Deadline -->
+            <a href="business_calendar.html" class="nav-item text-slate-400 hover:text-white transition-colors hover:bg-white/5 flex items-center gap-3 px-4 py-3 scale-95 active:scale-90 transition-transform rounded-lg" data-page="business_calendar.html" data-title="Lịch Trình & Hạn Nộp Thuế">
+                <span class="material-symbols-outlined">calendar_month</span>
+                <span class="text-sm">Lịch & Deadline thuế</span>
+            </a>
+            
+            <!-- Nhóm 4: Hóa đơn điện tử -->
+            <a href="business_invoices.html" class="nav-item text-slate-400 hover:text-white transition-colors hover:bg-white/5 flex items-center gap-3 px-4 py-3 scale-95 active:scale-90 transition-transform rounded-lg" data-page="business_invoices.html" data-title="Quản lý Hóa đơn điện tử">
+                <span class="material-symbols-outlined">receipt_long</span>
+                <span class="text-sm">Hóa đơn điện tử</span>
+            </a>
+            
+            <!-- Nhóm 5: Kê khai & Nộp thuế -->
+            <a href="business_filing.html" class="nav-item text-slate-400 hover:text-white transition-colors hover:bg-white/5 flex items-center gap-3 px-4 py-3 scale-95 active:scale-90 transition-transform rounded-lg" data-page="business_filing.html" data-title="Kê khai & Nộp thuế trực tuyến">
+                <span class="material-symbols-outlined">edit_document</span>
+                <span class="text-sm">Kê khai & Nộp thuế</span>
+            </a>
+            
+            <!-- Nhóm 6: Nghĩa vụ & Nợ thuế -->
+            <a href="business_debts.html" class="nav-item text-slate-400 hover:text-white transition-colors hover:bg-white/5 flex items-center gap-3 px-4 py-3 scale-95 active:scale-90 transition-transform rounded-lg" data-page="business_debts.html" data-title="Tra cứu Nghĩa vụ & Nợ thuế">
+                <span class="material-symbols-outlined">account_balance_wallet</span>
+                <span class="text-sm">Nghĩa vụ & Nợ thuế</span>
+            </a>
+            
+            <!-- Nhóm 7: Tra cứu pháp luật & Hỏi đáp AI -->
+            <a href="business_legal.html" class="nav-item text-slate-400 hover:text-white transition-colors hover:bg-white/5 flex items-center gap-3 px-4 py-3 scale-95 active:scale-90 transition-transform rounded-lg" data-page="business_legal.html" data-title="Tra cứu luật & Hỏi đáp AI">
+                <span class="material-symbols-outlined">chat</span>
+                <span class="text-sm">Tra cứu & AI Hỏi đáp</span>
+            </a>
+            
+            <!-- Nhóm 8: Phát triển & Thay đổi mô hình -->
+            <a href="business_growth.html" class="nav-item text-slate-400 hover:text-white transition-colors hover:bg-white/5 flex items-center gap-3 px-4 py-3 scale-95 active:scale-90 transition-transform rounded-lg" data-page="business_growth.html" data-title="Thay đổi Quy mô & Mô hình">
+                <span class="material-symbols-outlined">published_with_changes</span>
+                <span class="text-sm">Thay đổi mô hình</span>
+            </a>
+            
+            <!-- Nhóm 9: Kế toán & Sổ sách đơn giản -->
+            <a href="business_accounting.html" class="nav-item text-slate-400 hover:text-white transition-colors hover:bg-white/5 flex items-center gap-3 px-4 py-3 scale-95 active:scale-90 transition-transform rounded-lg" data-page="business_accounting.html" data-title="Sổ sách Kế toán đơn giản">
+                <span class="material-symbols-outlined">menu_book</span>
+                <span class="text-sm">Kế toán & Sổ sách</span>
+            </a>
+            
+            <!-- Nhóm 10: Quản lý chi phí được trừ -->
+            <a href="business_expenses.html" class="nav-item text-slate-400 hover:text-white transition-colors hover:bg-white/5 flex items-center gap-3 px-4 py-3 scale-95 active:scale-90 transition-transform rounded-lg" data-page="business_expenses.html" data-title="Quản lý Chi phí được trừ">
+                <span class="material-symbols-outlined">payments</span>
+                <span class="text-sm">Chi phí được trừ</span>
+            </a>
+            
+            <!-- Nhóm 11: Bảo vệ quyền lợi & Khiếu nại -->
+            <a href="business_claims.html" class="nav-item text-slate-400 hover:text-white transition-colors hover:bg-white/5 flex items-center gap-3 px-4 py-3 scale-95 active:scale-90 transition-transform rounded-lg" data-page="business_claims.html" data-title="Khiếu nại & Bảo vệ quyền lợi">
+                <span class="material-symbols-outlined">gavel</span>
+                <span class="text-sm">Quyền lợi & Khiếu nại</span>
+            </a>
+
+            <!-- Tài khoản -->
+            <a href="business_profile.html" class="nav-item text-slate-400 hover:text-white transition-colors hover:bg-white/5 flex items-center gap-3 px-4 py-3 scale-95 active:scale-90 transition-transform rounded-lg" data-page="business_profile.html" data-title="Tài khoản Người nộp thuế">
+                <span class="material-symbols-outlined">account_circle</span>
+                <span class="text-sm">Tài khoản</span>
+            </a>
+        </nav>
+
+        <!-- Profile Badge -->
+        <div class="mt-auto px-4">
+            <div class="pt-4 border-t border-white/5 pb-4">
+                <div class="flex items-center gap-3 p-2 rounded-lg bg-white/5 mx-2">
+                    <div class="w-8 h-8 rounded bg-primary-fixed-dim/20 flex items-center justify-center overflow-hidden shrink-0" id="user-avatar-container">
+                        <img id="user-avatar-image" alt="Avatar" class="w-full h-full object-cover hidden" />
+                        <span id="user-avatar-fallback" class="text-primary-fixed-dim text-[10px] font-black tracking-tight">NNT</span>
+                    </div>
+                    <div id="user-profile-badge">
+                        <p class="text-xs font-bold text-slate-200 truncate max-w-[120px]" id="user-full-name">Người nộp thuế</p>
+                        <p class="text-[10px] text-slate-400 font-mono" id="user-current-role">MST: ---</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </aside>
+
+    <!-- Main Content Area -->
+    <div class="flex-1 flex flex-col min-w-0 overflow-hidden ml-64 max-w-[calc(100%-16rem)]">
+        <!-- Top Header -->
+        <header class="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-8 flex-shrink-0">
+            <div class="flex items-center gap-3 text-xs">
+                <a href="#" class="text-slate-400 hover:text-slate-600">Trang chủ</a>
+                <span class="text-slate-300">/</span>
+                <span id="breadcrumb-current" class="text-slate-800 font-semibold">Tài khoản Người nộp thuế</span>
+            </div>
+
+            <!-- Right Header -->
+            <div class="flex items-center gap-4">
+                <button class="relative w-8 h-8 rounded-full border border-slate-200 flex items-center justify-center text-slate-500 hover:text-slate-800 hover:bg-slate-50 transition-all">
+                    <span class="material-symbols-outlined text-lg">notifications</span>
+                </button>
+            </div>
+        </header>
+
+        <!-- Main Workspace -->
+        <main class="flex-1 overflow-y-auto p-8 bg-slate-50/50">
+            <div class="max-w-5xl mx-auto space-y-8">
+                <!-- Error State (hidden by default) -->
+                <div id="profile-error" class="hidden bg-red-50 border border-red-200 rounded-xl p-6 text-center">
+                    <span class="material-symbols-outlined text-red-600 text-4xl mb-2" style="font-variation-settings: 'FILL' 1;">error</span>
+                    <p class="text-red-950 font-bold">Không thể tải thông tin tài khoản</p>
+                    <p class="text-sm text-red-700 mt-1">Vui lòng kiểm tra kết nối mạng hoặc đăng nhập lại.</p>
+                    <button onclick="window.location.href='login.html'" class="mt-4 px-6 py-2 bg-red-600 text-white rounded-lg text-sm font-bold">Đăng nhập lại</button>
+                </div>
+
+                <!-- Page Header -->
+                <div class="flex justify-between items-end">
+                    <div>
+                        <h2 class="text-3xl font-extrabold tracking-tight text-[#002147] mb-2">Hồ sơ Người nộp thuế</h2>
+                        <p class="text-slate-500 max-w-xl">Quản lý thông tin tài khoản, ngành nghề hoạt động và các phương thức xác minh danh tính 2FA.</p>
+                    </div>
+                    <button id="btn-logout" class="px-5 py-2.5 bg-red-50 text-red-600 font-semibold rounded-lg text-sm transition-all hover:bg-red-600 hover:text-white flex items-center gap-2 active:scale-95 border border-red-200">
+                        <span class="material-symbols-outlined text-sm">logout</span>
+                        Đăng xuất
+                    </button>
+                </div>
+
+                <!-- Profile Hero Card -->
+                <div class="profile-card bg-gradient-to-br from-[#002147] to-[#00336b] rounded-2xl p-8 text-white relative overflow-hidden shadow-xl">
+                    <div class="absolute -right-16 -top-16 w-56 h-56 bg-white/5 rounded-full"></div>
+                    <div class="absolute -right-4 -bottom-12 w-40 h-40 bg-white/5 rounded-full"></div>
+                    <div class="relative z-10 flex items-center gap-6">
+                        <!-- Avatar -->
+                        <button
+                            id="profile-avatar-trigger"
+                            type="button"
+                            onclick="openAvatarPickerModal()"
+                            class="w-20 h-20 bg-white/15 rounded-2xl flex items-center justify-center border-2 border-white/20 shadow-lg overflow-hidden relative group cursor-pointer focus:outline-none focus:ring-2 focus:ring-white/60"
+                            title="Cập nhật ảnh đại diện"
+                            aria-label="Cập nhật ảnh đại diện"
+                        >
+                            <img id="profile-avatar-image" alt="Ảnh đại diện" class="w-full h-full object-cover hidden" />
+                            <span id="profile-avatar-initials" class="text-2xl font-black tracking-tighter">NNT</span>
+                            <div class="absolute inset-0 bg-black/35 opacity-0 group-hover:opacity-100 group-focus:opacity-100 transition-opacity flex items-center justify-center">
+                                <span class="material-symbols-outlined text-white text-xl">photo_camera</span>
+                            </div>
+                        </button>
+                        <div class="flex-1">
+                            <h3 id="profile-full-name" class="text-2xl font-bold tracking-tight mb-1">Đang tải...</h3>
+                            <div class="flex items-center gap-3">
+                                <span class="text-white/60 text-sm font-mono" id="profile-badge-id">---</span>
+                                <span id="profile-role-badge" class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-bold bg-white/15 text-white/80">
+                                    Người nộp thuế
+                                </span>
+                            </div>
+                        </div>
+                        <div class="flex items-center gap-2">
+                            <div class="px-3 py-1.5 bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 rounded-lg flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest">
+                                <span class="material-symbols-outlined text-[14px]" style="font-variation-settings: 'FILL' 1;">verified_user</span>
+                                Cổng Công Dân
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Content Grid -->
+                <div class="grid grid-cols-12 gap-6">
+                    <div class="col-span-12 lg:col-span-7 self-start space-y-6">
+                        <!-- Card: Thông tin tài khoản -->
+                        <div class="profile-card bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+                            <div class="p-6 border-b border-slate-100 flex items-center gap-3 bg-slate-50/50">
+                                <span class="material-symbols-outlined text-[#002147]" style="font-variation-settings: 'FILL' 1;">badge</span>
+                                <h3 class="font-bold text-[#002147] text-sm">Thông tin Tài khoản</h3>
+                            </div>
+                            <div class="divide-y divide-slate-100 text-xs">
+                                <div class="flex items-center px-6 py-3.5 hover:bg-slate-50/50 transition-colors">
+                                    <span class="font-bold uppercase tracking-wider text-slate-400 w-40 shrink-0">MST / CCCD</span>
+                                    <span id="info-badge" class="font-medium font-mono text-slate-700">---</span>
+                                </div>
+                                <div class="flex items-center px-6 py-3.5 hover:bg-slate-50/50 transition-colors">
+                                    <span class="font-bold uppercase tracking-wider text-slate-400 w-40 shrink-0">Họ và tên</span>
+                                    <span id="info-name" class="font-bold text-slate-800">---</span>
+                                </div>
+                                <div class="flex items-center px-6 py-3.5 hover:bg-slate-50/50 transition-colors">
+                                    <span class="font-bold uppercase tracking-wider text-slate-400 w-40 shrink-0">Email liên hệ</span>
+                                    <span id="info-email" class="font-medium text-slate-700">---</span>
+                                </div>
+                                <div class="flex items-center px-6 py-3.5 hover:bg-slate-50/50 transition-colors">
+                                    <span class="font-bold uppercase tracking-wider text-slate-400 w-40 shrink-0">Ngành nghề / Địa bàn</span>
+                                    <span id="info-department" class="font-medium text-slate-700">---</span>
+                                </div>
+                                <div class="flex items-center px-6 py-3.5 hover:bg-slate-50/50 transition-colors group">
+                                    <span class="font-bold uppercase tracking-wider text-slate-400 w-40 shrink-0">Số điện thoại</span>
+                                    <span id="info-phone" class="font-medium text-slate-700">---</span>
+                                    <input id="phone-edit-input" class="text-xs font-medium font-mono border border-slate-200 rounded-lg px-3 py-1 ml-2 hidden focus:outline-none focus:ring-1 focus:ring-[#002147] w-40" type="tel" maxlength="11" placeholder="0xxx xxx xxx" />
+                                    <button id="btn-edit-phone" onclick="togglePhoneEdit()" class="ml-auto text-slate-400 hover:text-[#002147] transition-colors opacity-0 group-hover:opacity-100" title="Chỉnh sửa SĐT">
+                                        <span class="material-symbols-outlined text-base">edit</span>
+                                    </button>
+                                    <button id="btn-save-phone" onclick="savePhone()" class="ml-2 px-3 py-1 bg-[#002147] text-white text-[10px] font-bold rounded hover:bg-[#003366] transition-all hidden">Lưu</button>
+                                    <button id="btn-cancel-phone" onclick="cancelPhoneEdit()" class="ml-1 px-3 py-1 bg-slate-100 text-slate-600 text-[10px] font-bold rounded hover:bg-slate-200 transition-all hidden">Hủy</button>
+                                </div>
+                                <div class="flex items-center px-6 py-3.5 hover:bg-slate-50/50 transition-colors">
+                                    <span class="font-bold uppercase tracking-wider text-slate-400 w-40 shrink-0">Đối tượng nộp thuế</span>
+                                    <span id="info-role" class="font-bold text-slate-700">---</span>
+                                </div>
+                                <div class="flex items-center px-6 py-3.5 hover:bg-slate-50/50 transition-colors">
+                                    <span class="font-bold uppercase tracking-wider text-slate-400 w-40 shrink-0">Ngày đăng ký</span>
+                                    <span id="info-created" class="font-medium text-slate-500">---</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Card: Đổi mật khẩu -->
+                        <div id="change-password-card" class="profile-card bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+                            <div class="p-6 border-b border-slate-100 flex items-center gap-3 bg-slate-50/50">
+                                <span class="material-symbols-outlined text-[#002147]" style="font-variation-settings: 'FILL' 1;">password</span>
+                                <h3 class="font-bold text-[#002147] text-sm">Đổi mật khẩu</h3>
+                            </div>
+                            <form id="change-password-form" class="p-6 space-y-3">
+                                <div>
+                                    <label class="block text-[9px] font-extrabold uppercase tracking-widest text-slate-400 mb-1">Mật khẩu hiện tại</label>
+                                    <input id="current-password" type="password" class="w-full border border-slate-200 rounded-lg py-2 px-3 text-xs focus:outline-none focus:ring-1 focus:ring-[#002147]" placeholder="Nhập mật khẩu hiện tại" />
+                                </div>
+                                <div>
+                                    <label class="block text-[9px] font-extrabold uppercase tracking-widest text-slate-400 mb-1">Mật khẩu mới</label>
+                                    <input id="new-password" type="password" class="w-full border border-slate-200 rounded-lg py-2 px-3 text-xs focus:outline-none focus:ring-1 focus:ring-[#002147]" placeholder="Tối thiểu 8 ký tự" />
+                                </div>
+                                <div>
+                                    <label class="block text-[9px] font-extrabold uppercase tracking-widest text-slate-400 mb-1">Xác nhận mật khẩu mới</label>
+                                    <input id="confirm-password" type="password" class="w-full border border-slate-200 rounded-lg py-2 px-3 text-xs focus:outline-none focus:ring-1 focus:ring-[#002147]" placeholder="Nhập lại mật khẩu mới" />
+                                </div>
+                                <button id="change-password-btn" type="button" onclick="submitChangePassword()" class="w-full mt-2 py-2.5 bg-[#002147] text-white font-bold rounded-lg text-xs hover:bg-[#003366] transition-colors flex items-center justify-center gap-2 active:scale-[0.98]">
+                                    <span class="material-symbols-outlined text-sm">lock_reset</span>
+                                    Cập nhật mật khẩu
+                                </button>
+                            </form>
+                        </div>
+                    </div>
+
+                    <!-- Xác minh danh tính -->
+                    <div class="col-span-12 lg:col-span-5 space-y-6">
+                        <!-- Card: Xác minh Khuôn mặt -->
+                        <div id="face-card" class="profile-card bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+                            <div class="p-6 border-b border-slate-100 flex items-center gap-3 bg-slate-50/50">
+                                <span class="material-symbols-outlined text-[#002147]" style="font-variation-settings: 'FILL' 1;">face</span>
+                                <h3 class="font-bold text-[#002147] text-sm">Xác minh Khuôn mặt</h3>
+                            </div>
+                            <!-- Unverified State -->
+                            <div id="face-unverified" class="p-6 space-y-4">
+                                <div class="flex items-center justify-between text-xs">
+                                    <div>
+                                        <p class="font-bold text-slate-800">Trạng thái</p>
+                                        <p class="text-slate-500 mt-0.5 text-[11px]">Đăng nhập nhanh bằng nhận diện khuôn mặt</p>
+                                    </div>
+                                    <span class="px-2.5 py-0.5 bg-slate-100 text-slate-500 rounded-full text-[9px] font-bold uppercase tracking-wider whitespace-nowrap">Chưa thiết lập</span>
+                                </div>
+                                <div class="bg-slate-50 rounded-xl p-6 flex flex-col items-center justify-center border-2 border-dashed border-slate-200 group cursor-pointer hover:border-[#002147]/40 transition-colors" onclick="openFaceSetup()">
+                                    <div class="w-12 h-12 bg-slate-100 rounded-xl flex items-center justify-center mb-3 group-hover:scale-105 transition-transform text-[#002147]">
+                                        <span class="material-symbols-outlined text-2xl" style="font-variation-settings: 'FILL' 1;">face_retouching_natural</span>
+                                    </div>
+                                    <p class="text-xs font-bold text-[#002147] mb-0.5">Đăng ký khuôn mặt</p>
+                                    <p class="text-[10px] text-slate-400 text-center max-w-[200px]">Sử dụng camera quét để đăng nhập nhanh không mật khẩu.</p>
+                                </div>
+                                <button id="btn-setup-face" onclick="openFaceSetup()" class="w-full py-2.5 bg-[#002147] text-white font-bold rounded-lg text-xs hover:bg-[#003366] transition-colors flex items-center justify-center gap-2 active:scale-[0.98]">
+                                    <span class="material-symbols-outlined text-sm">photo_camera</span>
+                                    Thiết lập xác minh khuôn mặt
+                                </button>
+                            </div>
+                            <!-- Verified State (hidden by default) -->
+                            <div id="face-verified" class="p-6 space-y-4 hidden">
+                                <div class="flex items-center justify-between text-xs">
+                                    <div>
+                                        <p class="font-bold text-slate-800">Trạng thái</p>
+                                        <p class="text-slate-500 mt-0.5 text-[11px]">Đăng nhập nhanh bằng nhận diện khuôn mặt</p>
+                                    </div>
+                                    <span class="px-2.5 py-0.5 bg-emerald-50 text-emerald-700 rounded-full text-[9px] font-bold uppercase tracking-wider whitespace-nowrap flex items-center gap-1 border border-emerald-100">
+                                        <span class="material-symbols-outlined text-[10px]" style="font-variation-settings: 'FILL' 1;">check_circle</span>
+                                        Đã xác minh
+                                    </span>
+                                </div>
+                                <div class="bg-emerald-50/40 rounded-xl p-4 flex items-center gap-3 border border-emerald-100/50">
+                                    <div class="w-10 h-10 bg-emerald-100 rounded-lg flex items-center justify-center shrink-0 text-emerald-600">
+                                        <span class="material-symbols-outlined text-xl" style="font-variation-settings: 'FILL' 1;">verified_user</span>
+                                    </div>
+                                    <div>
+                                        <p class="text-xs font-bold text-emerald-800">Khuôn mặt đã được đăng ký</p>
+                                        <p class="text-[10px] text-emerald-600">Sẵn sàng để đăng nhập sinh trắc học.</p>
+                                    </div>
+                                </div>
+                                <button onclick="resetFace()" class="w-full py-2 bg-slate-100 text-slate-600 font-bold rounded-lg text-xs hover:bg-slate-200 transition-colors flex items-center justify-center gap-2">
+                                    <span class="material-symbols-outlined text-sm">restart_alt</span>
+                                    Thiết lập lại
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- Card: Xác minh CCCD -->
+                        <div id="cccd-card" class="profile-card bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+                            <div class="p-6 border-b border-slate-100 flex items-center gap-3 bg-slate-50/50">
+                                <span class="material-symbols-outlined text-[#002147]" style="font-variation-settings: 'FILL' 1;">id_card</span>
+                                <h3 class="font-bold text-[#002147] text-sm">Xác minh CCCD</h3>
+                            </div>
+                            <!-- Unverified State -->
+                            <div id="cccd-unverified" class="p-6 space-y-4">
+                                <div class="flex items-center justify-between text-xs">
+                                    <div>
+                                        <p class="font-bold text-slate-800">Trạng thái</p>
+                                        <p class="text-slate-500 mt-0.5 text-[11px]">Xác nhận danh tính bằng CCCD gắn chip</p>
+                                    </div>
+                                    <span class="px-2.5 py-0.5 bg-slate-100 text-slate-500 rounded-full text-[9px] font-bold uppercase tracking-wider whitespace-nowrap">Chưa xác minh</span>
+                                </div>
+                                <div class="bg-slate-50 rounded-xl p-6 flex flex-col items-center justify-center border-2 border-dashed border-slate-200 group cursor-pointer hover:border-[#002147]/40 transition-colors" onclick="openCccdSetup()">
+                                    <div class="w-12 h-12 bg-slate-100 rounded-xl flex items-center justify-center mb-3 group-hover:scale-105 transition-transform text-[#002147]">
+                                        <span class="material-symbols-outlined text-2xl" style="font-variation-settings: 'FILL' 1;">credit_card</span>
+                                    </div>
+                                    <p class="text-xs font-bold text-[#002147] mb-0.5">Xác minh Căn cước công dân</p>
+                                    <p class="text-[10px] text-slate-400 text-center max-w-[200px]">Liên kết CCCD gắn chip để nâng cấp bảo mật tài khoản.</p>
+                                </div>
+                                <button id="btn-setup-cccd" onclick="openCccdSetup()" class="w-full py-2.5 bg-[#002147] text-white font-bold rounded-lg text-xs hover:bg-[#003366] transition-colors flex items-center justify-center gap-2 active:scale-[0.98]">
+                                    <span class="material-symbols-outlined text-sm">id_card</span>
+                                    Xác minh CCCD
+                                </button>
+                            </div>
+                            <!-- Verified State (hidden by default) -->
+                            <div id="cccd-verified" class="p-6 space-y-4 hidden">
+                                <div class="flex items-center justify-between text-xs">
+                                    <div>
+                                        <p class="font-bold text-slate-800">Trạng thái</p>
+                                        <p class="text-slate-500 mt-0.5 text-[11px]">Xác nhận danh tính bằng CCCD gắn chip</p>
+                                    </div>
+                                    <span class="px-2.5 py-0.5 bg-emerald-50 text-emerald-700 rounded-full text-[9px] font-bold uppercase tracking-wider whitespace-nowrap flex items-center gap-1 border border-emerald-100">
+                                        <span class="material-symbols-outlined text-[10px]" style="font-variation-settings: 'FILL' 1;">check_circle</span>
+                                        Đã xác minh
+                                    </span>
+                                </div>
+                                <div class="bg-emerald-50/40 rounded-xl p-4 flex items-center gap-3 border border-emerald-100/50">
+                                    <div class="w-10 h-10 bg-emerald-100 rounded-lg flex items-center justify-center shrink-0 text-emerald-600">
+                                        <span class="material-symbols-outlined text-xl" style="font-variation-settings: 'FILL' 1;">verified_user</span>
+                                    </div>
+                                    <div>
+                                        <p class="text-xs font-bold text-emerald-800">CCCD đã được xác minh</p>
+                                        <p class="text-[10px] text-emerald-600" id="cccd-verified-number">Tài khoản được liên kết dữ liệu dân cư quốc gia.</p>
+                                    </div>
+                                </div>
+                                <button onclick="resetCccd()" class="w-full py-2 bg-slate-100 text-slate-600 font-bold rounded-lg text-xs hover:bg-slate-200 transition-colors flex items-center justify-center gap-2">
+                                    <span class="material-symbols-outlined text-sm">restart_alt</span>
+                                    Thiết lập lại
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- Card: Xác minh Chữ ký số -->
+                        <div id="signature-card" class="profile-card bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+                            <div class="p-6 border-b border-slate-100 flex items-center gap-3 bg-slate-50/50">
+                                <span class="material-symbols-outlined text-[#002147]" style="font-variation-settings: 'FILL' 1;">draw</span>
+                                <h3 class="font-bold text-[#002147] text-sm">Chữ ký số</h3>
+                            </div>
+                            <!-- Unverified State -->
+                            <div id="sig-unverified" class="p-6 space-y-4">
+                                <div class="flex items-center justify-between text-xs">
+                                    <div>
+                                        <p class="font-bold text-slate-800">Trạng thái</p>
+                                        <p class="text-slate-500 mt-0.5 text-[11px]">Xác thực 2 bước bằng chữ ký cá nhân</p>
+                                    </div>
+                                    <span class="px-2.5 py-0.5 bg-slate-100 text-slate-500 rounded-full text-[9px] font-bold uppercase tracking-wider whitespace-nowrap">Chưa thiết lập</span>
+                                </div>
+                                <div class="bg-slate-50 rounded-xl p-6 flex flex-col items-center justify-center border-2 border-dashed border-slate-200 group cursor-pointer hover:border-[#002147]/40 transition-colors" onclick="openSignatureSetup()">
+                                    <div class="w-12 h-12 bg-slate-100 rounded-xl flex items-center justify-center mb-3 group-hover:scale-105 transition-transform text-[#002147]">
+                                        <span class="material-symbols-outlined text-2xl" style="font-variation-settings: 'FILL' 1;">stylus_note</span>
+                                    </div>
+                                    <p class="text-xs font-bold text-[#002147] mb-0.5">Đăng ký chữ ký số</p>
+                                    <p class="text-[10px] text-slate-400 text-center max-w-[200px]">Tự tay ký xác nhận khi thực hiện các giao dịch hoặc 2FA sinh trắc.</p>
+                                </div>
+                                <button onclick="openSignatureSetup()" class="w-full py-2.5 bg-[#002147] text-white font-bold rounded-lg text-xs hover:bg-[#003366] transition-colors flex items-center justify-center gap-2 active:scale-[0.98]">
+                                    <span class="material-symbols-outlined text-sm">draw</span>
+                                    Thiết lập chữ ký số
+                                </button>
+                            </div>
+                            <!-- Verified State -->
+                            <div id="sig-verified" class="p-6 space-y-4 hidden">
+                                <div class="flex items-center justify-between text-xs">
+                                    <div>
+                                        <p class="font-bold text-slate-800">Trạng thái</p>
+                                        <p class="text-slate-500 mt-0.5 text-[11px]">Xác thực 2 bước bằng chữ ký cá nhân</p>
+                                    </div>
+                                    <span class="px-2.5 py-0.5 bg-emerald-50 text-emerald-700 rounded-full text-[9px] font-bold uppercase tracking-wider whitespace-nowrap flex items-center gap-1 border border-emerald-100">
+                                        <span class="material-symbols-outlined text-[10px]" style="font-variation-settings: 'FILL' 1;">check_circle</span>
+                                        Đã thiết lập
+                                    </span>
+                                </div>
+                                <div class="bg-emerald-50/40 rounded-xl p-4 flex items-center gap-3 border border-emerald-100/50">
+                                    <div class="w-10 h-10 bg-emerald-100 rounded-lg flex items-center justify-center shrink-0 text-emerald-600">
+                                        <span class="material-symbols-outlined text-xl" style="font-variation-settings: 'FILL' 1;">verified_user</span>
+                                    </div>
+                                    <div>
+                                        <p class="text-xs font-bold text-emerald-800">Chữ ký số đã được đăng ký</p>
+                                        <p class="text-[10px] text-emerald-600">Yêu cầu chữ ký khi đăng nhập sinh trắc học (2FA).</p>
+                                    </div>
+                                </div>
+                                <button onclick="resetSignature()" class="w-full py-2 bg-slate-100 text-slate-600 font-bold rounded-lg text-xs hover:bg-slate-200 transition-colors flex items-center justify-center gap-2">
+                                    <span class="material-symbols-outlined text-sm">restart_alt</span>
+                                    Thiết lập lại
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </main>
+
+        <!-- Footer Component -->
+        <footer class="w-full py-4 bg-slate-100 flex justify-between items-center px-8 border-t border-slate-200 font-inter text-[10px] uppercase tracking-widest text-slate-500 min-h-[50px] relative z-10" style="margin-top: auto;">
+            <div class="flex items-center gap-6">
+                <span class="font-bold text-red-600">Vietnam Taxpayer</span>
+                <p>© 2024 Cục Thuế Việt Nam - Cổng Người nộp thuế</p>
+            </div>
+            <div class="flex items-center gap-6">
+                <nav class="flex gap-4">
+                    <a class="text-slate-400 hover:underline" href="#">Điều khoản</a>
+                    <a class="text-slate-400 hover:underline" href="#">Bảo mật</a>
+                    <a class="text-slate-400 hover:underline" href="#">Liên hệ</a>
+                </nav>
+                <div class="flex items-center gap-2 bg-[#002147] px-3 py-1.5 rounded text-white font-bold cursor-help group relative">
+                    <span class="material-symbols-outlined text-[12px]" style="font-variation-settings: 'FILL' 1;">lock</span>
+                    <span>KẾT NỐI BẢO MẬT 0.9.2</span>
+                </div>
+            </div>
+        </footer>
+    </div>
+</div>
+
+<!-- Page Specific Script -->
+<script>
+    document.addEventListener("DOMContentLoaded", function() {
+        const currentPage = window.location.pathname.split("/").pop() || 'business_profile.html';
+        const navItems = document.querySelectorAll('#sidebar-nav .nav-item');
+        navItems.forEach(item => {
+            if (item.getAttribute('data-page') === currentPage) {
+                item.classList.remove('text-slate-400', 'hover:bg-white/5');
+                item.classList.add('bg-emerald-500/10', 'text-emerald-400', 'font-semibold');
+            }
+        });
+    });
+</script>
+
+<!-- Face Setup Overlay -->
+<div id="profile-bio-overlay" class="bio-overlay">
+    <button onclick="closeProfileBioOverlay()" class="absolute top-6 right-6 text-white/60 hover:text-white transition-colors z-20">
+        <span class="material-symbols-outlined text-3xl">close</span>
+    </button>
+    <p class="text-white/40 text-[10px] font-black uppercase tracking-[0.2em] mb-6">Thiết lập Xác minh Khuôn mặt</p>
+    <div class="scan-frame">
+        <video id="profile-bio-video" autoplay playsinline muted></video>
+        <div class="scan-line"></div>
+        <div class="scan-corner tl"></div>
+        <div class="scan-corner tr"></div>
+        <div class="scan-corner bl"></div>
+        <div class="scan-corner br"></div>
+    </div>
+    <p id="profile-bio-status" class="bio-status-text">Đang khởi tạo camera...</p>
+    <div class="flex gap-3 mt-6">
+        <button id="profile-bio-capture-btn" onclick="captureFaceSetup()" class="px-8 py-3 bg-[#002147] text-white font-bold rounded-lg text-sm hover:bg-[#003366] transition-all flex items-center gap-2 disabled:opacity-50" disabled>
+            <span class="material-symbols-outlined text-base">photo_camera</span> Xác nhận
+        </button>
+        <button onclick="closeProfileBioOverlay()" class="px-6 py-3 bg-white/10 text-white font-bold rounded-lg text-sm hover:bg-white/20 transition-all">Hủy</button>
+    </div>
+</div>
+
+<!-- CCCD Setup Modal -->
+<div id="profile-cccd-modal" class="cccd-modal">
+    <div class="bg-white rounded-2xl p-8 max-w-md w-full shadow-2xl mx-4 relative border border-slate-200">
+        <button onclick="closeProfileCccdModal()" class="absolute top-4 right-4 text-slate-400 hover:text-slate-700 transition-colors">
+            <span class="material-symbols-outlined">close</span>
+        </button>
+        <div class="text-center mb-6">
+            <div class="w-16 h-16 bg-[#002147]/5 rounded-2xl flex items-center justify-center mx-auto mb-4 text-[#002147]">
+                <span class="material-symbols-outlined text-3xl" style="font-variation-settings: 'FILL' 1;">id_card</span>
+            </div>
+            <h3 class="text-lg font-bold text-[#002147]">Xác minh CCCD</h3>
+            <p class="text-xs text-slate-500 mt-1">Nhập số Căn cước công dân 12 chữ số</p>
+        </div>
+        <div class="space-y-1 mb-6">
+            <label class="block text-[9px] font-extrabold text-slate-400 uppercase tracking-widest px-1">Số CCCD</label>
+            <input id="profile-cccd-input" class="w-full bg-white border border-slate-200 rounded-lg py-2.5 px-3 text-xs font-mono tracking-wider focus:outline-none focus:ring-1 focus:ring-[#002147] transition-all" placeholder="0XX XXX XXX XXX" type="text" maxlength="12" />
+        </div>
+        <button id="profile-cccd-btn" onclick="submitCccdSetup()" class="w-full py-2.5 bg-[#002147] text-white font-bold rounded-lg text-xs hover:bg-[#003366] transition-all flex items-center justify-center gap-2">
+            <span class="material-symbols-outlined text-base">verified</span> Xác minh ngay
+        </button>
+        <p id="profile-cccd-error" class="text-xs text-red-600 font-bold mt-3 text-center hidden"></p>
+    </div>
+</div>
+
+<!-- Signature Setup Modal -->
+<div id="profile-sig-modal" class="sig-modal">
+    <div class="bg-white rounded-2xl p-8 max-w-lg w-full shadow-2xl mx-4 relative border border-slate-200">
+        <button onclick="closeSignatureModal()" class="absolute top-4 right-4 text-slate-400 hover:text-slate-700 transition-colors">
+            <span class="material-symbols-outlined">close</span>
+        </button>
+        <div class="text-center mb-6">
+            <div class="w-16 h-16 bg-[#002147]/5 rounded-2xl flex items-center justify-center mx-auto mb-4 text-[#002147]">
+                <span class="material-symbols-outlined text-3xl" style="font-variation-settings: 'FILL' 1;">draw</span>
+            </div>
+            <h3 class="text-lg font-bold text-[#002147]">Thiết lập Chữ ký số</h3>
+            <p class="text-xs text-slate-500 mt-1">Sử dụng chuột hoặc ngón tay để ký tên bên dưới</p>
+        </div>
+        <div class="sig-canvas-wrap mx-auto" style="width:420px;height:180px;">
+            <canvas id="sig-canvas" width="420" height="180"></canvas>
+            <div class="sig-baseline"></div>
+        </div>
+        <div class="flex gap-3 mt-4 justify-center">
+            <button onclick="clearSigCanvas()" class="px-4 py-2 bg-slate-100 text-slate-600 font-bold rounded-lg text-xs hover:bg-slate-200 transition-all flex items-center gap-1">
+                <span class="material-symbols-outlined text-sm">ink_eraser</span> Xóa
+            </button>
+        </div>
+        <button id="sig-submit-btn" onclick="submitSignatureSetup()" class="w-full py-2.5 bg-[#002147] text-white font-bold rounded-lg text-xs hover:bg-[#003366] transition-all flex items-center justify-center gap-2 mt-4">
+            <span class="material-symbols-outlined text-base">verified</span> Lưu chữ ký
+        </button>
+        <p id="sig-error" class="text-xs text-red-600 font-bold mt-3 text-center hidden"></p>
+    </div>
+</div>
+
+<!-- Avatar Picker Modal -->
+<div id="avatar-chooser-modal" class="avatar-modal">
+    <div class="avatar-modal-panel bg-white rounded-2xl p-8 max-w-md w-full shadow-2xl mx-4 relative border border-slate-200">
+        <button onclick="closeAvatarPickerModal()" class="absolute top-4 right-4 text-slate-400 hover:text-slate-700 transition-colors">
+            <span class="material-symbols-outlined">close</span>
+        </button>
+        <div class="text-center mb-6">
+            <div class="w-16 h-16 bg-[#002147]/5 rounded-2xl flex items-center justify-center mx-auto mb-4 text-[#002147]">
+                <span class="material-symbols-outlined text-3xl" style="font-variation-settings: 'FILL' 1;">account_circle</span>
+            </div>
+            <h3 class="text-lg font-bold text-[#002147]">Cập nhật ảnh đại diện</h3>
+            <p class="text-xs text-slate-500 mt-1">Chọn camera hoặc tải ảnh có sẵn từ máy tính.</p>
+        </div>
+        <div class="space-y-3">
+            <button type="button" onclick="openAvatarCameraModal()" class="avatar-choice-btn w-full border border-slate-200 rounded-xl px-4 py-4 text-left flex items-center gap-3">
+                <span class="material-symbols-outlined text-[#002147] text-xl">photo_camera</span>
+                <span>
+                    <span class="block text-sm font-bold text-[#002147]">Mở camera và chụp ảnh</span>
+                    <span class="block text-[11px] text-slate-400">Cho phép xem trước trước khi lưu.</span>
+                </span>
+            </button>
+            <button type="button" onclick="triggerAvatarFileInput()" class="avatar-choice-btn w-full border border-slate-200 rounded-xl px-4 py-4 text-left flex items-center gap-3">
+                <span class="material-symbols-outlined text-[#002147] text-xl">upload</span>
+                <span>
+                    <span class="block text-sm font-bold text-[#002147]">Chọn ảnh từ máy tính</span>
+                    <span class="block text-[11px] text-slate-400">Hỗ trợ PNG/JPEG, tối đa 5MB.</span>
+                </span>
+            </button>
+        </div>
+        <input id="avatar-file-input" type="file" accept="image/png,image/jpeg" class="hidden" onchange="handleAvatarFileSelect(event)" />
+    </div>
+</div>
+
+<!-- Avatar Camera Modal -->
+<div id="avatar-camera-modal" class="avatar-modal">
+    <div class="avatar-modal-panel bg-white rounded-2xl p-8 max-w-xl w-full shadow-2xl mx-4 relative border border-slate-200">
+        <button onclick="closeAvatarCameraModal()" class="absolute top-4 right-4 text-slate-400 hover:text-slate-700 transition-colors">
+            <span class="material-symbols-outlined">close</span>
+        </button>
+        <div class="text-center mb-6">
+            <h3 class="text-lg font-bold text-[#002147]">Chụp ảnh đại diện</h3>
+            <p id="avatar-camera-status" class="text-xs text-slate-500 mt-1">Đưa khuôn mặt vào khung hình, sau đó nhấn Chụp ảnh.</p>
+        </div>
+        <div class="avatar-preview-frame mx-auto mb-5">
+            <video id="avatar-camera-video" autoplay playsinline muted class="w-full h-full object-cover"></video>
+            <img id="avatar-camera-preview" alt="Xem trước ảnh camera" class="w-full h-full object-cover hidden" />
+        </div>
+        <div class="flex flex-wrap gap-2 justify-center">
+            <button id="avatar-capture-btn" type="button" onclick="captureAvatarFromCamera()" class="px-5 py-2 bg-[#002147] text-white font-bold rounded-lg text-sm hover:bg-[#003366] transition-all">Chụp ảnh</button>
+            <button id="avatar-retake-btn" type="button" onclick="retakeAvatarCamera()" class="px-5 py-2 bg-slate-100 text-slate-700 font-bold rounded-lg text-sm hover:bg-slate-200 transition-all hidden">Chụp lại</button>
+            <button id="avatar-camera-confirm-btn" type="button" onclick="confirmAvatarCameraUpload()" class="px-5 py-2 bg-emerald-600 text-white font-bold rounded-lg text-sm hover:bg-emerald-700 transition-all hidden">Xác nhận lưu</button>
+        </div>
+    </div>
+</div>
+
+<!-- Avatar File Preview Modal -->
+<div id="avatar-preview-modal" class="avatar-modal">
+    <div class="avatar-modal-panel bg-white rounded-2xl p-8 max-w-lg w-full shadow-2xl mx-4 relative border border-slate-200">
+        <button onclick="closeAvatarPreviewModal()" class="absolute top-4 right-4 text-slate-400 hover:text-slate-700 transition-colors">
+            <span class="material-symbols-outlined">close</span>
+        </button>
+        <div class="text-center mb-6">
+            <h3 class="text-lg font-bold text-[#002147]">Xem trước ảnh đại diện</h3>
+            <p class="text-xs text-slate-500 mt-1">Bạn có thể chọn lại ảnh khác trước khi lưu.</p>
+        </div>
+        <div class="avatar-preview-frame mx-auto mb-5">
+            <img id="avatar-preview-image" alt="Xem trước ảnh tải lên" class="w-full h-full object-cover" />
+        </div>
+        <div class="flex flex-wrap gap-2 justify-center">
+            <button type="button" onclick="triggerAvatarFileInput()" class="px-5 py-2 bg-slate-100 text-slate-700 font-bold rounded-lg text-sm hover:bg-slate-200 transition-all">Chọn ảnh khác</button>
+            <button id="avatar-preview-confirm-btn" type="button" onclick="confirmAvatarFileUpload()" class="px-5 py-2 bg-[#002147] text-white font-bold rounded-lg text-sm hover:bg-[#003366] transition-all">Lưu ảnh đại diện</button>
+        </div>
+    </div>
+</div>
+
+<script src="../js/api.js"></script>
+<script src="../js/business_profile.js"></script>
+<script src="../js/business_taxpayer_common.js"></script>
+<script src="../js/business_intelligence.js"></script>
+<script type="module" src="../js/agent_widget.js"></script>
+</body>
+</html>

@@ -1,4 +1,8 @@
 /* Common Styles */
+/* Outfit – primary system font for all Taxpayer & Officer interfaces */
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
 :root {
     --motion-ease-emphasis: cubic-bezier(0.16, 1, 0.3, 1);
     --motion-duration-fast: 0.3s;
@@ -14,10 +18,29 @@
     --motion-duration-score-ms: 850;
     --motion-duration-result-ms: 600;
     --motion-duration-toast-out-ms: 400;
+
+    /* Typography tokens */
+    --font-primary: 'Outfit', system-ui, sans-serif;
+    --font-mono: 'JetBrains Mono', 'Courier New', monospace;
 }
 
-body {
-    font-family: 'Inter', sans-serif;
+/* ─── Global Typography ─────────────────────────────────────── */
+html, body {
+    font-family: var(--font-primary);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+}
+
+/* Consistent label/paragraph sizing */
+label, p, span, li, td, th {
+    letter-spacing: -0.01em;
+}
+
+/* Mono for tax codes, MST, dates */
+.font-mono, code, kbd, [class*="font-mono"] {
+    font-family: 'Courier New', monospace;
+    letter-spacing: 0;
 }
 
 .material-symbols-outlined {

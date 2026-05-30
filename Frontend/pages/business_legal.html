@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html lang="vi" class="h-full bg-slate-50">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Vietnam TaxInspector - Tra cứu &amp; AI Hỏi đáp</title>
+    <!-- Tailwind CSS Dynamic CDN -->
+    <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: {
+                    sans: ['Outfit', 'system-ui', 'sans-serif'],
+                },
+                colors: {
+                        'primary': '#002147',
+                        'primary-container': '#003366',
+                        'surface-container-lowest': '#ffffff',
+                        'surface-container-low': '#f8f9fa',
+                        'surface-container': '#f1f3f5',
+                        'outline-variant': '#dee2e6'
+                    }
+                }
+            }
+        }
+    </script>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" rel="stylesheet">
+    <link rel="stylesheet" href="../css/global.css">
+    <style>
+        /* Font is globally set in global.css to Outfit */
+    </style>
+    <script src="../js/api.js"></script>
+</head>
+<body class="bg-slate-50 text-slate-800 selection:bg-emerald-500/25 font-sans antialiased">
+    <!-- Sidebar -->
+    <aside class="fixed left-0 top-0 bottom-0 w-64 bg-slate-900 dark:bg-[#000a1e] text-white font-inter tracking-tight shadow-2xl flex flex-col py-6 z-50">
+        <!-- Brand Logo -->
+        <div class="px-6 mb-10 flex items-center gap-3">
+            <div class="w-10 h-10 bg-white/10 rounded flex items-center justify-center p-1.5 shadow-inner">
+                <img src="../assets/logo.png" alt="TaxInspector Logo" class="w-full h-full object-contain rounded" />
+            </div>
+            <div>
+                <h1 class="text-xl font-bold tracking-tighter text-white">TaxInspector</h1>
+                <p class="text-[10px] uppercase tracking-widest text-slate-400 font-semibold" id="sidebar-subtitle">Người Nộp Thuế</p>
+            </div>
+        </div>
+
+        <!-- Navigation Items -->
+        <nav class="flex-1 px-2 space-y-1 overflow-y-auto no-scrollbar" id="sidebar-nav">
+            <!-- Dashboard Overview -->
+            <a href="business_dashboard.html" class="nav-item text-slate-400 hover:text-white transition-colors hover:bg-white/5 flex items-center gap-3 px-4 py-3 scale-95 active:scale-90 transition-transform rounded-lg" data-page="business_dashboard.html" data-title="Tổng quan Hộ kinh doanh">
+                <span class="material-symbols-outlined">dashboard</span>
+                <span class="text-sm">Tổng quan</span>
+            </a>
+            
+            <div class="pt-3 pb-1.5 px-3 text-[9px] font-black text-slate-500 uppercase tracking-widest">Nhóm Nghiệp Vụ</div>
+            
+            <!-- Nhóm 1: Nhận diện & Đăng ký -->
+            <a href="business_registration.html" class="nav-item text-slate-400 hover:text-white transition-colors hover:bg-white/5 flex items-center gap-3 px-4 py-3 scale-95 active:scale-90 transition-transform rounded-lg" data-page="business_registration.html" data-title="Nhận diện & Đăng ký Thuế">
+                <span class="material-symbols-outlined">app_registration</span>
+                <span class="text-sm">Nhận diện & Đăng ký</span>
+            </a>
+            
+            <!-- Nhóm 2: Tính thuế tự động -->
+            <a href="business_calculator.html" class="nav-item text-slate-400 hover:text-white transition-colors hover:bg-white/5 flex items-center gap-3 px-4 py-3 scale-95 active:scale-90 transition-transform rounded-lg" data-page="business_calculator.html" data-title="Tính toán Thuế tự động">
+                <span class="material-symbols-outlined">calculate</span>
+                <span class="text-sm">Tính thuế tự động</span>
+            </a>
+            
+            <!-- Nhóm 3: Lịch & Deadline -->
+            <a href="business_calendar.html" class="nav-item text-slate-400 hover:text-white transition-colors hover:bg-white/5 flex items-center gap-3 px-4 py-3 scale-95 active:scale-90 transition-transform rounded-lg" data-page="business_calendar.html" data-title="Lịch Trình & Hạn Nộp Thuế">
+                <span class="material-symbols-outlined">calendar_month</span>
+                <span class="text-sm">Lịch & Deadline thuế</span>
+            </a>
+            
+            <!-- Nhóm 4: Hóa đơn điện tử -->
+            <a href="business_invoices.html" class="nav-item text-slate-400 hover:text-white transition-colors hover:bg-white/5 flex items-center gap-3 px-4 py-3 scale-95 active:scale-90 transition-transform rounded-lg" data-page="business_invoices.html" data-title="Quản lý Hóa đơn điện tử">
+                <span class="material-symbols-outlined">receipt_long</span>
+                <span class="text-sm">Hóa đơn điện tử</span>
+            </a>
+            
+            <!-- Nhóm 5: Kê khai & Nộp thuế -->
+            <a href="business_filing.html" class="nav-item text-slate-400 hover:text-white transition-colors hover:bg-white/5 flex items-center gap-3 px-4 py-3 scale-95 active:scale-90 transition-transform rounded-lg" data-page="business_filing.html" data-title="Kê khai & Nộp thuế trực tuyến">
+                <span class="material-symbols-outlined">edit_document</span>
+                <span class="text-sm">Kê khai & Nộp thuế</span>
+            </a>
+            
+            <!-- Nhóm 6: Nghĩa vụ & Nợ thuế -->
+            <a href="business_debts.html" class="nav-item text-slate-400 hover:text-white transition-colors hover:bg-white/5 flex items-center gap-3 px-4 py-3 scale-95 active:scale-90 transition-transform rounded-lg" data-page="business_debts.html" data-title="Tra cứu Nghĩa vụ & Nợ thuế">
+                <span class="material-symbols-outlined">account_balance_wallet</span>
+                <span class="text-sm">Nghĩa vụ & Nợ thuế</span>
+            </a>
+            
+            <!-- Nhóm 7: Tra cứu pháp luật & Hỏi đáp AI -->
+            <a href="business_legal.html" class="nav-item text-slate-400 hover:text-white transition-colors hover:bg-white/5 flex items-center gap-3 px-4 py-3 scale-95 active:scale-90 transition-transform rounded-lg" data-page="business_legal.html" data-title="Tra cứu luật & Hỏi đáp AI">
+                <span class="material-symbols-outlined">chat</span>
+                <span class="text-sm">Tra cứu & AI Hỏi đáp</span>
+            </a>
+            
+            <!-- Nhóm 8: Phát triển & Thay đổi mô hình -->
+            <a href="business_growth.html" class="nav-item text-slate-400 hover:text-white transition-colors hover:bg-white/5 flex items-center gap-3 px-4 py-3 scale-95 active:scale-90 transition-transform rounded-lg" data-page="business_growth.html" data-title="Thay đổi Quy mô & Mô hình">
+                <span class="material-symbols-outlined">published_with_changes</span>
+                <span class="text-sm">Thay đổi mô hình</span>
+            </a>
+            
+            <!-- Nhóm 9: Kế toán & Sổ sách đơn giản -->
+            <a href="business_accounting.html" class="nav-item text-slate-400 hover:text-white transition-colors hover:bg-white/5 flex items-center gap-3 px-4 py-3 scale-95 active:scale-90 transition-transform rounded-lg" data-page="business_accounting.html" data-title="Sổ sách Kế toán đơn giản">
+                <span class="material-symbols-outlined">menu_book</span>
+                <span class="text-sm">Kế toán & Sổ sách</span>
+            </a>
+            
+            <!-- Nhóm 10: Quản lý chi phí được trừ -->
+            <a href="business_expenses.html" class="nav-item text-slate-400 hover:text-white transition-colors hover:bg-white/5 flex items-center gap-3 px-4 py-3 scale-95 active:scale-90 transition-transform rounded-lg" data-page="business_expenses.html" data-title="Quản lý Chi phí được trừ">
+                <span class="material-symbols-outlined">payments</span>
+                <span class="text-sm">Chi phí được trừ</span>
+            </a>
+            
+            <!-- Nhóm 11: Bảo vệ quyền lợi & Khiếu nại -->
+            <a href="business_claims.html" class="nav-item text-slate-400 hover:text-white transition-colors hover:bg-white/5 flex items-center gap-3 px-4 py-3 scale-95 active:scale-90 transition-transform rounded-lg" data-page="business_claims.html" data-title="Khiếu nại & Bảo vệ quyền lợi">
+                <span class="material-symbols-outlined">gavel</span>
+                <span class="text-sm">Quyền lợi & Khiếu nại</span>
+            </a>
+
+            <!-- Tài khoản -->
+            <a href="business_profile.html" class="nav-item text-slate-400 hover:text-white transition-colors hover:bg-white/5 flex items-center gap-3 px-4 py-3 scale-95 active:scale-90 transition-transform rounded-lg" data-page="business_profile.html" data-title="Tài khoản Người nộp thuế">
+                <span class="material-symbols-outlined">account_circle</span>
+                <span class="text-sm">Tài khoản</span>
+            </a>
+        </nav>
+
+        <!-- Profile Badge -->
+        <div class="mt-auto px-4">
+            <div class="pt-4 border-t border-white/5 pb-4">
+                <div class="flex items-center gap-3 p-2 rounded-lg bg-white/5 mx-2">
+                    <div class="w-8 h-8 rounded bg-primary-fixed-dim/20 flex items-center justify-center overflow-hidden shrink-0" id="user-avatar-container">
+                        <img id="user-avatar-image" alt="Avatar" class="w-full h-full object-cover hidden" />
+                        <span id="user-avatar-fallback" class="text-primary-fixed-dim text-[10px] font-black tracking-tight">NNT</span>
+                    </div>
+                    <div id="user-profile-badge">
+                        <p class="text-xs font-bold text-slate-200 truncate max-w-[120px]" id="user-full-name">Người nộp thuế</p>
+                        <p class="text-[10px] text-slate-400 font-mono" id="user-current-role">MST: ---</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </aside>
+
+    <!-- Main Content Area -->
+    <div class="flex-1 flex flex-col min-w-0 overflow-hidden ml-64 max-w-[calc(100%-16rem)]">
+        <!-- Top Header -->
+        <header class="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-8 flex-shrink-0">
+            <div class="flex items-center gap-3 text-xs">
+                <a href="#" class="text-slate-400 hover:text-slate-600">Trang chủ</a>
+                <span class="text-slate-300">/</span>
+                <a href="#" class="text-slate-400 hover:text-slate-600">Cá nhân &amp; Hộ kinh doanh</a>
+                <span class="text-slate-300">/</span>
+                <span id="breadcrumb-current" class="text-slate-800 font-semibold">Tra cứu &amp; AI Hỏi đáp</span>
+            </div>
+
+            <!-- Right Header -->
+            <div class="flex items-center gap-4">
+                <button class="relative w-8 h-8 rounded-full border border-slate-200 flex items-center justify-center text-slate-500 hover:text-slate-800 hover:bg-slate-50 transition-all">
+                    <span class="material-symbols-outlined text-lg">notifications</span>
+                </button>
+                <div class="flex items-center gap-2 pl-4 border-l border-slate-200">
+                    <div class="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center text-slate-600 font-bold text-xs ring-1 ring-slate-200">TN</div>
+                    <div class="hidden md:block text-left">
+                        <p class="text-xs font-bold text-slate-800">Cửa hàng Gia dụng Thuận Phát</p>
+                        <p class="text-[9px] text-slate-500">MST: 8092471928</p>
+                    </div>
+                </div>
+            </div>
+        </header>
+
+        <!-- Main Workspace -->
+        <main class="flex-1 overflow-y-auto p-8 bg-slate-50/50">
+            <div class="max-w-6xl mx-auto space-y-6">
+                <!-- Grid: Left (AI Chat), Right (Quick law search) -->
+                <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                    
+                    <!-- Left: AI Legal Advisor Chat (Col span 2) -->
+                    <div class="lg:col-span-2 bg-white rounded-xl border border-slate-200 shadow-sm flex flex-col h-[520px]">
+                        <!-- Chat header -->
+                        <div class="px-6 py-4 border-b border-slate-200 flex items-center gap-3 bg-slate-50/50">
+                            <div class="w-8 h-8 rounded-lg bg-emerald-100 flex items-center justify-center text-emerald-600 font-bold">
+                                AI
+                            </div>
+                            <div>
+                                <h4 class="text-xs font-black uppercase tracking-wider text-slate-700">Trợ lý Pháp lý Thuế AI (TaxInspector Agent V4)</h4>
+                                <p class="text-[9px] text-slate-400">Tự động trả lời, tra cứu điều khoản luật liên quan đến Hộ kinh doanh &amp; Cá nhân.</p>
+                            </div>
+                        </div>
+
+                        <!-- Chat messages screen -->
+                        <div class="flex-1 p-6 overflow-y-auto space-y-4 text-xs" id="chat-messages">
+                            <!-- Bot Message -->
+                            <div class="flex gap-3 max-w-[85%]">
+                                <div class="w-7 h-7 bg-slate-100 rounded-full flex items-center justify-center font-bold text-slate-500 flex-shrink-0">AI</div>
+                                <div class="bg-slate-100 p-3 rounded-2xl rounded-tl-none text-slate-700">
+                                    Xin chào! Tôi là Trợ lý AI pháp luật Thuế Việt Nam. Bạn cần tư vấn về vấn đề gì hôm nay? (Ví dụ: "Hộ kinh doanh mới thành lập có được giảm thuế VAT?", "Lao động bán thời gian khấu trừ thuế thế nào?")
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Chat Input bar -->
+                        <div class="p-4 border-t border-slate-200 bg-slate-50 flex gap-2">
+                            <input type="text" id="chat-input" placeholder="Nhập câu hỏi của bạn tại đây..." class="flex-1 rounded-lg border-slate-200 text-xs focus:ring-1 focus:ring-emerald-500 outline-none" onkeypress="handleKeyPress(event)">
+                            <button onclick="sendChatMessage()" class="px-4 py-2 bg-emerald-500 hover:bg-primary-fixed-dim/20 text-white font-bold rounded-lg text-xs transition-all flex items-center gap-1">
+                                <span class="material-symbols-outlined text-sm">send</span> Gửi
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Right: Fast legislation documents query -->
+                    <div class="bg-white p-6 rounded-xl border border-slate-200 shadow-sm space-y-4">
+                        <div class="flex items-center gap-2">
+                            <span class="material-symbols-outlined text-emerald-500">menu_book</span>
+                            <h4 class="text-xs font-black uppercase tracking-wider text-slate-700">Bộ chỉ mục văn bản pháp luật</h4>
+                        </div>
+                        <p class="text-[10px] text-slate-500">Tra cứu các văn bản luật thuế cốt lõi đang có hiệu lực thi hành.</p>
+
+                        <!-- Document List -->
+                        <div class="space-y-2">
+                            <!-- Doc 1 -->
+                            <a href="https://thuvienphapluat.vn" target="_blank" class="block p-3 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-lg transition-all text-xs">
+                                <h5 class="font-bold text-slate-800">Thông tư 40/2021/TT-BTC</h5>
+                                <p class="text-[9px] text-slate-400 mt-1">Hướng dẫn quản lý thuế đối với hộ kinh doanh, cá nhân kinh doanh.</p>
+                            </a>
+                            <!-- Doc 2 -->
+                            <a href="https://thuvienphapluat.vn" target="_blank" class="block p-3 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-lg transition-all text-xs">
+                                <h5 class="font-bold text-slate-800">Thông tư 88/2021/TT-BTC</h5>
+                                <p class="text-[9px] text-slate-400 mt-1">Chế độ kế toán chứng từ áp dụng riêng cho các Hộ kinh doanh nhóm 1.</p>
+                            </a>
+                            <!-- Doc 3 -->
+                            <a href="https://thuvienphapluat.vn" target="_blank" class="block p-3 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-lg transition-all text-xs">
+                                <h5 class="font-bold text-slate-800">Nghị định 123/2020/NĐ-CP</h5>
+                                <p class="text-[9px] text-slate-400 mt-1">Quy định về hóa đơn, chứng từ điện tử &amp; thời điểm phát hành.</p>
+                            </a>
+                        </div>
+                    </div>
+
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- Active Navigation Highlighter Script -->
+    <script>
+        document.addEventListener("DOMContentLoaded", function() {
+            const currentPage = window.location.pathname.split("/").pop() || 'business_dashboard.html';
+            const navItems = document.querySelectorAll('#sidebar-nav .nav-item');
+            let pageTitle = "Hệ thống";
+
+            navItems.forEach(item => {
+                if (item.getAttribute('data-page') === currentPage) {
+                    item.classList.remove('text-slate-400', 'hover:bg-white/5');
+                    item.classList.add('bg-emerald-500/10', 'text-emerald-400', 'font-semibold');
+                    pageTitle = item.getAttribute('data-title');
+                }
+            });
+
+            const breadcrumbCurrent = document.getElementById('breadcrumb-current');
+            if (breadcrumbCurrent) breadcrumbCurrent.textContent = pageTitle;
+            const sidebarSubtitle = document.getElementById('sidebar-subtitle');
+            if (sidebarSubtitle) sidebarSubtitle.textContent = pageTitle;
+        });
+    </script>
+    <script src="../js/business_taxpayer_common.js"></script>
+    <script src="../js/business_legal.js"></script>
+    <script src="../js/business_intelligence.js"></script>
+</body>
+</html>

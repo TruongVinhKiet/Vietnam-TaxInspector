@@ -15,11 +15,22 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 import time
+import urllib.error
+import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
+
+from ml_engine.tax_agent_tool_contracts import (
+    CANONICAL_TOOL_NAMES,
+    TOOL_TO_INTENT_MAP as CANONICAL_TOOL_TO_INTENT_MAP,
+    tool_prompt_lines,
+    validate_tool_call,
+)
+from ml_engine.tax_agent_runtime_policy import apply_offline_environment, local_files_only
 
 logger = logging.getLogger(__name__)
 
@@ -42,7 +53,7 @@ Quy tắc sau khi nhận tool result pháp luật:
 Công cụ khả dụng:
 1. top_n_risky_companies(n): Danh sách top N doanh nghiệp rủi ro cao nhất.
 2. company_risk_lookup(tax_code): Tra cứu hồ sơ rủi ro tổng thể của một MST.
-3. gnn_vat_fraud(tax_code): Pipeline gian lận VAT kết hợp graph/GNN.
+3. gnn_analysis(tax_code): Pipeline gian lận VAT kết hợp graph/GNN.
 4. gnn_analysis(tax_code): Phân tích mạng lưới giao dịch VAT.
 5. invoice_risk_scan(tax_code, period): Rà soát rủi ro hóa đơn đầu vào/đầu ra.
 6. vat_refund_risk(tax_code, period): Đánh giá rủi ro hồ sơ hoàn thuế VAT.
@@ -61,23 +72,31 @@ Công cụ khả dụng:
 19. macro_forecast(scenario): Mô phỏng vĩ mô và kịch bản chính sách.
 20. ocr_document_process(document_type, language): OCR hóa đơn/chứng từ.
 21. knowledge_search(query, top_k): Tra cứu pháp luật thuế qua RAG/GraphRAG.
-22. escalate_to_debate(tax_code): Mở phiên tranh biện đa đặc vụ AI."""
+22. runtime_debate_escalation: Orchestrator handles debate; do not emit as a tool."""
+
+_PROMPT_PREFIX = AGENTIC_SYSTEM_PROMPT.split("Công cụ khả dụng:")[0]
+AGENTIC_SYSTEM_PROMPT = (
+    _PROMPT_PREFIX
+    + "Cong cu kha dung (chi dung ten canonical cua backend):\n"
+    + "\n".join(tool_prompt_lines())
+    + "\n\nLuu y: debate/adjudication la hanh dong runtime cua orchestrator, "
+      "khong duoc goi nhu mot tool trong <tool_call>."
+)
 
 # Tập hợp tên tool hợp lệ (đồng bộ với ModeContracts)
 VALID_TOOL_NAMES = {
-    "top_n_risky_companies", "company_risk_lookup", "gnn_vat_fraud", "gnn_analysis",
+    "top_n_risky_companies", "company_risk_lookup", "gnn_analysis",
     "invoice_risk_scan", "vat_refund_risk", "vae_anomaly_scan", "motif_detection",
     "ring_scoring", "ownership_analysis", "hetero_gnn_risk", "entity_resolution_check",
     "company_name_search", "nlp_red_flag_scan", "delinquency_check",
     "temporal_delinquency_deep", "causal_uplift_recommend", "revenue_forecast",
-    "macro_forecast", "ocr_document_process", "knowledge_search", "escalate_to_debate",
+    "macro_forecast", "ocr_document_process", "knowledge_search",
 }
 
 # Ánh xạ từ tool_name (agent output) sang intent (orchestrator input)
 TOOL_TO_INTENT_MAP = {
     "top_n_risky_companies": "top_n_query",
     "company_risk_lookup": "general_tax_query",
-    "gnn_vat_fraud": "vat_network_analysis",
     "gnn_analysis": "vat_network_analysis",
     "invoice_risk_scan": "invoice_risk",
     "vat_refund_risk": "vat_network_analysis",
@@ -96,8 +115,10 @@ TOOL_TO_INTENT_MAP = {
     "macro_forecast": "macro_forecast",
     "ocr_document_process": "general_tax_query",
     "knowledge_search": "general_tax_query",
-    "escalate_to_debate": "general_tax_query",
 }
+
+VALID_TOOL_NAMES = set(CANONICAL_TOOL_NAMES)
+TOOL_TO_INTENT_MAP = dict(CANONICAL_TOOL_TO_INTENT_MAP)
 
 
 @dataclass
@@ -125,6 +146,7 @@ class AgenticLLM:
         self._tokenizer = None
         self._loaded = False
         self._available = False
+        self._local_endpoint = os.getenv("TAX_AGENT_LOCAL_LLM_ENDPOINT", "").strip()
 
     @property
     def is_available(self) -> bool:
@@ -134,6 +156,12 @@ class AgenticLLM:
         """Load LoRA V4 adapter. Trả về True nếu thành công."""
         if self._loaded:
             return self._available
+
+        if self._local_endpoint:
+            self._loaded = True
+            self._available = True
+            logger.info("[AgenticLLM] Using local OpenAI-compatible endpoint: %s", self._local_endpoint)
+            return True
 
         adapter_config = self._adapter_dir / "adapter_config.json"
         if not adapter_config.exists():
@@ -145,6 +173,7 @@ class AgenticLLM:
             return False
 
         try:
+            apply_offline_environment()
             import torch
             from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
             from peft import PeftModel
@@ -158,7 +187,7 @@ class AgenticLLM:
 
             # Load tokenizer từ adapter (đã lưu cùng khi train)
             self._tokenizer = AutoTokenizer.from_pretrained(
-                str(self._adapter_dir), trust_remote_code=True,
+                str(self._adapter_dir), trust_remote_code=True, local_files_only=True,
             )
             if self._tokenizer.pad_token_id is None:
                 self._tokenizer.pad_token_id = self._tokenizer.eos_token_id
@@ -176,6 +205,7 @@ class AgenticLLM:
                     quantization_config=bnb_config,
                     device_map="auto",
                     trust_remote_code=True,
+                    local_files_only=local_files_only(),
                 )
             else:
                 # CPU fallback — không quantize
@@ -183,9 +213,14 @@ class AgenticLLM:
                     base_model_name,
                     trust_remote_code=True,
                     low_cpu_mem_usage=True,
+                    local_files_only=local_files_only(),
                 )
 
-            self._model = PeftModel.from_pretrained(base_model, str(self._adapter_dir))
+            self._model = PeftModel.from_pretrained(
+                base_model,
+                str(self._adapter_dir),
+                local_files_only=True,
+            )
             self._model.eval()
             self._available = True
             self._loaded = True
@@ -209,6 +244,9 @@ class AgenticLLM:
             return None
 
         try:
+            if self._local_endpoint:
+                return self._infer_local_endpoint(query)
+
             import torch
 
             t0 = time.perf_counter()
@@ -229,7 +267,8 @@ class AgenticLLM:
             with torch.no_grad():
                 outputs = self._model.generate(
                     **inputs,
-                    max_new_tokens=256,
+                    max_new_tokens=int(os.getenv("TAX_AGENT_LLM_MAX_NEW_TOKENS", "256")),
+                    max_time=float(os.getenv("TAX_AGENT_LLM_TIMEOUT_SECONDS", "20")),
                     temperature=0.1,
                     repetition_penalty=1.05,
                     pad_token_id=self._tokenizer.eos_token_id,
@@ -250,6 +289,43 @@ class AgenticLLM:
             logger.warning("[AgenticLLM] Inference thất bại: %s", exc)
             return None
 
+    def _infer_local_endpoint(self, query: str) -> Optional[AgenticDecision]:
+        """Call a local llama.cpp/vLLM-compatible OpenAI chat endpoint."""
+        messages = [
+            {"role": "system", "content": AGENTIC_SYSTEM_PROMPT},
+            {"role": "user", "content": query},
+        ]
+        payload = {
+            "model": os.getenv("TAX_AGENT_LOCAL_LLM_MODEL", "tax-agent-local"),
+            "messages": messages,
+            "temperature": 0.1,
+            "max_tokens": int(os.getenv("TAX_AGENT_LLM_MAX_NEW_TOKENS", "256")),
+        }
+        url = self._local_endpoint.rstrip("/")
+        if not url.endswith("/chat/completions"):
+            url = f"{url}/v1/chat/completions"
+        request = urllib.request.Request(
+            url,
+            data=json.dumps(payload).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        timeout = float(os.getenv("TAX_AGENT_LLM_TIMEOUT_SECONDS", "20"))
+        try:
+            t0 = time.perf_counter()
+            with urllib.request.urlopen(request, timeout=timeout) as response:
+                data = json.loads(response.read().decode("utf-8"))
+            choice = (data.get("choices") or [{}])[0]
+            response_text = (choice.get("message") or {}).get("content") or choice.get("text") or ""
+            logger.info(
+                "[AgenticLLM] Local endpoint inference completed in %.0fms",
+                (time.perf_counter() - t0) * 1000.0,
+            )
+            return self._parse_output(response_text)
+        except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, OSError) as exc:
+            logger.warning("[AgenticLLM] Local endpoint inference failed: %s", exc)
+            return None
+
     def _parse_output(self, raw: str) -> Optional[AgenticDecision]:
         """Parse output thô thành AgenticDecision có cấu trúc."""
         # Trích xuất <thought>
@@ -268,12 +344,9 @@ class AgenticLLM:
             logger.debug("[AgenticLLM] JSON parse thất bại: %s — raw: %s", exc, tool_match.group(1)[:200])
             return None
 
-        tool_name = tool_json.get("name", "")
-        tool_args = tool_json.get("arguments", {})
-
-        # Validate tên tool
-        if tool_name not in VALID_TOOL_NAMES:
-            logger.debug("[AgenticLLM] Tool không hợp lệ: '%s'", tool_name)
+        ok, tool_name, tool_args, reason = validate_tool_call(tool_json)
+        if not ok:
+            logger.debug("[AgenticLLM] Tool call không hợp lệ (%s): %s", reason, tool_json)
             return None
 
         mapped_intent = TOOL_TO_INTENT_MAP.get(tool_name, "general_tax_query")

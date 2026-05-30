@@ -216,6 +216,38 @@ def get_current_user(
     return user
 
 
+def get_current_officer(
+    current_user: models.User = Depends(get_current_user),
+) -> models.User:
+    """
+    Enforce that the authenticated user is a tax officer/inspector.
+    Allowed roles: viewer, analyst, inspector, admin.
+    """
+    OFFICER_ROLES = ("viewer", "analyst", "inspector", "admin")
+    if current_user.role not in OFFICER_ROLES:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Bạn không có quyền truy cập chức năng dành cho cán bộ thuế.",
+        )
+    return current_user
+
+
+def get_current_taxpayer(
+    current_user: models.User = Depends(get_current_user),
+) -> models.User:
+    """
+    Enforce that the authenticated user is a taxpayer (individual or enterprise).
+    Both 'taxpayer' and legacy 'enterprise' roles map to taxpayer.
+    """
+    TAXPAYER_ROLES = ("taxpayer", "enterprise")
+    if current_user.role not in TAXPAYER_ROLES:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Chức năng này chỉ dành cho người nộp thuế.",
+        )
+    return current_user
+
+
 # =============================================================================
 # AUDIT LOGGING
 # =============================================================================

@@ -1,9 +1,14 @@
-const API_BASE = window.API_BASE_URL || 'http://localhost:8000';
-
 document.addEventListener('DOMContentLoaded', () => {
     const charts = {};
     const windowSelect = document.getElementById('timeWindow');
     const refreshBtn = document.getElementById('refreshBtn');
+    const apiUrl = (path) => {
+        const configured = window.TELEMETRY_API_BASE_URL || window.API_BASE_URL || 'http://localhost:8000/api';
+        const base = String(configured).replace(/\/+$/, '');
+        const apiBase = base.endsWith('/api') ? base : `${base}/api`;
+        const suffix = String(path || '').startsWith('/') ? path : `/${path}`;
+        return `${apiBase}${suffix}`;
+    };
 
     Chart.defaults.font.family = "'Inter', 'Segoe UI', Roboto, Helvetica, Arial, sans-serif";
     Chart.defaults.color = '#64748b';
@@ -22,10 +27,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
         try {
             const [telemetryRes, driftRes, feedbackRes, activeRes] = await Promise.all([
-                fetch(`${API_BASE}/api/tax-agent/telemetry/dashboard?window_minutes=${win}`),
-                fetch(`${API_BASE}/api/tax-agent/telemetry/drift?window_hours=${driftWin}`),
-                fetch(`${API_BASE}/api/tax-agent/feedback/stats?window_hours=${driftWin}`),
-                fetch(`${API_BASE}/api/tax-agent/feedback/active-learning?limit=10`)
+                fetch(apiUrl(`/tax-agent/telemetry/dashboard?window_minutes=${win}`)),
+                fetch(apiUrl(`/tax-agent/telemetry/drift?window_hours=${driftWin}`)),
+                fetch(apiUrl(`/tax-agent/feedback/stats?window_hours=${driftWin}`)),
+                fetch(apiUrl('/tax-agent/feedback/active-learning?limit=10'))
             ]);
 
             const telemetry = await telemetryRes.json();
@@ -54,7 +59,7 @@ document.addEventListener('DOMContentLoaded', () => {
         btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Running...';
         btn.disabled = true;
         try {
-            await fetch(`${API_BASE}/api/tax-agent/dpo/dry-run`, { method: 'POST' });
+            await fetch(apiUrl('/tax-agent/dpo/dry-run'), { method: 'POST' });
             setTimeout(fetchData, 1000);
         } finally {
             btn.innerHTML = oldHtml;
@@ -73,7 +78,7 @@ document.addEventListener('DOMContentLoaded', () => {
         btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Training...';
         btn.disabled = true;
         try {
-            const res = await fetch(`${API_BASE}/api/tax-agent/dpo/trigger?dry_run=false`, { 
+            const res = await fetch(apiUrl('/tax-agent/dpo/trigger?dry_run=false'), { 
                 method: 'POST',
                 headers: {
                     'X-Admin-Token': token
@@ -329,10 +334,19 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function updateChart(chart, labels, datasetValues) {
-        chart.data.labels = labels;
+        const hasLabels = Array.isArray(labels) && labels.length > 0;
+        const hasValues = datasetValues.some(values => (values || []).some(value => Number(value || 0) > 0));
+        chart.data.labels = hasLabels ? labels : ['No data'];
         datasetValues.forEach((values, index) => {
-            if (chart.data.datasets[index]) chart.data.datasets[index].data = values;
+            if (chart.data.datasets[index]) {
+                chart.data.datasets[index].data = hasLabels ? values : [0];
+            }
         });
+        if (!hasValues && hasLabels) {
+            chart.data.datasets.forEach(dataset => {
+                dataset.backgroundColor = dataset.backgroundColor || '#e2e8f0';
+            });
+        }
         chart.update();
     }
 

@@ -17,6 +17,8 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Generator, Optional
 
+from ml_engine.tax_agent_runtime_policy import apply_offline_environment, local_files_only
+
 logger = logging.getLogger(__name__)
 
 
@@ -66,6 +68,8 @@ class LoRATrainingConfig:
     warmup_ratio: float = 0.1
     weight_decay: float = 0.01
     gradient_checkpointing: bool = True
+    max_records: int | None = None
+    max_seq_length: int = 2048
 
 
 FEW_SHOT_EXAMPLES = {
@@ -113,11 +117,21 @@ class TaxAgentLLM:
         if not Path(adapter).exists():
             return None
         try:
+            apply_offline_environment()
             from transformers import AutoModelForCausalLM, AutoTokenizer
             from peft import PeftModel
-            self._tokenizer = AutoTokenizer.from_pretrained(self.config.model_name, trust_remote_code=True)
-            base = AutoModelForCausalLM.from_pretrained(self.config.model_name, trust_remote_code=True, low_cpu_mem_usage=True)
-            self._model = PeftModel.from_pretrained(base, adapter)
+            self._tokenizer = AutoTokenizer.from_pretrained(
+                self.config.model_name,
+                trust_remote_code=True,
+                local_files_only=local_files_only(),
+            )
+            base = AutoModelForCausalLM.from_pretrained(
+                self.config.model_name,
+                trust_remote_code=True,
+                low_cpu_mem_usage=True,
+                local_files_only=local_files_only(),
+            )
+            self._model = PeftModel.from_pretrained(base, adapter, local_files_only=True)
             self._model.eval()
             self._tier = LLMTier.FINETUNED
             self._loaded = True
@@ -129,12 +143,22 @@ class TaxAgentLLM:
 
     def _try_load_base(self) -> Optional[LLMTier]:
         try:
+            apply_offline_environment()
             import psutil
             if psutil.virtual_memory().available / (1024**2) < 4000:
                 return None
             from transformers import AutoModelForCausalLM, AutoTokenizer
-            self._tokenizer = AutoTokenizer.from_pretrained(self.config.model_name, trust_remote_code=True)
-            self._model = AutoModelForCausalLM.from_pretrained(self.config.model_name, trust_remote_code=True, low_cpu_mem_usage=True)
+            self._tokenizer = AutoTokenizer.from_pretrained(
+                self.config.model_name,
+                trust_remote_code=True,
+                local_files_only=local_files_only(),
+            )
+            self._model = AutoModelForCausalLM.from_pretrained(
+                self.config.model_name,
+                trust_remote_code=True,
+                low_cpu_mem_usage=True,
+                local_files_only=local_files_only(),
+            )
             self._model.eval()
             self._tier = LLMTier.BASE_FEW_SHOT
             self._loaded = True
@@ -171,6 +195,7 @@ class TaxAgentLLM:
             inputs = self._tokenizer(prompt, return_tensors="pt")
             streamer = TextIteratorStreamer(self._tokenizer, skip_prompt=True, skip_special_tokens=True)
             kw = {**inputs, "streamer": streamer, "max_new_tokens": self.config.max_new_tokens,
+                  "max_time": float(os.getenv("TAX_AGENT_LLM_TIMEOUT_SECONDS", "20")),
                   "temperature": self.config.temperature, "do_sample": True}
             t = threading.Thread(target=self._model.generate, kwargs=kw)
             t.start()
@@ -187,6 +212,7 @@ class TaxAgentLLM:
         with torch.no_grad():
             out = self._model.generate(
                 **inputs, max_new_tokens=max_tokens or self.config.max_new_tokens,
+                max_time=float(os.getenv("TAX_AGENT_LLM_TIMEOUT_SECONDS", "20")),
                 temperature=self.config.temperature, top_p=self.config.top_p,
                 repetition_penalty=self.config.repetition_penalty, do_sample=True,
                 pad_token_id=self._tokenizer.eos_token_id,
@@ -253,24 +279,65 @@ class LoRATrainer:
             logger.warning("[LoRATrainer] No training data at %s", data_path)
             return {"train": [], "eval": []}
 
-        examples = []
+        train_examples = []
+        eval_examples = []
+        max_records = self.config.max_records
+        if max_records is None:
+            env_limit = os.getenv("TAX_AGENT_LORA_MAX_RECORDS")
+            max_records = int(env_limit) if env_limit and env_limit.isdigit() else None
         with open(data_path, "r", encoding="utf-8") as f:
             for line in f:
                 line = line.strip()
                 if not line:
                     continue
                 record = json.loads(line)
-                convos = record.get("conversations", [])
-                if len(convos) >= 3:
-                    examples.append({
-                        "system": convos[0].get("value", ""),
-                        "user": convos[1].get("value", ""),
-                        "assistant": convos[2].get("value", ""),
-                    })
+                example = self._record_to_training_example(record)
+                if not example:
+                    continue
 
-        # 90/10 train/eval split
-        split_idx = int(len(examples) * 0.9)
-        return {"train": examples[:split_idx], "eval": examples[split_idx:]}
+                metadata = record.get("metadata") or {}
+                split = str(metadata.get("split") or "").lower()
+                if split in {"dev", "test", "eval", "validation"}:
+                    eval_examples.append(example)
+                else:
+                    train_examples.append(example)
+
+                if max_records and (len(train_examples) + len(eval_examples)) >= max_records:
+                    break
+
+        if not eval_examples and train_examples:
+            # 90/10 fallback split for legacy datasets without metadata.
+            split_idx = max(1, int(len(train_examples) * 0.9))
+            eval_examples = train_examples[split_idx:]
+            train_examples = train_examples[:split_idx]
+
+        return {"train": train_examples, "eval": eval_examples}
+
+    def _record_to_training_example(self, record: dict[str, Any]) -> dict[str, str] | None:
+        """Normalize legacy `conversations` and V4/V5 `messages` JSONL records."""
+        convos = record.get("conversations")
+        if isinstance(convos, list) and len(convos) >= 3:
+            return {
+                "system": str(convos[0].get("value", "")),
+                "user": str(convos[1].get("value", "")),
+                "assistant": str(convos[2].get("value", "")),
+            }
+
+        messages = record.get("messages")
+        if not isinstance(messages, list):
+            return None
+
+        by_role = {"system": "", "user": "", "assistant": ""}
+        for message in messages:
+            if not isinstance(message, dict):
+                continue
+            role = str(message.get("role", "")).lower()
+            if role in by_role and not by_role[role]:
+                by_role[role] = str(message.get("content", ""))
+
+        if not by_role["user"] or not by_role["assistant"]:
+            return None
+        return by_role
 
     def train(self) -> dict:
         """
@@ -294,14 +361,20 @@ class LoRATrainer:
         logger.info("[LoRATrainer] Starting training with %d examples", len(dataset["train"]))
 
         # Load tokenizer and base model
+        apply_offline_environment()
         tokenizer = AutoTokenizer.from_pretrained(
-            self.config.base_model, trust_remote_code=True,
+            self.config.base_model,
+            trust_remote_code=True,
+            local_files_only=local_files_only(),
         )
         if tokenizer.pad_token is None:
             tokenizer.pad_token = tokenizer.eos_token
 
         model = AutoModelForCausalLM.from_pretrained(
-            self.config.base_model, trust_remote_code=True, low_cpu_mem_usage=True,
+            self.config.base_model,
+            trust_remote_code=True,
+            low_cpu_mem_usage=True,
+            local_files_only=local_files_only(),
         )
 
         # LoRA config
@@ -327,7 +400,7 @@ class LoRATrainer:
         # Tokenize
         encodings = tokenizer(
             train_texts, truncation=True, padding=True,
-            max_length=self.config.context_window if hasattr(self.config, 'context_window') else 2048,
+            max_length=self.config.max_seq_length,
             return_tensors="pt",
         )
         # For causal LM, labels = input_ids
@@ -407,9 +480,19 @@ class LoRATrainer:
             if not Path(adapter_path).exists():
                 return {"status": "error", "message": "No adapter found"}
 
-            tokenizer = AutoTokenizer.from_pretrained(self.config.base_model, trust_remote_code=True)
-            base = AutoModelForCausalLM.from_pretrained(self.config.base_model, trust_remote_code=True, low_cpu_mem_usage=True)
-            model = PeftModel.from_pretrained(base, adapter_path)
+            apply_offline_environment()
+            tokenizer = AutoTokenizer.from_pretrained(
+                self.config.base_model,
+                trust_remote_code=True,
+                local_files_only=local_files_only(),
+            )
+            base = AutoModelForCausalLM.from_pretrained(
+                self.config.base_model,
+                trust_remote_code=True,
+                low_cpu_mem_usage=True,
+                local_files_only=local_files_only(),
+            )
+            model = PeftModel.from_pretrained(base, adapter_path, local_files_only=True)
             merged = model.merge_and_unload()
 
             out = output_dir or str(Path(adapter_path) / "merged")

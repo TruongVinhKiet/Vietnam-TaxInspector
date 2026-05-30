@@ -26,6 +26,7 @@ class TokenData(BaseModel):
 class LoginRequest(BaseModel):
     badge_id: str
     password: str = Field(min_length=1, max_length=128)
+    expected_role: Optional[Literal["inspector", "taxpayer"]] = None
 
 
 class GenericMessage(BaseModel):
@@ -55,7 +56,7 @@ class UserBase(BaseModel):
     department: str
     email: str
     phone: Optional[str] = None
-    role: Literal["viewer", "analyst", "inspector", "admin"] = "viewer"
+    role: Literal["viewer", "analyst", "inspector", "admin", "taxpayer", "enterprise"] = "viewer"
 
 class UserCreate(UserBase):
     password: str = Field(min_length=8, max_length=128)

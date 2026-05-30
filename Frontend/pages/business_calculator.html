@@ -1,0 +1,820 @@
+<!DOCTYPE html>
+<html lang="vi" class="h-full bg-slate-50">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Vietnam Taxpayer - Tính thuế tự động</title>
+    <!-- Tailwind CSS Dynamic CDN with Extended Outfit Font -->
+    <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Outfit', 'sans-serif'],
+                    },
+                    colors: {
+                        'primary': '#002147',
+                        'primary-container': '#003366',
+                        'surface-container-lowest': '#ffffff',
+                        'surface-container-low': '#f8f9fa',
+                        'surface-container': '#f1f3f5',
+                        'outline-variant': '#dee2e6'
+                    }
+                }
+            }
+        }
+    </script>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" rel="stylesheet">
+    <link rel="stylesheet" href="../css/global.css">
+    <style>
+        body { font-family: 'Outfit', sans-serif; }
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+        
+        /* Premium micro-animations & layout stabilizers */
+        .calculator-card {
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        .calculator-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 12px 24px -10px rgba(0, 0, 0, 0.06);
+        }
+        .fade-in {
+            animation: fadeIn 0.4s ease-out forwards;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(8px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        /* Print friendly styling */
+        @media print {
+            body * {
+                visibility: hidden;
+            }
+            #print-area, #print-area * {
+                visibility: visible;
+            }
+            #print-area {
+                position: absolute;
+                left: 0;
+                top: 0;
+                width: 100%;
+                margin: 0;
+                padding: 20px;
+                background: white !important;
+                color: #000 !important;
+            }
+            .no-print {
+                display: none !important;
+            }
+        }
+    </style>
+    <script src="../js/api.js?v=3.4"></script>
+</head>
+<body class="bg-slate-50 text-slate-800 selection:bg-emerald-500/25 antialiased font-sans">
+    <!-- Sidebar -->
+    <aside class="fixed left-0 top-0 bottom-0 w-64 bg-slate-900 text-white shadow-2xl flex flex-col py-6 z-50 no-print">
+        <!-- Brand Logo -->
+        <div class="px-6 mb-10 flex items-center gap-3">
+            <div class="w-10 h-10 bg-white/10 rounded flex items-center justify-center p-1.5 shadow-inner">
+                <img src="../assets/logo.png" alt="Taxpayer Logo" class="w-full h-full object-contain rounded" />
+            </div>
+            <div>
+                <h1 class="text-xl font-bold tracking-tighter text-white">Taxpayer</h1>
+                <p class="text-[10px] uppercase tracking-widest text-slate-400 font-semibold" id="sidebar-subtitle">Hệ thống của tôi</p>
+            </div>
+        </div>
+
+        <!-- Navigation Items -->
+        <nav class="flex-1 px-2 space-y-1 overflow-y-auto no-scrollbar" id="sidebar-nav">
+            <!-- Dashboard Overview -->
+            <a href="business_dashboard.html" class="nav-item text-slate-400 hover:text-white transition-colors hover:bg-white/5 flex items-center gap-3 px-4 py-3 scale-95 active:scale-90 transition-transform rounded-lg" data-page="business_dashboard.html" data-title="Tổng quan Hộ kinh doanh">
+                <span class="material-symbols-outlined">dashboard</span>
+                <span class="text-sm">Tổng quan</span>
+            </a>
+            
+            <div class="pt-3 pb-1.5 px-3 text-[9px] font-black text-slate-500 uppercase tracking-widest">Nhóm Nghiệp Vụ</div>
+            
+            <!-- Nhóm 1: Nhận diện & Đăng ký -->
+            <a href="business_registration.html" class="nav-item text-slate-400 hover:text-white transition-colors hover:bg-white/5 flex items-center gap-3 px-4 py-3 scale-95 active:scale-90 transition-transform rounded-lg" data-page="business_registration.html" data-title="Nhận diện & Đăng ký Thuế">
+                <span class="material-symbols-outlined">app_registration</span>
+                <span class="text-sm">Nhận diện & Đăng ký</span>
+            </a>
+            
+            <!-- Nhóm 2: Tính thuế tự động -->
+            <a href="business_calculator.html" class="nav-item text-slate-400 hover:text-white transition-colors hover:bg-white/5 flex items-center gap-3 px-4 py-3 scale-95 active:scale-90 transition-transform rounded-lg" data-page="business_calculator.html" data-title="Tính toán Thuế tự động">
+                <span class="material-symbols-outlined">calculate</span>
+                <span class="text-sm font-semibold text-emerald-400 bg-emerald-500/10 rounded-lg">Tính thuế tự động</span>
+            </a>
+            
+            <!-- Nhóm 3: Lịch & Deadline -->
+            <a href="business_calendar.html" class="nav-item text-slate-400 hover:text-white transition-colors hover:bg-white/5 flex items-center gap-3 px-4 py-3 scale-95 active:scale-90 transition-transform rounded-lg" data-page="business_calendar.html" data-title="Lịch Trình & Hạn Nộp Thuế">
+                <span class="material-symbols-outlined">calendar_month</span>
+                <span class="text-sm">Lịch & Deadline thuế</span>
+            </a>
+            
+            <!-- Nhóm 4: Hóa đơn điện tử -->
+            <a href="business_invoices.html" class="nav-item text-slate-400 hover:text-white transition-colors hover:bg-white/5 flex items-center gap-3 px-4 py-3 scale-95 active:scale-90 transition-transform rounded-lg" data-page="business_invoices.html" data-title="Quản lý Hóa đơn điện tử">
+                <span class="material-symbols-outlined">receipt_long</span>
+                <span class="text-sm">Hóa đơn điện tử</span>
+            </a>
+            
+            <!-- Nhóm 5: Kê khai & Nộp thuế -->
+            <a href="business_filing.html" class="nav-item text-slate-400 hover:text-white transition-colors hover:bg-white/5 flex items-center gap-3 px-4 py-3 scale-95 active:scale-90 transition-transform rounded-lg" data-page="business_filing.html" data-title="Kê khai & Nộp thuế trực tuyến">
+                <span class="material-symbols-outlined">edit_document</span>
+                <span class="text-sm">Kê khai & Nộp thuế</span>
+            </a>
+            
+            <!-- Nhóm 6: Nghĩa vụ & Nợ thuế -->
+            <a href="business_debts.html" class="nav-item text-slate-400 hover:text-white transition-colors hover:bg-white/5 flex items-center gap-3 px-4 py-3 scale-95 active:scale-90 transition-transform rounded-lg" data-page="business_debts.html" data-title="Tra cứu Nghĩa vụ & Nợ thuế">
+                <span class="material-symbols-outlined">account_balance_wallet</span>
+                <span class="text-sm">Nghĩa vụ & Nợ thuế</span>
+            </a>
+            
+            <!-- Nhóm 7: Tra cứu pháp luật & Hỏi đáp AI -->
+            <a href="business_legal.html" class="nav-item text-slate-400 hover:text-white transition-colors hover:bg-white/5 flex items-center gap-3 px-4 py-3 scale-95 active:scale-90 transition-transform rounded-lg" data-page="business_legal.html" data-title="Tra cứu luật & Hỏi đáp AI">
+                <span class="material-symbols-outlined">chat</span>
+                <span class="text-sm">Tra cứu & AI Hỏi đáp</span>
+            </a>
+            
+            <!-- Nhóm 8: Phát triển & Thay đổi mô hình -->
+            <a href="business_growth.html" class="nav-item text-slate-400 hover:text-white transition-colors hover:bg-white/5 flex items-center gap-3 px-4 py-3 scale-95 active:scale-90 transition-transform rounded-lg" data-page="business_growth.html" data-title="Thay đổi Quy mô & Mô hình">
+                <span class="material-symbols-outlined">published_with_changes</span>
+                <span class="text-sm">Thay đổi mô hình</span>
+            </a>
+            
+            <!-- Nhóm 9: Kế toán & Sổ sách đơn giản -->
+            <a href="business_accounting.html" class="nav-item text-slate-400 hover:text-white transition-colors hover:bg-white/5 flex items-center gap-3 px-4 py-3 scale-95 active:scale-90 transition-transform rounded-lg" data-page="business_accounting.html" data-title="Sổ sách Kế toán đơn giản">
+                <span class="material-symbols-outlined">menu_book</span>
+                <span class="text-sm">Kế toán & Sổ sách</span>
+            </a>
+            
+            <!-- Nhóm 10: Quản lý chi phí được trừ -->
+            <a href="business_expenses.html" class="nav-item text-slate-400 hover:text-white transition-colors hover:bg-white/5 flex items-center gap-3 px-4 py-3 scale-95 active:scale-90 transition-transform rounded-lg" data-page="business_expenses.html" data-title="Quản lý Chi phí được trừ">
+                <span class="material-symbols-outlined">payments</span>
+                <span class="text-sm">Chi phí được trừ</span>
+            </a>
+            
+            <!-- Nhóm 11: Bảo vệ quyền lợi & Khiếu nại -->
+            <a href="business_claims.html" class="nav-item text-slate-400 hover:text-white transition-colors hover:bg-white/5 flex items-center gap-3 px-4 py-3 scale-95 active:scale-90 transition-transform rounded-lg" data-page="business_claims.html" data-title="Khiếu nại & Bảo vệ quyền lợi">
+                <span class="material-symbols-outlined">gavel</span>
+                <span class="text-sm">Quyền lợi & Khiếu nại</span>
+            </a>
+
+            <!-- Tài khoản -->
+            <a href="business_profile.html" class="nav-item text-slate-400 hover:text-white transition-colors hover:bg-white/5 flex items-center gap-3 px-4 py-3 scale-95 active:scale-90 transition-transform rounded-lg" data-page="business_profile.html" data-title="Tài khoản Người nộp thuế">
+                <span class="material-symbols-outlined">account_circle</span>
+                <span class="text-sm">Tài khoản</span>
+            </a>
+        </nav>
+
+        <!-- Profile Badge -->
+        <div class="mt-auto px-4">
+            <div class="pt-4 border-t border-white/5 pb-4">
+                <div class="flex items-center gap-3 p-2 rounded-lg bg-white/5 mx-2">
+                    <div class="w-8 h-8 rounded bg-emerald-500/20 flex items-center justify-center overflow-hidden shrink-0" id="user-avatar-container">
+                        <img id="user-avatar-image" alt="Avatar" class="w-full h-full object-cover hidden" />
+                        <span id="user-avatar-fallback" class="text-emerald-400 text-[10px] font-black tracking-tight">NNT</span>
+                    </div>
+                    <div id="user-profile-badge">
+                        <p class="text-xs font-bold text-slate-200 truncate max-w-[120px]" id="user-full-name">Người nộp thuế</p>
+                        <p class="text-[10px] text-slate-400 font-mono" id="user-current-role">MST: ---</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </aside>
+
+    <!-- Main Content Area -->
+    <div class="flex-1 flex flex-col min-w-0 overflow-hidden ml-64 max-w-[calc(100%-16rem)] min-h-screen">
+        <!-- Top Header -->
+        <header class="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-8 flex-shrink-0 no-print">
+            <div class="flex items-center gap-3 text-xs">
+                <a href="#" class="text-slate-400 hover:text-slate-600">Trang chủ</a>
+                <span class="text-slate-300">/</span>
+                <a href="#" class="text-slate-400 hover:text-slate-600">Cá nhân &amp; Hộ kinh doanh</a>
+                <span class="text-slate-300">/</span>
+                <span id="breadcrumb-current" class="text-slate-800 font-semibold">Tính thuế tự động</span>
+            </div>
+
+            <!-- Right Header -->
+            <div class="flex items-center gap-4">
+                <button class="relative w-8 h-8 rounded-full border border-slate-200 flex items-center justify-center text-slate-500 hover:text-slate-800 hover:bg-slate-50 transition-all">
+                    <span class="material-symbols-outlined text-lg">notifications</span>
+                </button>
+                <div class="flex items-center gap-2 pl-4 border-l border-slate-200" id="header-profile-box">
+                    <div class="w-8 h-8 rounded-full bg-emerald-100 flex items-center justify-center text-emerald-800 font-bold text-xs ring-1 ring-emerald-200" id="header-avatar-fallback">NN</div>
+                    <div class="hidden md:block text-left">
+                        <p class="text-xs font-bold text-slate-800" id="header-user-fullname">Hộ Kinh Doanh Cá Nhân</p>
+                        <p class="text-[9px] text-slate-500 font-mono" id="header-user-mst">MST: 123123123123</p>
+                    </div>
+                </div>
+            </div>
+        </header>
+
+        <!-- Main Workspace -->
+        <main class="flex-1 overflow-y-auto p-8 bg-slate-50/50 no-print">
+            <div class="max-w-6xl mx-auto space-y-8">
+                
+                <!-- Grid layout with 8 robust, equal-height stretchable calculators -->
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-8 items-stretch">
+                    
+                    <!-- Card 1: GTGT & TNCN Calculator -->
+                    <div class="calculator-card bg-white p-6 rounded-2xl border border-slate-200 shadow-sm flex flex-col justify-between h-full space-y-6">
+                        <div class="space-y-4 flex-1">
+                            <div class="flex justify-between items-start">
+                                <div class="flex items-center gap-2.5">
+                                    <span class="material-symbols-outlined text-emerald-600 bg-emerald-50 p-1.5 rounded-lg text-lg">percent</span>
+                                    <h4 class="text-sm font-bold tracking-tight text-slate-800">Thuế GTGT &amp; TNCN nộp khoán</h4>
+                                </div>
+                                <span class="text-[10px] px-2.5 py-1 bg-emerald-50 text-emerald-700 font-bold rounded-full">Thông tư 40/2021</span>
+                            </div>
+                            
+                            <p class="text-xs text-slate-500 leading-relaxed">Khai báo doanh thu bán hàng và lĩnh vực để tính toán chính xác mức thuế tạm nộp theo Thông tư 40/2021/TT-BTC.</p>
+                            
+                            <div class="space-y-4">
+                                <div>
+                                    <label class="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">Ngành nghề / Lĩnh vực hoạt động</label>
+                                    <select id="calc-industry" class="w-full rounded-lg border-slate-200 text-xs focus:ring-1 focus:ring-emerald-500 focus:border-emerald-500 py-2">
+                                        <option value="commerce">Phân phối, bán buôn, bán lẻ hàng hóa (GTGT: 1%, TNCN: 0.5%)</option>
+                                        <option value="service">Dịch vụ, môi giới, đại lý (GTGT: 5%, TNCN: 2%)</option>
+                                        <option value="manufacture">Sản xuất, gia công, xây dựng có bao thầu (GTGT: 3%, TNCN: 1.5%)</option>
+                                        <option value="other">Hoạt động kinh doanh khác (GTGT: 2%, TNCN: 1%)</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label class="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">Doanh thu phát sinh (VNĐ)</label>
+                                    <input type="number" id="calc-revenue" placeholder="Ví dụ: 150000000..." class="w-full rounded-lg border-slate-200 text-xs focus:ring-1 focus:ring-emerald-500 focus:border-emerald-500 py-2">
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="space-y-4">
+                            <div class="flex gap-2">
+                                <button onclick="calculateTaxes()" class="flex-1 py-2.5 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-lg text-xs transition-all shadow-sm">Tính số thuế</button>
+                                <button onclick="saveToHistory('gtgt_tncn')" id="save-gtgt-btn" class="hidden px-3.5 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-lg text-xs transition-all" title="Lưu lịch sử">
+                                    <span class="material-symbols-outlined text-sm block">save</span>
+                                </button>
+                            </div>
+
+                            <!-- Result Section -->
+                            <div id="calc-tax-result" class="hidden fade-in p-4 bg-slate-50 border border-slate-200 rounded-xl space-y-2.5 text-xs">
+                                <div class="flex justify-between font-bold border-b pb-2 text-slate-800">
+                                    <span>TỔNG SỐ THUẾ PHẢI NỘP</span>
+                                    <span id="res-tax-total" class="text-rose-600 font-semibold text-sm">0 VNĐ</span>
+                                </div>
+                                <div class="flex justify-between text-[11px] text-slate-600">
+                                    <span>• Thuế Giá trị gia tăng (GTGT)</span>
+                                    <span id="res-tax-gtgt">0 VNĐ</span>
+                                </div>
+                                <div class="flex justify-between text-[11px] text-slate-600">
+                                    <span>• Thuế Thu nhập cá nhân (TNCN)</span>
+                                    <span id="res-tax-tncn">0 VNĐ</span>
+                                </div>
+                                <div class="pt-2 flex justify-end">
+                                    <button onclick="printReceipt('gtgt_tncn')" class="text-[10px] text-emerald-600 hover:underline flex items-center gap-1 font-bold">
+                                        <span class="material-symbols-outlined text-xs">print</span> Xuất PDF biên lai
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Card 2: Personal & Dependent Deductions -->
+                    <div class="calculator-card bg-white p-6 rounded-2xl border border-slate-200 shadow-sm flex flex-col justify-between h-full space-y-6">
+                        <div class="space-y-4 flex-1">
+                            <div class="flex justify-between items-start">
+                                <div class="flex items-center gap-2.5">
+                                    <span class="material-symbols-outlined text-emerald-600 bg-emerald-50 p-1.5 rounded-lg text-lg">group</span>
+                                    <h4 class="text-sm font-bold tracking-tight text-slate-800">Giảm trừ gia cảnh &amp; Thu nhập tính thuế</h4>
+                                </div>
+                                <span class="text-[10px] px-2.5 py-1 bg-emerald-50 text-emerald-700 font-bold rounded-full">Ngưỡng 2026</span>
+                            </div>
+                            
+                            <p class="text-xs text-slate-500 leading-relaxed">Áp dụng cho cá nhân kinh doanh nộp thuế theo biểu lũy tiến. Mức giảm trừ 2026: <strong class="text-emerald-700 font-semibold">Bản thân: 15.5tr/tháng, Người phụ thuộc: 6.2tr/tháng</strong>.</p>
+                            
+                            <div class="space-y-4">
+                                <div>
+                                    <label class="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">Thu nhập bình quân tháng (VNĐ)</label>
+                                    <input type="number" id="calc-monthly-income" placeholder="Nhập thu nhập..." class="w-full rounded-lg border-slate-200 text-xs focus:ring-1 focus:ring-emerald-500 focus:border-emerald-500 py-2">
+                                </div>
+                                <div>
+                                    <label class="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">Số người phụ thuộc đăng ký giảm trừ</label>
+                                    <input type="number" id="calc-dependents" placeholder="Ví dụ: 2" class="w-full rounded-lg border-slate-200 text-xs focus:ring-1 focus:ring-emerald-500 focus:border-emerald-500 py-2">
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="space-y-4">
+                            <div class="flex gap-2">
+                                <button onclick="calculateDeductions()" class="flex-1 py-2.5 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-lg text-xs transition-all shadow-sm">Tính thu nhập chịu thuế</button>
+                                <button onclick="saveToHistory('deductions')" id="save-deduct-btn" class="hidden px-3.5 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-lg text-xs transition-all" title="Lưu lịch sử">
+                                    <span class="material-symbols-outlined text-sm block">save</span>
+                                </button>
+                            </div>
+
+                            <!-- Result Section -->
+                            <div id="calc-deduct-result" class="hidden fade-in p-4 bg-emerald-50/50 border border-emerald-200 rounded-xl space-y-2.5 text-xs">
+                                <div class="flex justify-between font-bold border-b pb-2 text-emerald-950">
+                                    <span>THU NHẬP CHỊU THUẾ SAU GIẢM TRỪ</span>
+                                    <span id="res-deduct-taxable" class="text-emerald-700 font-semibold text-sm">0 VNĐ</span>
+                                </div>
+                                <div class="flex justify-between text-[11px] text-emerald-800">
+                                    <span>• Mức giảm trừ bản thân</span>
+                                    <span>15.500.000 VNĐ / tháng</span>
+                                </div>
+                                <div class="flex justify-between text-[11px] text-emerald-800">
+                                    <span>• Mức giảm trừ người phụ thuộc</span>
+                                    <span id="res-deduct-dependents-total">0 VNĐ / tháng</span>
+                                </div>
+                                <div class="pt-2 flex justify-end">
+                                    <button onclick="printReceipt('deductions')" class="text-[10px] text-emerald-600 hover:underline flex items-center gap-1 font-bold">
+                                        <span class="material-symbols-outlined text-xs">print</span> Xuất PDF biên lai
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Card 3: So sánh 3 phương pháp nộp thuế (including TNDN 20% & LLC) -->
+                    <div class="calculator-card bg-white p-6 rounded-2xl border border-slate-200 shadow-sm flex flex-col justify-between h-full space-y-6">
+                        <div class="space-y-4 flex-1">
+                            <div class="flex justify-between items-start">
+                                <div class="flex items-center gap-2.5">
+                                    <span class="material-symbols-outlined text-emerald-600 bg-emerald-50 p-1.5 rounded-lg text-lg">compare_arrows</span>
+                                    <h4 class="text-sm font-bold tracking-tight text-slate-800">Khoán vs Kê khai vs Lên Doanh nghiệp (TNDN 20%)</h4>
+                                </div>
+                                <span class="text-[10px] px-2.5 py-1 bg-blue-50 text-blue-700 font-bold rounded-full">Tối ưu mô hình</span>
+                            </div>
+                            
+                            <p class="text-xs text-slate-500 leading-relaxed">Phân tích toàn diện giúp Hộ kinh doanh lựa chọn phương pháp đóng thuế tối ưu nhất hoặc quyết định chuyển đổi sang doanh nghiệp TNHH.</p>
+                            
+                            <div class="space-y-4">
+                                <div class="grid grid-cols-2 gap-4">
+                                    <div>
+                                        <label class="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">Doanh thu năm (VNĐ)</label>
+                                        <input type="number" id="compare-rev" placeholder="Tổng doanh thu..." class="w-full rounded-lg border-slate-200 text-xs focus:ring-1 focus:ring-emerald-500 focus:border-emerald-500 py-2">
+                                    </div>
+                                    <div>
+                                        <label class="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">Tổng chi phí thực tế (VNĐ)</label>
+                                        <input type="number" id="compare-exp" placeholder="Chi phí hợp lý..." class="w-full rounded-lg border-slate-200 text-xs focus:ring-1 focus:ring-emerald-500 focus:border-emerald-500 py-2">
+                                    </div>
+                                </div>
+                                <div>
+                                    <label class="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">Ngành nghề kinh doanh</label>
+                                    <select id="compare-industry" class="w-full rounded-lg border-slate-200 text-xs focus:ring-1 focus:ring-emerald-500 focus:border-emerald-500 py-2">
+                                        <option value="commerce">Thương mại (Phân phối, bán buôn, bán lẻ)</option>
+                                        <option value="service">Dịch vụ, đại lý, môi giới</option>
+                                        <option value="manufacture">Sản xuất, gia công, xây dựng</option>
+                                        <option value="other">Lĩnh vực hoạt động khác</option>
+                                    </select>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="space-y-4">
+                            <div class="flex gap-2">
+                                <button onclick="compareMethods()" class="flex-1 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-lg text-xs transition-all shadow-sm">Phân tích phương pháp tối ưu</button>
+                                <button onclick="saveToHistory('compare')" id="save-compare-btn" class="hidden px-3.5 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-lg text-xs transition-all" title="Lưu lịch sử">
+                                    <span class="material-symbols-outlined text-sm block">save</span>
+                                </button>
+                            </div>
+
+                            <!-- Result Section -->
+                            <div id="compare-result" class="hidden fade-in p-4 bg-slate-50 border border-slate-200 rounded-xl space-y-3 text-xs">
+                                <p class="font-bold text-slate-800">Đánh giá &amp; So sánh mức thuế năm:</p>
+                                <div class="grid grid-cols-3 gap-2 text-[10px]">
+                                    <div class="p-2 bg-white border border-slate-200 rounded text-center">
+                                        <p class="font-bold text-slate-500">1. Thuế Khoán</p>
+                                        <p class="text-rose-600 font-bold mt-1 text-[11px]" id="res-compare-khoan">0 VNĐ</p>
+                                    </div>
+                                    <div class="p-2 bg-white border border-slate-200 rounded text-center">
+                                        <p class="font-bold text-slate-500">2. Thuế Kê khai</p>
+                                        <p class="text-amber-600 font-bold mt-1 text-[11px]" id="res-compare-kekhai">0 VNĐ</p>
+                                    </div>
+                                    <div class="p-2 bg-white border border-slate-200 rounded text-center">
+                                        <p class="font-bold text-slate-500">3. Lên TNHH (20%)</p>
+                                        <p class="text-emerald-600 font-bold mt-1 text-[11px]" id="res-compare-llc">0 VNĐ</p>
+                                    </div>
+                                </div>
+                                <div class="p-2.5 bg-emerald-50 border border-emerald-100 rounded text-emerald-800 font-medium leading-relaxed" id="compare-advice">
+                                    Khuyên dùng: ...
+                                </div>
+                                <div class="flex justify-end pt-1">
+                                    <button onclick="printReceipt('compare')" class="text-[10px] text-emerald-600 hover:underline flex items-center gap-1 font-bold">
+                                        <span class="material-symbols-outlined text-xs">print</span> Xuất PDF biên lai
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Card 4: Tiền phạt chậm nộp thuế -->
+                    <div class="calculator-card bg-white p-6 rounded-2xl border border-slate-200 shadow-sm flex flex-col justify-between h-full space-y-6">
+                        <div class="space-y-4 flex-1">
+                            <div class="flex justify-between items-start">
+                                <div class="flex items-center gap-2.5">
+                                    <span class="material-symbols-outlined text-rose-600 bg-rose-50 p-1.5 rounded-lg text-lg">event_busy</span>
+                                    <h4 class="text-sm font-bold tracking-tight text-slate-800">Tính tiền phạt chậm nộp thuế</h4>
+                                </div>
+                                <span class="text-[10px] px-2.5 py-1 bg-red-50 text-red-700 font-bold rounded-full">0.03% / ngày</span>
+                            </div>
+                            
+                            <p class="text-xs text-slate-500 leading-relaxed">Mức phạt chậm nộp quy định: <strong class="text-rose-700 font-semibold">0.03% / ngày</strong> trên số tiền thuế chậm nộp (Luật Quản lý thuế số 38/2019/QH14).</p>
+                            
+                            <div class="space-y-4">
+                                <div class="grid grid-cols-2 gap-4">
+                                    <div>
+                                        <label class="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">Số tiền thuế chậm nộp (VNĐ)</label>
+                                        <input type="number" id="late-amount" placeholder="Nhập số tiền..." class="w-full rounded-lg border-slate-200 text-xs focus:ring-1 focus:ring-emerald-500 focus:border-emerald-500 py-2">
+                                    </div>
+                                    <div>
+                                        <label class="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">Số ngày chậm nộp</label>
+                                        <input type="number" id="late-days" placeholder="Ví dụ: 30" class="w-full rounded-lg border-slate-200 text-xs focus:ring-1 focus:ring-emerald-500 focus:border-emerald-500 py-2">
+                                    </div>
+                                </div>
+                                <div>
+                                    <label class="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">Giai đoạn phát sinh khoản nợ thuế</label>
+                                    <select id="late-period" class="w-full rounded-lg border-slate-200 text-xs focus:ring-1 focus:ring-emerald-500 focus:border-emerald-500 py-2">
+                                        <option value="0.03">Từ 01/07/2016 đến nay (Mức 0.03% / ngày)</option>
+                                        <option value="0.05">Từ 01/01/2015 đến 30/06/2016 (Mức 0.05% / ngày)</option>
+                                        <option value="0.07">Trước 01/01/2015 (Mức 0.07% / ngày)</option>
+                                    </select>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="space-y-4">
+                            <div class="flex gap-2">
+                                <button onclick="calculateLatePenalty()" class="flex-1 py-2.5 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-lg text-xs transition-all shadow-sm">Tính tiền phạt</button>
+                                <button onclick="saveToHistory('penalty')" id="save-penalty-btn" class="hidden px-3.5 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-lg text-xs transition-all" title="Lưu lịch sử">
+                                    <span class="material-symbols-outlined text-sm block">save</span>
+                                </button>
+                            </div>
+
+                            <!-- Result Section -->
+                            <div id="late-result" class="hidden fade-in p-4 bg-red-50 border border-red-100 rounded-xl space-y-2.5 text-xs text-red-950">
+                                <div class="flex justify-between font-bold border-b border-red-200 pb-2">
+                                    <span>TỔNG TIỀN PHẢI NỘP (CẢ PHẠT)</span>
+                                    <span id="res-late-total" class="text-rose-600 font-semibold text-sm">0 VNĐ</span>
+                                </div>
+                                <div class="flex justify-between text-[11px] text-slate-600">
+                                    <span>• Tiền thuế gốc</span>
+                                    <span id="res-late-origin">0 VNĐ</span>
+                                </div>
+                                <div class="flex justify-between text-[11px] text-slate-600">
+                                    <span>• Tiền phạt chậm nộp (0.03% / ngày)</span>
+                                    <span id="res-late-penalty" class="font-bold">0 VNĐ</span>
+                                </div>
+                                <div class="pt-2 flex justify-end">
+                                    <button onclick="printReceipt('penalty')" class="text-[10px] text-emerald-600 hover:underline flex items-center gap-1 font-bold">
+                                        <span class="material-symbols-outlined text-xs">print</span> Xuất PDF biên lai
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Card 5: Thuế TNCN lũy tiến 7 bậc -->
+                    <div class="calculator-card bg-white p-6 rounded-2xl border border-slate-200 shadow-sm flex flex-col justify-between h-full space-y-6">
+                        <div class="space-y-4 flex-1">
+                            <div class="flex justify-between items-start">
+                                <div class="flex items-center gap-2.5">
+                                    <span class="material-symbols-outlined text-emerald-600 bg-emerald-50 p-1.5 rounded-lg text-lg">stairs</span>
+                                    <h4 class="text-sm font-bold tracking-tight text-slate-800">Thuế TNCN Lũy tiến (7 Bậc)</h4>
+                                </div>
+                                <span class="text-[10px] px-2.5 py-1 bg-emerald-50 text-emerald-700 font-bold rounded-full">Tiền lương &amp; Công</span>
+                            </div>
+                            
+                            <p class="text-xs text-slate-500 leading-relaxed">Biểu thuế lũy tiến từng phần theo Điều 22 Luật Thuế TNCN. Áp dụng cho thu nhập từ tiền lương và tiền công.</p>
+                            
+                            <div class="space-y-4">
+                                <div class="grid grid-cols-2 gap-4">
+                                    <div>
+                                        <label class="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">Thu nhập chịu thuế (VNĐ)</label>
+                                        <input type="number" id="progressive-income" placeholder="Thu nhập sau giảm trừ..." class="w-full rounded-lg border-slate-200 text-xs focus:ring-1 focus:ring-emerald-500 focus:border-emerald-500 py-2">
+                                    </div>
+                                    <div>
+                                        <label class="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">Chu kỳ thu nhập</label>
+                                        <select id="progressive-cycle" class="w-full rounded-lg border-slate-200 text-xs focus:ring-1 focus:ring-emerald-500 focus:border-emerald-500 py-2">
+                                            <option value="month">Thu nhập hàng tháng</option>
+                                            <option value="year">Thu nhập cả năm</option>
+                                        </select>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="space-y-4">
+                            <div class="flex gap-2">
+                                <button onclick="calculateProgressivePIT()" class="flex-1 py-2.5 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-lg text-xs transition-all shadow-sm">Tính thuế lũy tiến</button>
+                                <button onclick="saveToHistory('progressive')" id="save-progressive-btn" class="hidden px-3.5 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-lg text-xs transition-all" title="Lưu lịch sử">
+                                    <span class="material-symbols-outlined text-sm block">save</span>
+                                </button>
+                            </div>
+
+                            <!-- Result Section -->
+                            <div id="progressive-result" class="hidden fade-in p-4 bg-slate-50 border border-slate-200 rounded-xl space-y-2.5 text-xs">
+                                <div class="flex justify-between font-bold border-b pb-2 text-slate-800">
+                                    <span>TỔNG THUẾ TNCN PHẢI NỘP</span>
+                                    <span id="res-progressive-total" class="text-rose-600 font-semibold text-sm">0 VNĐ</span>
+                                </div>
+                                <div class="flex justify-between text-[11px] text-slate-600">
+                                    <span>• Mức thuế bình quân tháng</span>
+                                    <span id="res-progressive-monthly">0 VNĐ / tháng</span>
+                                </div>
+                                <div class="flex justify-between text-[11px] text-slate-600">
+                                    <span>• Bậc thuế cao nhất áp dụng</span>
+                                    <span id="res-progressive-bracket" class="font-bold text-emerald-600 text-sm">Bậc 1 (5%)</span>
+                                </div>
+                                <div class="pt-2 flex justify-end">
+                                    <button onclick="printReceipt('progressive')" class="text-[10px] text-emerald-600 hover:underline flex items-center gap-1 font-bold">
+                                        <span class="material-symbols-outlined text-xs">print</span> Xuất PDF biên lai
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Card 6: Lệ phí môn bài năm -->
+                    <div class="calculator-card bg-white p-6 rounded-2xl border border-slate-200 shadow-sm flex flex-col justify-between h-full space-y-6">
+                        <div class="space-y-4 flex-1">
+                            <div class="flex justify-between items-start">
+                                <div class="flex items-center gap-2.5">
+                                    <span class="material-symbols-outlined text-emerald-600 bg-emerald-50 p-1.5 rounded-lg text-lg">corporate_fare</span>
+                                    <h4 class="text-sm font-bold tracking-tight text-slate-800">Lệ phí môn bài hàng năm</h4>
+                                </div>
+                                <span class="text-[10px] px-2.5 py-1 bg-emerald-50 text-emerald-700 font-bold rounded-full">NĐ 139/2016</span>
+                            </div>
+                            
+                            <p class="text-xs text-slate-500 leading-relaxed">Mức lệ phí môn bài cố định nộp đầu năm áp dụng cho Doanh nghiệp (vốn điều lệ) và Hộ kinh doanh (doanh thu năm).</p>
+                            
+                            <div class="space-y-4">
+                                <div class="grid grid-cols-2 gap-4">
+                                    <div>
+                                        <label class="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">Loại hình tổ chức</label>
+                                        <select id="license-type" onchange="toggleLicenseInput()" class="w-full rounded-lg border-slate-200 text-xs focus:ring-1 focus:ring-emerald-500 focus:border-emerald-500 py-2">
+                                            <option value="household">Hộ kinh doanh cá thể</option>
+                                            <option value="business">Doanh nghiệp / Công ty</option>
+                                        </select>
+                                    </div>
+                                    <div id="license-rev-box">
+                                        <label class="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">Doanh thu năm (VNĐ)</label>
+                                        <input type="number" id="license-revenue" placeholder="Nhập doanh thu..." class="w-full rounded-lg border-slate-200 text-xs focus:ring-1 focus:ring-emerald-500 focus:border-emerald-500 py-2">
+                                    </div>
+                                    <div id="license-cap-box" class="hidden">
+                                        <label class="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">Vốn GPKD (VNĐ)</label>
+                                        <input type="number" id="license-capital" placeholder="Vốn đăng ký..." class="w-full rounded-lg border-slate-200 text-xs focus:ring-1 focus:ring-emerald-500 focus:border-emerald-500 py-2">
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="space-y-4">
+                            <div class="flex gap-2">
+                                <button onclick="calculateLicenseFee()" class="flex-1 py-2.5 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-lg text-xs transition-all shadow-sm">Xác định lệ phí môn bài</button>
+                                <button onclick="saveToHistory('license_fee')" id="save-license-btn" class="hidden px-3.5 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-lg text-xs transition-all" title="Lưu lịch sử">
+                                    <span class="material-symbols-outlined text-sm block">save</span>
+                                </button>
+                            </div>
+
+                            <!-- Result Section -->
+                            <div id="license-result" class="hidden fade-in p-4 bg-slate-50 border border-slate-200 rounded-xl space-y-2.5 text-xs">
+                                <div class="flex justify-between font-bold border-b pb-2 text-slate-800">
+                                    <span>MỨC LỆ PHÍ MÔN BÀI NĂM</span>
+                                    <span id="res-license-fee" class="text-rose-600 font-semibold text-sm">0 VNĐ</span>
+                                </div>
+                                <div class="flex justify-between text-[11px] text-slate-600">
+                                    <span>• Phân loại áp dụng</span>
+                                    <span id="res-license-level" class="font-bold text-emerald-600">...</span>
+                                </div>
+                                <div class="pt-2 flex justify-end">
+                                    <button onclick="printReceipt('license_fee')" class="text-[10px] text-emerald-600 hover:underline flex items-center gap-1 font-bold">
+                                        <span class="material-symbols-outlined text-xs">print</span> Xuất PDF biên lai
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Card 7: Thuế cho thuê tài sản -->
+                    <div class="calculator-card bg-white p-6 rounded-2xl border border-slate-200 shadow-sm flex flex-col justify-between h-full space-y-6">
+                        <div class="space-y-4 flex-1">
+                            <div class="flex justify-between items-start">
+                                <div class="flex items-center gap-2.5">
+                                    <span class="material-symbols-outlined text-emerald-600 bg-emerald-50 p-1.5 rounded-lg text-lg">real_estate_agent</span>
+                                    <h4 class="text-sm font-bold tracking-tight text-slate-800">Thuế cho thuê nhà, tài sản</h4>
+                                </div>
+                                <span class="text-[10px] px-2.5 py-1 bg-emerald-50 text-emerald-700 font-bold rounded-full">Ngưỡng: 100tr/năm</span>
+                            </div>
+                            
+                            <p class="text-xs text-slate-500 leading-relaxed">Thuế đối với hoạt động cho thuê nhà, mặt bằng kinh doanh hoặc ô tô: <strong class="text-emerald-700 font-semibold">GTGT 5% + TNCN 5% = 10%</strong> tổng doanh thu thuê.</p>
+                            
+                            <div class="space-y-4">
+                                <div class="grid grid-cols-2 gap-4">
+                                    <div>
+                                        <label class="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">Tiền thuê hàng tháng (VNĐ)</label>
+                                        <input type="number" id="rental-rent" placeholder="Giá thuê/tháng..." class="w-full rounded-lg border-slate-200 text-xs focus:ring-1 focus:ring-emerald-500 focus:border-emerald-500 py-2">
+                                    </div>
+                                    <div>
+                                        <label class="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">Số tháng cho thuê thực tế</label>
+                                        <input type="number" id="rental-months" placeholder="Ví dụ: 12" value="12" class="w-full rounded-lg border-slate-200 text-xs focus:ring-1 focus:ring-emerald-500 focus:border-emerald-500 py-2">
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="space-y-4">
+                            <div class="flex gap-2">
+                                <button onclick="calculateRentalTax()" class="flex-1 py-2.5 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-lg text-xs transition-all shadow-sm">Tính thuế cho thuê</button>
+                                <button onclick="saveToHistory('rental')" id="save-rental-btn" class="hidden px-3.5 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-lg text-xs transition-all" title="Lưu lịch sử">
+                                    <span class="material-symbols-outlined text-sm block">save</span>
+                                </button>
+                            </div>
+
+                            <!-- Result Section -->
+                            <div id="rental-result" class="hidden fade-in p-4 bg-slate-50 border border-slate-200 rounded-xl space-y-2.5 text-xs">
+                                <div class="flex justify-between font-bold border-b pb-2 text-slate-800">
+                                    <span>TỔNG SỐ THUẾ PHẢI NỘP</span>
+                                    <span id="res-rental-total" class="text-rose-600 font-semibold text-sm">0 VNĐ</span>
+                                </div>
+                                <div class="flex justify-between text-[11px] text-slate-600">
+                                    <span>• Tổng doanh thu nhận được</span>
+                                    <span id="res-rental-gross">0 VNĐ</span>
+                                </div>
+                                <div class="flex justify-between text-[11px] text-slate-600">
+                                    <span>• Thuế GTGT cho thuê (5%)</span>
+                                    <span id="res-rental-gtgt">0 VNĐ</span>
+                                </div>
+                                <div class="flex justify-between text-[11px] text-slate-600">
+                                    <span>• Thuế TNCN cho thuê (5%)</span>
+                                    <span id="res-rental-tncn">0 VNĐ</span>
+                                </div>
+                                <div class="pt-2 flex justify-end">
+                                    <button onclick="printReceipt('rental')" class="text-[10px] text-emerald-600 hover:underline flex items-center gap-1 font-bold">
+                                        <span class="material-symbols-outlined text-xs">print</span> Xuất PDF biên lai
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Card 8: Thuế nhà thầu nước ngoài (FCT) -->
+                    <div class="calculator-card bg-white p-6 rounded-2xl border border-slate-200 shadow-sm flex flex-col justify-between h-full space-y-6">
+                        <div class="space-y-4 flex-1">
+                            <div class="flex justify-between items-start">
+                                <div class="flex items-center gap-2.5">
+                                    <span class="material-symbols-outlined text-emerald-600 bg-emerald-50 p-1.5 rounded-lg text-lg">language</span>
+                                    <h4 class="text-sm font-bold tracking-tight text-slate-800">Thuế nhà thầu nước ngoài (FCT)</h4>
+                                </div>
+                                <span class="text-[10px] px-2.5 py-1 bg-blue-50 text-blue-700 font-bold rounded-full">Thông tư 103/2014</span>
+                            </div>
+                            
+                            <p class="text-xs text-slate-500 leading-relaxed">Tính thuế nhà thầu khi HKD thanh toán chi phí cho dịch vụ số/quảng cáo của các công ty nước ngoài (Facebook, Google...).</p>
+                            
+                            <div class="space-y-4">
+                                <div class="grid grid-cols-2 gap-4">
+                                    <div>
+                                        <label class="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">Giá trị hợp đồng (VNĐ)</label>
+                                        <input type="number" id="contractor-val" placeholder="Ví dụ: 50000000..." class="w-full rounded-lg border-slate-200 text-xs focus:ring-1 focus:ring-emerald-500 focus:border-emerald-500 py-2">
+                                    </div>
+                                    <div>
+                                        <label class="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">Loại dịch vụ ký kết</label>
+                                        <select id="contractor-service" class="w-full rounded-lg border-slate-200 text-xs focus:ring-1 focus:ring-emerald-500 focus:border-emerald-500 py-2">
+                                            <option value="services">Dịch vụ (Mạng, quảng cáo: GTGT 5%, TNDN 5%)</option>
+                                            <option value="goods">Cung cấp hàng hóa (TNDN: 1%)</option>
+                                            <option value="construction_goods">Xây dựng kèm vật tư (GTGT 3%, TNDN 2%)</option>
+                                        </select>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="space-y-4">
+                            <div class="flex gap-2">
+                                <button onclick="calculateContractorTax()" class="flex-1 py-2.5 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-lg text-xs transition-all shadow-sm">Tính thuế nhà thầu</button>
+                                <button onclick="saveToHistory('contractor')" id="save-contractor-btn" class="hidden px-3.5 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-lg text-xs transition-all" title="Lưu lịch sử">
+                                    <span class="material-symbols-outlined text-sm block">save</span>
+                                </button>
+                            </div>
+
+                            <!-- Result Section -->
+                            <div id="contractor-result" class="hidden fade-in p-4 bg-slate-50 border border-slate-200 rounded-xl space-y-2.5 text-xs">
+                                <div class="flex justify-between font-bold border-b pb-2 text-slate-800">
+                                    <span>TỔNG THUẾ NHÀ THẦU (FCT)</span>
+                                    <span id="res-contractor-total" class="text-rose-600 font-semibold text-sm">0 VNĐ</span>
+                                </div>
+                                <div class="flex justify-between text-[11px] text-slate-600">
+                                    <span>• Thuế GTGT nhà thầu</span>
+                                    <span id="res-contractor-gtgt">0 VNĐ</span>
+                                </div>
+                                <div class="flex justify-between text-[11px] text-slate-600">
+                                    <span>• Thuế TNDN nhà thầu</span>
+                                    <span id="res-contractor-tndn">0 VNĐ</span>
+                                </div>
+                                <div class="pt-2 flex justify-end">
+                                    <button onclick="printReceipt('contractor')" class="text-[10px] text-emerald-600 hover:underline flex items-center gap-1 font-bold">
+                                        <span class="material-symbols-outlined text-xs">print</span> Xuất PDF biên lai
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                </div>
+
+                <!-- Lịch sử tính toán thuế Section -->
+                <div class="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-4">
+                    <div class="flex justify-between items-center">
+                        <div class="flex items-center gap-2">
+                            <span class="material-symbols-outlined text-emerald-600">history</span>
+                            <h4 class="text-xs font-black uppercase tracking-wider text-slate-700">Lịch sử phép tính thuế đã thực hiện</h4>
+                        </div>
+                        <span class="text-[10px] px-2.5 py-1 bg-slate-100 text-slate-600 font-bold rounded-full" id="history-count">0 kết quả</span>
+                    </div>
+                    <p class="text-[11px] text-slate-500">Danh sách các phép tính thuế gần đây của bạn được lưu trữ đồng bộ với tài khoản Người nộp thuế để đối chiếu khi cần.</p>
+                    
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-xs text-left border-collapse">
+                            <thead>
+                                <tr class="border-b border-slate-200 text-slate-400 uppercase text-[9px] font-bold">
+                                    <th class="py-3">Thời gian</th>
+                                    <th class="py-3">Loại phép tính</th>
+                                    <th class="py-3">Tham số đầu vào</th>
+                                    <th class="py-3 text-right">Tổng thuế phải nộp</th>
+                                    <th class="py-3 text-center">Biên lai</th>
+                                </tr>
+                            </thead>
+                            <tbody id="history-table-body" class="divide-y divide-slate-100 text-slate-700">
+                                <tr>
+                                    <td colspan="5" class="py-8 text-center text-slate-400 italic">Chưa thực hiện phép tính nào hoặc chưa đăng nhập để đồng bộ lịch sử.</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+            </div>
+        </main>
+    </div>
+
+    <!-- PRINT-ONLY AREA overlay -->
+    <div id="print-area" class="hidden font-serif">
+        <div class="text-center border-b-2 border-black pb-4 mb-6">
+            <h1 class="text-2xl font-black tracking-tight uppercase">CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM</h1>
+            <p class="text-sm font-bold tracking-widest mt-1">Độc lập - Tự do - Hạnh phúc</p>
+            <div class="w-24 h-0.5 bg-black mx-auto mt-2"></div>
+            <h2 class="text-xl font-bold uppercase mt-6" id="print-title">BIÊN LAI TÍNH TOÁN THUẾ TỰ ĐỘNG</h2>
+            <p class="text-xs text-slate-600 mt-1" id="print-date">Thời gian xuất: ...</p>
+        </div>
+
+        <div class="space-y-4 text-sm mb-8">
+            <div class="grid grid-cols-2 gap-4 border-b pb-3">
+                <p><strong>Người thực hiện:</strong> <span id="print-user-name">Gia dụng Thuận Phát</span></p>
+                <p><strong>Mã số thuế:</strong> <span id="print-user-mst">8092471928</span></p>
+            </div>
+            
+            <div>
+                <h3 class="font-bold text-base mb-2">1. THAM SỐ KHAI BÁO ĐẦU VÀO</h3>
+                <div class="pl-4 space-y-1.5" id="print-inputs">
+                    <!-- Dynamic -->
+                </div>
+            </div>
+
+            <div class="mt-6">
+                <h3 class="font-bold text-base mb-2">2. KẾT QUẢ TÍNH THUẾ CHI TIẾT</h3>
+                <div class="border rounded p-4 bg-slate-50/50 space-y-2" id="print-results">
+                    <!-- Dynamic -->
+                </div>
+            </div>
+        </div>
+
+        <div class="mt-12 grid grid-cols-2 text-center text-xs">
+            <div>
+                <p class="font-bold">HỆ THỐNG TAXPAYER</p>
+                <p class="text-slate-400 italic mt-1">(Ký điện tử tự động)</p>
+                <div class="h-16 flex items-center justify-center">
+                    <span class="border border-emerald-500 text-emerald-600 font-mono font-bold px-3 py-1.5 uppercase rounded text-[10px] transform -rotate-3">Verified by Taxpayer</span>
+                </div>
+            </div>
+            <div>
+                <p class="font-bold">NGƯỜI NỘP THUẾ</p>
+                <p class="text-slate-400 italic mt-1">(Ký ghi rõ họ tên)</p>
+                <div class="h-16"></div>
+            </div>
+        </div>
+
+        <div class="mt-16 text-center text-[10px] text-slate-400 border-t pt-4 no-print">
+            Biên lai tính toán chỉ mang tính chất tham khảo dựa trên quy định pháp luật hiện hành.
+        </div>
+    </div>
+
+    <!-- Script loading -->
+    <script src="../js/business_taxpayer_common.js"></script>
+    <script src="../js/business_calculator.js?v=1.1"></script>
+    <script src="../js/business_intelligence.js"></script>
+</body>
+</html>

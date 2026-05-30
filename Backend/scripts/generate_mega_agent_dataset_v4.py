@@ -17,6 +17,7 @@ Colab notebook: Backend/data/agent_ultimate_dataset.jsonl.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import importlib.util
 import json
 import random
@@ -33,9 +34,16 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 SCRIPT_DIR = Path(__file__).resolve().parent
 OUTPUT = BASE_DIR / "data" / "agent_ultimate_dataset_v4.jsonl"
 LATEST_OUTPUT = BASE_DIR / "data" / "agent_ultimate_dataset.jsonl"
+DEFAULT_SPLIT_RATIOS = {"train": 80, "dev": 10, "test": 10}
 
 if str(BASE_DIR) not in sys.path:
     sys.path.insert(0, str(BASE_DIR))
+
+from ml_engine.tax_agent_tool_contracts import (  # noqa: E402
+    CANONICAL_TOOL_NAMES,
+    tool_prompt_lines,
+    validate_tool_call,
+)
 
 
 def strip_accents(value: str) -> str:
@@ -72,6 +80,61 @@ def normalize_query(value: str) -> str:
     text = strip_accents(value).lower()
     text = re.sub(r"[^\w\s]", " ", text)
     return clean_spaces(text)
+
+
+def split_for_group(split_group: str, ratios: dict[str, int] | None = None) -> str:
+    """Assign a stable train/dev/test split for a semantic group."""
+    ratios = ratios or DEFAULT_SPLIT_RATIOS
+    total = sum(ratios.values()) or 100
+    digest = hashlib.sha1(normalize_query(split_group).encode("utf-8")).hexdigest()
+    bucket = int(digest[:8], 16) % total
+    running = 0
+    for name in ("train", "dev", "test"):
+        running += int(ratios.get(name, 0))
+        if bucket < running:
+            return name
+    return "train"
+
+
+def first_user_message(record: dict[str, Any]) -> str:
+    for message in record.get("messages", []):
+        if message.get("role") == "user":
+            return str(message.get("content") or "")
+    return ""
+
+
+def assign_split(record: dict[str, Any], split_group: str | None = None) -> None:
+    metadata = record.setdefault("metadata", {})
+    group = split_group or metadata.get("split_group") or first_user_message(record)
+    metadata["split_group"] = normalize_query(str(group or "ungrouped"))
+    metadata["split"] = split_for_group(metadata["split_group"])
+
+
+def validate_dataset_tool_calls(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Return invalid tool-call diagnostics; empty list means the dataset is safe."""
+    invalid: list[dict[str, Any]] = []
+    for idx, record in enumerate(records):
+        for message in record.get("messages", []):
+            if message.get("role") != "assistant":
+                continue
+            content = str(message.get("content") or "")
+            match = re.search(r"<tool_call>\s*(\{.*?\})\s*</tool_call>", content, re.DOTALL)
+            if not match:
+                continue
+            try:
+                payload = json.loads(match.group(1))
+            except json.JSONDecodeError as exc:
+                invalid.append({"row": idx, "reason": f"invalid_json:{exc}"})
+                continue
+            ok, canonical_name, _args, reason = validate_tool_call(payload)
+            if not ok:
+                invalid.append({
+                    "row": idx,
+                    "tool": payload.get("name"),
+                    "canonical_tool": canonical_name,
+                    "reason": reason,
+                })
+    return invalid
 
 
 def apply_abbreviations(value: str) -> str:
@@ -170,10 +233,10 @@ TOOL_BLUEPRINTS: list[dict[str, Any]] = [
         ],
     },
     {
-        "name": "gnn_vat_fraud",
+        "name": "gnn_analysis",
         "mode": "fraud",
         "description": "Pipeline gian lận VAT kết hợp graph/GNN.",
-        "thought": "Yêu cầu đánh giá gian lận VAT bằng tín hiệu đồ thị. Gọi gnn_vat_fraud.",
+        "thought": "Yêu cầu đánh giá gian lận VAT bằng tín hiệu đồ thị. Gọi gnn_analysis.",
         "args": lambda rng: {"tax_code": make_tax_code(rng)},
         "templates": [
             "Đánh giá gian lận VAT bằng GNN cho MST {tax_code}",
@@ -285,7 +348,7 @@ TOOL_BLUEPRINTS: list[dict[str, Any]] = [
         "mode": "fraud",
         "description": "Tìm doanh nghiệp theo tên.",
         "thought": "Người dùng đưa tên doanh nghiệp thay vì MST. Gọi company_name_search.",
-        "args": lambda rng: {"query": make_company_name(rng), "limit": rng.choice([5, 10])},
+        "args": lambda rng: {"name": make_company_name(rng), "limit": rng.choice([5, 10])},
         "templates": [
             "Tìm thông tin về {company_name}",
             "Tra cứu công ty tên {company_name}",
@@ -362,7 +425,11 @@ TOOL_BLUEPRINTS: list[dict[str, Any]] = [
         "mode": "vat",
         "description": "OCR hóa đơn/chứng từ.",
         "thought": "Yêu cầu đọc chứng từ/hóa đơn bằng OCR. Gọi ocr_document_process.",
-        "args": lambda rng: {"document_type": rng.choice(["invoice", "receipt", "tax_notice"]), "language": "vi"},
+        "args": lambda rng: {
+            "file_path": "<uploaded_file>",
+            "document_type": rng.choice(["invoice", "receipt", "tax_notice"]),
+            "language": "vi",
+        },
         "templates": [
             "Đọc hóa đơn tôi đính kèm và trích xuất thông tin thuế",
             "OCR chứng từ thuế này rồi kiểm tra trường dữ liệu",
@@ -381,6 +448,14 @@ TOOL_BLUEPRINTS: list[dict[str, Any]] = [
         ],
     },
 ]
+
+_UNKNOWN_BLUEPRINT_TOOLS = [spec["name"] for spec in TOOL_BLUEPRINTS if spec["name"] not in CANONICAL_TOOL_NAMES]
+if _UNKNOWN_BLUEPRINT_TOOLS:
+    TOOL_BLUEPRINTS = [spec for spec in TOOL_BLUEPRINTS if spec["name"] in CANONICAL_TOOL_NAMES]
+_DEDUPED_BLUEPRINTS: dict[str, dict[str, Any]] = {}
+for _spec in TOOL_BLUEPRINTS:
+    _DEDUPED_BLUEPRINTS.setdefault(_spec["name"], _spec)
+TOOL_BLUEPRINTS = list(_DEDUPED_BLUEPRINTS.values())
 
 
 LEGAL_TOOL_QUERIES = [
@@ -476,9 +551,6 @@ def load_legal_deep_data() -> list[dict[str, Any]]:
 
 
 def build_system_prompt() -> str:
-    tool_lines = []
-    for idx, spec in enumerate(TOOL_BLUEPRINTS, 1):
-        tool_lines.append(f"{idx}. {spec['name']}(...): {spec['description']}")
     return (
         "Bạn là TaxInspector AI - Trợ lý Thanh tra Thuế và tư vấn pháp luật thuế.\n"
         "Nhiệm vụ: hiểu yêu cầu tiếng Việt tự nhiên, kể cả không dấu/viết tắt/sai ký tự nhẹ; "
@@ -490,7 +562,7 @@ def build_system_prompt() -> str:
         "Quy tắc sau khi nhận tool result pháp luật:\n"
         "- Tổng hợp bằng tiếng Việt rõ ràng, có căn cứ, điều kiện áp dụng, bước xử lý, cảnh báo rủi ro.\n"
         "- Ưu tiên GraphRAG/knowledge graph, authority path và tình trạng hiệu lực; không kết luận vượt quá chứng cứ.\n\n"
-        "Công cụ khả dụng:\n" + "\n".join(tool_lines)
+        "Công cụ khả dụng:\n" + "\n".join(tool_prompt_lines())
     )
 
 
@@ -499,6 +571,10 @@ SYSTEM_PROMPT = build_system_prompt()
 
 def tool_call_content(tool_name: str, args: dict[str, Any]) -> str:
     payload = {"name": tool_name, "arguments": args}
+    ok, canonical_name, canonical_args, reason = validate_tool_call(payload)
+    if not ok:
+        raise ValueError(f"Invalid tool call for training data: {tool_name} ({reason})")
+    payload = {"name": canonical_name, "arguments": canonical_args}
     return json.dumps(payload, ensure_ascii=False, sort_keys=True)
 
 
@@ -511,13 +587,13 @@ def render_template(template: str, args: dict[str, Any], rng: random.Random) -> 
         "gdp": round((args.get("scenario") or {}).get("gdp_growth", 5.5), 1),
         "vat": (args.get("scenario") or {}).get("vat_rate", 10),
         "cpi": round((args.get("scenario") or {}).get("cpi", 3.5), 1),
-        "company_name": args.get("query") or make_company_name(rng),
+        "company_name": args.get("name") or args.get("query") or make_company_name(rng),
     }
     return template.format(**values)
 
 
 def make_task_record(query: str, tool_name: str, args: dict[str, Any], thought: str) -> dict[str, Any]:
-    return {
+    record = {
         "messages": [
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user", "content": query},
@@ -528,6 +604,8 @@ def make_task_record(query: str, tool_name: str, args: dict[str, Any], thought: 
             "expected_tool": tool_name,
         },
     }
+    assign_split(record, query)
+    return record
 
 
 def make_legal_record(data_item: dict[str, Any], rng: random.Random) -> dict[str, Any]:
@@ -565,7 +643,7 @@ def make_legal_record(data_item: dict[str, Any], rng: random.Random) -> dict[str
             "requires_effective_date_check": True,
         },
     }
-    return {
+    record = {
         "messages": [
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user", "content": query},
@@ -578,6 +656,8 @@ def make_legal_record(data_item: dict[str, Any], rng: random.Random) -> dict[str
             "expected_tool": "knowledge_search",
         },
     }
+    assign_split(record, base_query)
+    return record
 
 
 def make_smalltalk_record(query: str) -> dict[str, Any]:
@@ -591,7 +671,7 @@ def make_smalltalk_record(query: str) -> dict[str, Any]:
         )
     else:
         answer = "Xin chào! Bạn có thể gửi câu hỏi thuế, MST/tên doanh nghiệp, hoặc upload tệp cần phân tích."
-    return {
+    record = {
         "messages": [
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user", "content": query},
@@ -599,10 +679,12 @@ def make_smalltalk_record(query: str) -> dict[str, Any]:
         ],
         "metadata": {"kind": "smalltalk", "expected_tool": None},
     }
+    assign_split(record, query)
+    return record
 
 
 def make_clarification_record(query: str) -> dict[str, Any]:
-    return {
+    record = {
         "messages": [
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user", "content": query},
@@ -616,6 +698,8 @@ def make_clarification_record(query: str) -> dict[str, Any]:
         ],
         "metadata": {"kind": "clarification", "expected_tool": None},
     }
+    assign_split(record, query)
+    return record
 
 
 def generate(
@@ -650,6 +734,7 @@ def generate(
             query = rng.choice(make_noisy_variants(wrapped, rng, max_variants=4))
             record = make_task_record(query, spec["name"], args, spec["thought"])
             record["metadata"]["mode"] = spec["mode"]
+            assign_split(record, base_query)
             dataset.append(record)
             counts[spec["name"]] += 1
 
@@ -669,6 +754,11 @@ def generate(
         dataset.append(make_clarification_record(query))
         counts["clarification"] += 1
 
+    invalid_tool_calls = validate_dataset_tool_calls(dataset)
+    if invalid_tool_calls:
+        preview = invalid_tool_calls[:5]
+        raise RuntimeError(f"Generated dataset contains invalid tool calls: {preview}")
+
     rng.shuffle(dataset)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     with output_path.open("w", encoding="utf-8") as f:
@@ -678,6 +768,11 @@ def generate(
     if write_latest_alias and output_path.resolve() != LATEST_OUTPUT.resolve():
         shutil.copyfile(output_path, LATEST_OUTPUT)
 
+    split_distribution = Counter(
+        str(record.get("metadata", {}).get("split") or "unknown")
+        for record in dataset
+    )
+    manifest_path = output_path.with_suffix(output_path.suffix + ".manifest.json")
     summary = {
         "output": str(output_path),
         "latest_alias": str(LATEST_OUTPUT) if write_latest_alias else None,
@@ -685,8 +780,13 @@ def generate(
         "legal_seed_records": len(legal_data),
         "tool_count": len(TOOL_BLUEPRINTS),
         "distribution": dict(sorted(counts.items())),
+        "split_distribution": dict(sorted(split_distribution.items())),
+        "canonical_tools": sorted(CANONICAL_TOOL_NAMES),
+        "deprecated_tools_dropped": list(_UNKNOWN_BLUEPRINT_TOOLS),
         "seed": seed,
     }
+    manifest_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
+    summary["manifest"] = str(manifest_path)
     print(json.dumps(summary, ensure_ascii=False, indent=2))
     return summary
 

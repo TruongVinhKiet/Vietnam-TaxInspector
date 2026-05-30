@@ -180,16 +180,43 @@ def register(
     user: schemas.UserCreate,
     db: Session = Depends(get_db),
 ):
+    # ── Role normalization: merge 'enterprise' into 'taxpayer' ──
+    # From 2025 onwards, both individual and enterprise taxpayers share the same
+    # portal. Legacy 'enterprise' registrations are silently normalized.
+    effective_role = user.role
+    if effective_role == "enterprise":
+        effective_role = "taxpayer"
+
+    # Enforce role-based validations
+    is_taxpayer = effective_role == "taxpayer"
+    
+    if is_taxpayer:
+        # Taxpayer may register with 12-digit CCCD or 10-digit MST
+        if not re.match(r"^\d{10}$|^\d{12}$", user.badge_id):
+            raise HTTPException(
+                status_code=400, 
+                detail="Số CCCD phải có đúng 12 chữ số hoặc Mã số thuế phải có đúng 10 chữ số."
+            )
+    else:
+        # Officer/Inspector roles must use a government email
+        if not user.email.lower().endswith("@gdt.gov.vn"):
+            raise HTTPException(
+                status_code=400,
+                detail="Email đăng ký của cán bộ phải là email công vụ (@gdt.gov.vn)."
+            )
+
     # Check if badge_id or email already exists
     db_user_badge = db.query(models.User).filter(models.User.badge_id == user.badge_id).first()
     if db_user_badge:
-        raise HTTPException(status_code=400, detail="Mã số cán bộ đã được đăng ký trong hệ thống.")
+        detail_msg = "Mã số thuế hoặc CCCD đã được đăng ký trong hệ thống." if is_taxpayer else "Mã số cán bộ đã được đăng ký trong hệ thống."
+        raise HTTPException(status_code=400, detail=detail_msg)
     
     db_user_email = db.query(models.User).filter(models.User.email == user.email).first()
     if db_user_email:
-        raise HTTPException(status_code=400, detail="Email công vụ đã được đăng ký.")
+        detail_msg = "Email đã được đăng ký trong hệ thống." if is_taxpayer else "Email công vụ đã được đăng ký."
+        raise HTTPException(status_code=400, detail=detail_msg)
 
-    # Create new user
+    # Create new user – always store the normalized role
     hashed_password = auth.get_password_hash(user.password)
     db_user = models.User(
         badge_id=user.badge_id,
@@ -198,7 +225,7 @@ def register(
         email=user.email,
         phone=user.phone,
         password_hash=hashed_password,
-        role=user.role
+        role=effective_role
     )
     db.add(db_user)
     db.commit()
@@ -222,14 +249,20 @@ def login(
     user_credentials: schemas.LoginRequest,
     db: Session = Depends(get_db),
 ):
-    user = db.query(models.User).filter(models.User.badge_id == user_credentials.badge_id).first()
+    # Try badge_id first; fallback to email lookup (taxpayers may login with email)
+    identifier = user_credentials.badge_id.strip()
+    user = db.query(models.User).filter(models.User.badge_id == identifier).first()
+    if not user and "@" in identifier:
+        user = db.query(models.User).filter(
+            models.User.email == identifier.lower()
+        ).first()
     
     if not user:
         auth.log_audit(db, "LOGIN_FAILED", request, badge_id=user_credentials.badge_id,
                        detail="Tài khoản không tồn tại.")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Tài khoản cán bộ không tồn tại.",
+            detail="Tài khoản hoặc mật khẩu không chính xác.",
         )
     if not auth.verify_password(user_credentials.password, user.password_hash):
         auth.log_audit(db, "LOGIN_FAILED", request, user_id=user.id, badge_id=user.badge_id,
@@ -238,11 +271,31 @@ def login(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Tài khoản hoặc mật khẩu không chính xác.",
         )
+
+    # ── Role verification: ensure selected portal matches account role ──
+    TAXPAYER_ROLES = ("taxpayer", "enterprise")
+    expected = user_credentials.expected_role
+    if expected:
+        actual_is_taxpayer = user.role in TAXPAYER_ROLES
+        if expected == "taxpayer" and not actual_is_taxpayer:
+            auth.log_audit(db, "LOGIN_FAILED", request, user_id=user.id, badge_id=user.badge_id,
+                           detail=f"Role mismatch: expected taxpayer, got {user.role}")
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Không tìm thấy tài khoản Người nộp thuế với thông tin này.",
+            )
+        if expected == "inspector" and actual_is_taxpayer:
+            auth.log_audit(db, "LOGIN_FAILED", request, user_id=user.id, badge_id=user.badge_id,
+                           detail=f"Role mismatch: expected officer, got {user.role}")
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Không tìm thấy tài khoản Cán bộ / Thanh tra với thông tin này.",
+            )
     
     _create_and_set_cookie(user, response)
     auth.log_audit(db, "LOGIN_SUCCESS", request, user_id=user.id, badge_id=user.badge_id)
 
-    return {"success": True, "message": "Đăng nhập thành công."}
+    return {"success": True, "message": "Đăng nhập thành công.", "role": user.role, "full_name": user.full_name}
 
 
 # =============================================================================
@@ -605,7 +658,14 @@ def login_face(
     _create_and_set_cookie(match, response)
     auth.log_audit(db, "FACE_LOGIN_SUCCESS", request, user_id=match.id, badge_id=match.badge_id,
                    detail=f"Distance: {dist:.4f}")
-    return {"success": True, "require_signature": False, "message": "Xác thực khuôn mặt thành công."}
+    return {
+        "success": True,
+        "require_signature": False,
+        "message": "Xác thực khuôn mặt thành công.",
+        "role": match.role,
+        "full_name": match.full_name,
+        "badge_id": match.badge_id,
+    }
 
 
 # =============================================================================
@@ -702,7 +762,14 @@ def login_cccd(
     # No signature → grant full session
     _create_and_set_cookie(matched_user, response)
     auth.log_audit(db, "CCCD_LOGIN_SUCCESS", request, user_id=matched_user.id, badge_id=matched_user.badge_id)
-    return {"success": True, "require_signature": False, "message": "Xác thực CCCD thành công."}
+    return {
+        "success": True,
+        "require_signature": False,
+        "message": "Xác thực CCCD thành công.",
+        "role": matched_user.role,
+        "full_name": matched_user.full_name,
+        "badge_id": matched_user.badge_id,
+    }
 
 
 # =============================================================================
@@ -787,4 +854,10 @@ def login_signature(
     auth.log_audit(db, "SIGNATURE_LOGIN_SUCCESS", request, user_id=user.id, badge_id=user.badge_id,
                    detail=f"Hamming distance: {distance}")
 
-    return {"success": True, "message": "Xác thực chữ ký thành công. Đăng nhập hoàn tất."}
+    return {
+        "success": True,
+        "message": "Xác thực chữ ký thành công. Đăng nhập hoàn tất.",
+        "role": user.role,
+        "full_name": user.full_name,
+        "badge_id": user.badge_id,
+    }

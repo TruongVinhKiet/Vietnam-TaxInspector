@@ -1,0 +1,618 @@
+<!DOCTYPE html>
+<html lang="vi" class="h-full bg-slate-50">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Vietnam Taxpayer - Nhận diện &amp; Đăng ký</title>
+    <!-- Tailwind CSS Dynamic CDN -->
+    <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Outfit', 'system-ui', 'sans-serif'],
+                    },
+                    colors: {
+                        'primary': '#002147',
+                        'primary-container': '#003366',
+                        'surface-container-lowest': '#ffffff',
+                        'surface-container-low': '#f8f9fa',
+                        'surface-container': '#f1f3f5',
+                        'outline-variant': '#dee2e6'
+                    }
+                }
+            }
+        }
+    </script>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" rel="stylesheet">
+    <link rel="stylesheet" href="../css/global.css">
+    
+    <!-- Leaflet JS Map Engine integration -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+    
+    <style>
+        /* Font is globally set in global.css via var(--font-primary) = Outfit */
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+        #leaflet-map {
+            z-index: 1;
+        }
+        .fade-in {
+            animation: fadeIn 0.4s ease-out forwards;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        canvas {
+            border: 2px dashed #cbd5e1;
+            border-radius: 8px;
+            cursor: crosshair;
+        }
+    </style>
+    <script src="../js/api.js?v=3.4"></script>
+</head>
+<body class="bg-slate-50 text-slate-800 selection:bg-emerald-500/25 font-sans antialiased">
+    <!-- Sidebar -->
+    <aside class="fixed left-0 top-0 bottom-0 w-64 bg-slate-900 text-white shadow-2xl flex flex-col py-6 z-50">
+        <!-- Brand Logo -->
+        <div class="px-6 mb-10 flex items-center gap-3">
+            <div class="w-10 h-10 bg-white/10 rounded flex items-center justify-center p-1.5 shadow-inner">
+                <img src="../assets/logo.png" alt="Taxpayer Logo" class="w-full h-full object-contain rounded" />
+            </div>
+            <div>
+                <h1 class="text-xl font-bold tracking-tighter text-white">Taxpayer</h1>
+                <p class="text-[10px] uppercase tracking-widest text-slate-400 font-semibold" id="sidebar-subtitle">Hệ thống của tôi</p>
+            </div>
+        </div>
+
+        <!-- Navigation Items -->
+        <nav class="flex-1 px-2 space-y-1 overflow-y-auto no-scrollbar" id="sidebar-nav">
+            <!-- Dashboard Overview -->
+            <a href="business_dashboard.html" class="nav-item text-slate-400 hover:text-white transition-colors hover:bg-white/5 flex items-center gap-3 px-4 py-3 scale-95 active:scale-90 transition-transform rounded-lg" data-page="business_dashboard.html" data-title="Tổng quan Hộ kinh doanh">
+                <span class="material-symbols-outlined">dashboard</span>
+                <span class="text-sm">Tổng quan</span>
+            </a>
+            
+            <div class="pt-3 pb-1.5 px-3 text-[9px] font-black text-slate-500 uppercase tracking-widest">Nhóm Nghiệp Vụ</div>
+            
+            <!-- Nhóm 1: Nhận diện & Đăng ký -->
+            <a href="business_registration.html" class="nav-item text-slate-400 hover:text-white transition-colors hover:bg-white/5 flex items-center gap-3 px-4 py-3 scale-95 active:scale-90 transition-transform rounded-lg" data-page="business_registration.html" data-title="Nhận diện & Đăng ký Thuế">
+                <span class="material-symbols-outlined">app_registration</span>
+                <span class="text-sm font-semibold text-emerald-400 bg-emerald-500/10 rounded-lg">Nhận diện & Đăng ký</span>
+            </a>
+            
+            <!-- Nhóm 2: Tính thuế tự động -->
+            <a href="business_calculator.html" class="nav-item text-slate-400 hover:text-white transition-colors hover:bg-white/5 flex items-center gap-3 px-4 py-3 scale-95 active:scale-90 transition-transform rounded-lg" data-page="business_calculator.html" data-title="Tính toán Thuế tự động">
+                <span class="material-symbols-outlined">calculate</span>
+                <span class="text-sm">Tính thuế tự động</span>
+            </a>
+            
+            <!-- Nhóm 3: Lịch & Deadline -->
+            <a href="business_calendar.html" class="nav-item text-slate-400 hover:text-white transition-colors hover:bg-white/5 flex items-center gap-3 px-4 py-3 scale-95 active:scale-90 transition-transform rounded-lg" data-page="business_calendar.html" data-title="Lịch Trình & Hạn Nộp Thuế">
+                <span class="material-symbols-outlined">calendar_month</span>
+                <span class="text-sm">Lịch & Deadline thuế</span>
+            </a>
+            
+            <!-- Nhóm 4: Hóa đơn điện tử -->
+            <a href="business_invoices.html" class="nav-item text-slate-400 hover:text-white transition-colors hover:bg-white/5 flex items-center gap-3 px-4 py-3 scale-95 active:scale-90 transition-transform rounded-lg" data-page="business_invoices.html" data-title="Quản lý Hóa đơn điện tử">
+                <span class="material-symbols-outlined">receipt_long</span>
+                <span class="text-sm">Hóa đơn điện tử</span>
+            </a>
+            
+            <!-- Nhóm 5: Kê khai & Nộp thuế -->
+            <a href="business_filing.html" class="nav-item text-slate-400 hover:text-white transition-colors hover:bg-white/5 flex items-center gap-3 px-4 py-3 scale-95 active:scale-90 transition-transform rounded-lg" data-page="business_filing.html" data-title="Kê khai & Nộp thuế trực tuyến">
+                <span class="material-symbols-outlined">edit_document</span>
+                <span class="text-sm">Kê khai & Nộp thuế</span>
+            </a>
+            
+            <!-- Nhóm 6: Nghĩa vụ & Nợ thuế -->
+            <a href="business_debts.html" class="nav-item text-slate-400 hover:text-white transition-colors hover:bg-white/5 flex items-center gap-3 px-4 py-3 scale-95 active:scale-90 transition-transform rounded-lg" data-page="business_debts.html" data-title="Tra cứu Nghĩa vụ & Nợ thuế">
+                <span class="material-symbols-outlined">account_balance_wallet</span>
+                <span class="text-sm">Nghĩa vụ & Nợ thuế</span>
+            </a>
+            
+            <!-- Nhóm 7: Tra cứu pháp luật & Hỏi đáp AI -->
+            <a href="business_legal.html" class="nav-item text-slate-400 hover:text-white transition-colors hover:bg-white/5 flex items-center gap-3 px-4 py-3 scale-95 active:scale-90 transition-transform rounded-lg" data-page="business_legal.html" data-title="Tra cứu luật & Hỏi đáp AI">
+                <span class="material-symbols-outlined">chat</span>
+                <span class="text-sm">Tra cứu & AI Hỏi đáp</span>
+            </a>
+            
+            <!-- Nhóm 8: Phát triển & Thay đổi mô hình -->
+            <a href="business_growth.html" class="nav-item text-slate-400 hover:text-white transition-colors hover:bg-white/5 flex items-center gap-3 px-4 py-3 scale-95 active:scale-90 transition-transform rounded-lg" data-page="business_growth.html" data-title="Thay đổi Quy mô & Mô hình">
+                <span class="material-symbols-outlined">published_with_changes</span>
+                <span class="text-sm">Thay đổi mô hình</span>
+            </a>
+            
+            <!-- Nhóm 9: Kế toán & Sổ sách đơn giản -->
+            <a href="business_accounting.html" class="nav-item text-slate-400 hover:text-white transition-colors hover:bg-white/5 flex items-center gap-3 px-4 py-3 scale-95 active:scale-90 transition-transform rounded-lg" data-page="business_accounting.html" data-title="Sổ sách Kế toán đơn giản">
+                <span class="material-symbols-outlined">menu_book</span>
+                <span class="text-sm">Kế toán & Sổ sách</span>
+            </a>
+            
+            <!-- Nhóm 10: Quản lý chi phí được trừ -->
+            <a href="business_expenses.html" class="nav-item text-slate-400 hover:text-white transition-colors hover:bg-white/5 flex items-center gap-3 px-4 py-3 scale-95 active:scale-90 transition-transform rounded-lg" data-page="business_expenses.html" data-title="Quản lý Chi phí được trừ">
+                <span class="material-symbols-outlined">payments</span>
+                <span class="text-sm">Chi phí được trừ</span>
+            </a>
+            
+            <!-- Nhóm 11: Bảo vệ quyền lợi & Khiếu nại -->
+            <a href="business_claims.html" class="nav-item text-slate-400 hover:text-white transition-colors hover:bg-white/5 flex items-center gap-3 px-4 py-3 scale-95 active:scale-90 transition-transform rounded-lg" data-page="business_claims.html" data-title="Khiếu nại & Bảo vệ quyền lợi">
+                <span class="material-symbols-outlined">gavel</span>
+                <span class="text-sm">Quyền lợi & Khiếu nại</span>
+            </a>
+
+            <!-- Tài khoản -->
+            <a href="business_profile.html" class="nav-item text-slate-400 hover:text-white transition-colors hover:bg-white/5 flex items-center gap-3 px-4 py-3 scale-95 active:scale-90 transition-transform rounded-lg" data-page="business_profile.html" data-title="Tài khoản Người nộp thuế">
+                <span class="material-symbols-outlined">account_circle</span>
+                <span class="text-sm">Tài khoản</span>
+            </a>
+        </nav>
+
+        <!-- Profile Badge -->
+        <div class="mt-auto px-4">
+            <div class="pt-4 border-t border-white/5 pb-4">
+                <div class="flex items-center gap-3 p-2 rounded-lg bg-white/5 mx-2">
+                    <div class="w-8 h-8 rounded bg-emerald-500/20 flex items-center justify-center overflow-hidden shrink-0" id="user-avatar-container">
+                        <span id="user-avatar-fallback" class="text-emerald-400 text-xs font-black tracking-tight">NNT</span>
+                    </div>
+                    <div id="user-profile-badge">
+                        <p class="text-xs font-bold text-slate-200 truncate max-w-[120px]" id="user-full-name">Người nộp thuế</p>
+                        <p class="text-[10px] text-slate-400 font-mono" id="user-current-role">Đang hoạt động</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </aside>
+
+    <!-- Main Content Area -->
+    <div class="flex-1 flex flex-col min-w-0 overflow-hidden ml-64 max-w-[calc(100%-16rem)]">
+        <!-- Top Header -->
+        <header class="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-8 flex-shrink-0 z-40">
+            <div class="flex items-center gap-3 text-xs">
+                <span class="text-slate-400">Trang chủ</span>
+                <span class="text-slate-300">/</span>
+                <span class="text-slate-400">Người nộp thuế</span>
+                <span class="text-slate-300">/</span>
+                <span id="breadcrumb-current" class="text-slate-800 font-semibold">Nhận diện &amp; Đăng ký</span>
+            </div>
+
+            <!-- Right Header -->
+            <div class="flex items-center gap-4">
+                <div class="flex items-center gap-2 pl-4">
+                    <div class="w-8 h-8 rounded-full bg-emerald-100 flex items-center justify-center text-emerald-700 font-bold text-xs ring-1 ring-emerald-200">TN</div>
+                    <div class="hidden md:block text-left">
+                        <p class="text-xs font-bold text-slate-800" id="header-user-name">Đang tải...</p>
+                        <p class="text-[9px] text-slate-500 font-mono" id="header-user-mst">MST: Chưa liên kết</p>
+                    </div>
+                </div>
+            </div>
+        </header>
+
+        <!-- Main Workspace -->
+        <main class="flex-1 overflow-y-auto p-8 bg-slate-50/50">
+            <div class="max-w-6xl mx-auto space-y-6">
+                <!-- Banner Cảnh báo tuân thủ (Alert system) -->
+                <div id="compliance-banner-container" class="hidden"></div>
+
+                <!-- Two Column Layout -->
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    
+                    <!-- Left: THUẾ CƠ SỞ MAPS & PHÂN LOẠI HKD -->
+                    <div class="space-y-6">
+                        <!-- Tra cứu cơ quan thuế quản lý -->
+                        <div class="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-4">
+                            <div class="flex items-center justify-between">
+                                <div class="flex items-center gap-2">
+                                    <span class="material-symbols-outlined text-emerald-500">pin_drop</span>
+                                    <h4 class="text-xs font-black uppercase tracking-wider text-slate-700">Bản đồ 29 Thuế cơ sở TP.HCM (01/07/2025)</h4>
+                                </div>
+                                <span class="px-2 py-0.5 bg-emerald-100 text-emerald-800 font-bold rounded text-[9px] uppercase tracking-wider">HCMC Real-time</span>
+                            </div>
+                            <p class="text-[11px] text-slate-500 leading-relaxed">
+                                Chọn Quận &amp; Phường để xác định Thuế Cơ sở mới quản lý địa giới hành chính, hoặc <strong>click trực tiếp trên bản đồ</strong> để reverse-geocode tự động.
+                            </p>
+                            
+                            <!-- Dropdown cascader -->
+                            <div class="grid grid-cols-2 gap-3 text-xs">
+                                <div>
+                                    <label class="block text-[9px] font-bold text-slate-400 uppercase mb-1">Quận / Huyện TP.HCM</label>
+                                    <select id="lookup-district" onchange="onDistrictChange()" class="w-full rounded-lg border-slate-200 text-xs focus:ring-1 focus:ring-emerald-500 font-semibold text-slate-700">
+                                        <option value="">-- Chọn Quận/Huyện --</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label class="block text-[9px] font-bold text-slate-400 uppercase mb-1">Phường / Xã / Thị trấn</label>
+                                    <select id="lookup-ward" onchange="onWardChange()" class="w-full rounded-lg border-slate-200 text-xs focus:ring-1 focus:ring-emerald-500 font-semibold text-slate-700" disabled>
+                                        <option value="">-- Chọn Phường/Xã --</option>
+                                    </select>
+                                </div>
+                            </div>
+                            
+                            <!-- Leaflet Map Container -->
+                            <div id="leaflet-map" class="h-64 rounded-xl border border-slate-200 shadow-inner overflow-hidden"></div>
+
+                            <!-- Click action tips -->
+                            <div class="flex items-center gap-1.5 text-[10px] text-slate-400">
+                                <span class="material-symbols-outlined text-xs">info</span>
+                                <span>Mẹo: Bạn có thể click trực tiếp trên bản đồ để xác định địa bàn và Chi cục Thuế nhanh nhất.</span>
+                            </div>
+
+                            <!-- Tax Office Result (Hidden by default) -->
+                            <div id="office-result" class="hidden p-4 bg-slate-50 border border-slate-200 rounded-xl space-y-2 text-xs fade-in">
+                                <div class="flex justify-between items-center pb-2 border-b border-slate-200">
+                                    <span class="font-bold text-slate-800" id="res-office-name">---</span>
+                                    <span class="px-2 py-0.5 bg-emerald-100 text-emerald-800 font-bold rounded text-[9px]" id="res-office-badge">CƠ SỞ</span>
+                                </div>
+                                <div class="space-y-1.5 text-[11px] text-slate-600">
+                                    <p class="flex items-start gap-1.5"><span class="material-symbols-outlined text-xs mt-0.5 text-emerald-600">location_on</span> <span id="res-office-addr">---</span></p>
+                                    <p class="flex items-center gap-1.5"><span class="material-symbols-outlined text-xs text-emerald-600">phone</span> <span id="res-office-phone">---</span></p>
+                                    <p class="flex items-center gap-1.5"><span class="material-symbols-outlined text-xs text-emerald-600">schedule</span> <span id="res-office-hours">---</span></p>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Xác định phân loại Hộ kinh doanh -->
+                        <div class="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-4">
+                            <div class="flex items-center gap-2">
+                                <span class="material-symbols-outlined text-emerald-500">query_stats</span>
+                                <h4 class="text-xs font-black uppercase tracking-wider text-slate-700">Công cụ Xác định Nhóm Hộ kinh doanh</h4>
+                            </div>
+                            <p class="text-[11px] text-slate-500 leading-relaxed">
+                                Áp dụng quy chế phân nhóm theo quy định mới nhất tại <strong>Thông tư 152/2025/TT-BTC &amp; Nghị định 68/2026/NĐ-CP</strong> để xác định đúng trách nhiệm sổ sách kế toán.
+                            </p>
+                            
+                            <div class="grid grid-cols-2 gap-3 text-xs">
+                                <div class="col-span-2">
+                                    <label class="block text-[9px] font-bold text-slate-400 uppercase mb-1">Ngành nghề sản xuất kinh doanh</label>
+                                    <select id="class-field" class="w-full rounded-lg border-slate-200 text-xs focus:ring-1 focus:ring-emerald-500 font-semibold text-slate-700">
+                                        <option value="commerce">Phân phối, cung cấp hàng hóa (Thương mại)</option>
+                                        <option value="services">Dịch vụ, xây dựng không bao thầu nguyên vật liệu</option>
+                                        <option value="manufacturing">Sản xuất, vận tải, dịch vụ có gắn với hàng hóa</option>
+                                        <option value="agriculture">Nông nghiệp, lâm nghiệp, thủy sản và hoạt động khác</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label class="block text-[9px] font-bold text-slate-400 uppercase mb-1">Doanh thu dự kiến cả năm (Triệu VND)</label>
+                                    <input type="number" id="class-revenue" placeholder="Ví dụ: 850" class="w-full rounded-lg border-slate-200 text-xs focus:ring-1 focus:ring-emerald-500 font-semibold text-slate-700">
+                                </div>
+                                <div>
+                                    <label class="block text-[9px] font-bold text-slate-400 uppercase mb-1">Số lao động sử dụng thường xuyên</label>
+                                    <input type="number" id="class-labor" placeholder="Ví dụ: 4" class="w-full rounded-lg border-slate-200 text-xs focus:ring-1 focus:ring-emerald-500 font-semibold text-slate-700">
+                                </div>
+                            </div>
+
+                            <button onclick="classifyHousehold()" class="w-full py-2.5 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-lg text-xs transition-all flex items-center justify-center gap-2">
+                                <span class="material-symbols-outlined text-sm">settings_suggest</span>
+                                Phân loại &amp; Ước lượng thuế phải nộp
+                            </button>
+
+                            <!-- Classifier Result -->
+                            <div id="class-result" class="hidden p-4 bg-emerald-50/50 border border-emerald-200 rounded-xl space-y-3 text-xs fade-in">
+                                <div class="flex justify-between items-center pb-2 border-b border-emerald-200">
+                                    <span class="font-bold text-emerald-800">Kết quả phân tích phân loại</span>
+                                    <span id="res-group-badge" class="px-2 py-0.5 bg-emerald-600 text-white font-bold rounded text-[9px]">NHÓM</span>
+                                </div>
+                                <div class="space-y-2 text-[11px] text-slate-700">
+                                    <p class="font-semibold text-emerald-900" id="res-group-name">---</p>
+                                    <p id="res-group-desc">---</p>
+                                    
+                                    <div class="p-3 bg-white rounded-lg border border-emerald-100 space-y-1.5">
+                                        <p class="text-[9px] font-bold text-slate-400 uppercase tracking-wider">Danh sách nghĩa vụ bắt buộc</p>
+                                        <ul class="list-disc list-inside space-y-1 font-semibold text-slate-600 text-[10px]" id="res-group-obligations">
+                                        </ul>
+                                    </div>
+
+                                    <div class="p-3 bg-white rounded-lg border border-emerald-100 space-y-1">
+                                        <p class="text-[9px] font-bold text-slate-400 uppercase tracking-wider">Ước tính nghĩa vụ thuế năm đầu (Nghị định 68/2026)</p>
+                                        <p class="text-slate-600 font-semibold flex justify-between"><span>Ngành áp dụng:</span> <span id="res-tax-sector" class="text-slate-800 font-bold">---</span></p>
+                                        <p class="text-slate-600 font-semibold flex justify-between"><span>Tỷ lệ thuế tổng cộng:</span> <span id="res-tax-rate" class="text-slate-800 font-bold">---</span></p>
+                                        <p class="text-slate-600 font-semibold flex justify-between"><span>Số thuế ước tính:</span> <span id="res-tax-estimate" class="text-emerald-600 font-extrabold">---</span></p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Right: TRA CỨU MST / ĐĂNG KÝ ONLINE WIZARD / BANK ACCOUNTS -->
+                    <div class="space-y-6">
+                        <!-- Tra cứu MST / Supplier authenticity audit (Group 1 risk mitigation) -->
+                        <div class="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-4">
+                            <div class="flex items-center gap-2">
+                                <span class="material-symbols-outlined text-emerald-500">search_check</span>
+                                <h4 class="text-xs font-black uppercase tracking-wider text-slate-700">Tra cứu MST / Hạn chế Rủi ro Hóa đơn ma</h4>
+                            </div>
+                            <p class="text-[11px] text-slate-500 leading-relaxed">
+                                Nhập CCCD hoặc MST đối tác để kiểm tra trạng thái hoạt động thực tế. Hệ thống cảnh báo tự động các doanh nghiệp bỏ trốn hoặc không hoạt động tại địa chỉ đăng ký (mã trạng thái 06).
+                            </p>
+                            
+                            <div class="flex gap-2">
+                                <input type="text" id="lookup-mst-input" placeholder="Nhập số CCCD (12 số) hoặc Mã số thuế cần tra cứu..." class="flex-1 rounded-lg border-slate-200 text-xs focus:ring-1 focus:ring-emerald-500 font-mono font-bold text-slate-700">
+                                <button onclick="lookupMst()" class="px-5 py-2.5 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-lg text-xs transition-all">Kiểm tra</button>
+                            </div>
+
+                            <!-- MST Result -->
+                            <div id="mst-result" class="hidden p-4 rounded-xl border space-y-3 text-xs fade-in">
+                                <div class="flex justify-between items-center pb-2 border-b border-slate-200" id="mst-res-header">
+                                    <span class="font-bold text-slate-800" id="mst-res-name">---</span>
+                                    <span id="mst-res-status" class="px-2 py-0.5 font-bold rounded text-[9px]">---</span>
+                                </div>
+                                
+                                <div class="grid grid-cols-2 gap-2 text-[10px] text-slate-600">
+                                    <div>
+                                        <p class="text-slate-400 font-bold uppercase tracking-wider">Mã số thuế</p>
+                                        <p class="font-mono text-slate-800 font-extrabold text-sm" id="mst-res-code">---</p>
+                                    </div>
+                                    <div>
+                                        <p class="text-slate-400 font-bold uppercase tracking-wider">Lĩnh vực hoạt động</p>
+                                        <p class="text-slate-800 font-semibold" id="mst-res-industry">---</p>
+                                    </div>
+                                    <div class="col-span-2">
+                                        <p class="text-slate-400 font-bold uppercase tracking-wider">Địa điểm kinh doanh</p>
+                                        <p class="text-slate-800 font-semibold" id="mst-res-addr">---</p>
+                                    </div>
+                                    <div>
+                                        <p class="text-slate-400 font-bold uppercase tracking-wider">Phân hệ / Phân lớp</p>
+                                        <p class="text-slate-800 font-semibold" id="mst-res-type">---</p>
+                                    </div>
+                                    <div>
+                                        <p class="text-slate-400 font-bold uppercase tracking-wider">Ngày đăng ký hoạt động</p>
+                                        <p class="text-slate-800 font-semibold" id="mst-res-date">---</p>
+                                    </div>
+                                </div>
+
+                                <!-- Flashing warning if inactive or not at address -->
+                                <div id="mst-warning-card" class="hidden p-3 bg-red-950 text-red-200 border border-red-800 rounded-lg space-y-1">
+                                    <p class="font-bold flex items-center gap-1"><span class="material-symbols-outlined text-sm">warning</span> CẢNH BÁO RỦI RO HOẠT ĐỘNG (06)</p>
+                                    <p class="text-[9px] leading-relaxed text-red-300">
+                                        Đơn vị này có trạng thái không hoạt động tại địa chỉ đã đăng ký hoặc mang rủi ro thuế rất cao. Không thực hiện xuất hóa đơn hay giao dịch thanh toán để tránh rủi ro hóa đơn bất hợp pháp.
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- 3-Step Registration Wizard -->
+                        <div class="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-4">
+                            <div class="flex items-center gap-2">
+                                <span class="material-symbols-outlined text-emerald-500">online_prediction</span>
+                                <h4 class="text-xs font-black uppercase tracking-wider text-slate-700">Đăng ký MST lần đầu trực tuyến (Form 03-ĐK-TCT)</h4>
+                            </div>
+                            <p class="text-[11px] text-slate-500 leading-relaxed">
+                                Cổng đăng ký nộp hồ sơ xin cấp mã số thuế tự động liên thông với Cơ sở dữ liệu quốc gia về dân cư.
+                            </p>
+
+                            <!-- Step bars -->
+                            <div class="flex justify-between items-center px-1 text-[9px] font-bold text-slate-400 uppercase tracking-wider mb-2">
+                                <span id="step-label-1" class="text-emerald-500">1. VNeID Identity</span>
+                                <span id="step-label-2">2. Điền hồ sơ</span>
+                                <span id="step-label-3">3. Ký số &amp; Nộp</span>
+                            </div>
+                            <div class="w-full bg-slate-100 h-1.5 rounded-full overflow-hidden mb-6">
+                                <div id="step-progress-bar" class="bg-emerald-500 h-full rounded-full transition-all duration-300" style="width: 33%"></div>
+                            </div>
+
+                            <!-- WIZARD STEP 1 -->
+                            <div id="wizard-step-1" class="space-y-4">
+                                <div class="p-4 bg-emerald-50/50 border border-emerald-100 rounded-xl space-y-3">
+                                    <h5 class="text-xs font-bold text-emerald-900">Liên kết tài khoản định danh điện tử</h5>
+                                    <p class="text-[10px] text-slate-500 leading-relaxed">
+                                        Quét mã QR bằng ứng dụng VNeID để tự động trích xuất thông tin cá nhân chính xác từ Bộ Công An.
+                                    </p>
+                                    
+                                    <div class="flex justify-center py-2 bg-white rounded border border-slate-200 max-w-[140px] mx-auto shadow-inner cursor-pointer" onclick="triggerVneidVerification()">
+                                        <div class="text-center space-y-1">
+                                            <div id="vneid-qr-box" class="w-24 h-24 mx-auto flex items-center justify-center bg-slate-50 text-slate-400 rounded">
+                                                <span class="material-symbols-outlined text-4xl">qr_code_2</span>
+                                            </div>
+                                            <span class="text-[9px] font-bold text-emerald-600 block hover:underline animate-pulse">Click để giả lập quét</span>
+                                        </div>
+                                    </div>
+                                    
+                                    <div class="text-center text-[10px] text-slate-400 font-bold uppercase tracking-wider">Hoặc nhập thủ công số CCCD</div>
+                                    
+                                    <div class="flex gap-2">
+                                        <input type="text" id="wizard-cccd-input" placeholder="Nhập CCCD 12 số..." class="flex-1 rounded-lg border-slate-200 text-xs focus:ring-1 focus:ring-emerald-500 font-mono font-bold text-slate-700">
+                                        <button onclick="verifyCccdHandshake()" class="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-lg text-xs">Xác thực</button>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- WIZARD STEP 2 -->
+                            <div id="wizard-step-2" class="hidden space-y-4 fade-in">
+                                <h5 class="text-xs font-bold text-slate-700">Thông tin Hộ kinh doanh &amp; Cơ sở kinh doanh</h5>
+                                <div class="grid grid-cols-2 gap-3 text-[11px]">
+                                    <div class="col-span-2">
+                                        <label class="block text-[9px] font-bold text-slate-400 uppercase mb-0.5">Tên chủ hộ (tự động điền)</label>
+                                        <input type="text" id="wiz-full-name" class="w-full rounded border-slate-200 bg-slate-100 font-bold text-slate-700" disabled>
+                                    </div>
+                                    <div>
+                                        <label class="block text-[9px] font-bold text-slate-400 uppercase mb-0.5">Ngày sinh</label>
+                                        <input type="text" id="wiz-dob" class="w-full rounded border-slate-200 bg-slate-100 text-slate-600 font-mono" disabled>
+                                    </div>
+                                    <div>
+                                        <label class="block text-[9px] font-bold text-slate-400 uppercase mb-0.5">Giới tính</label>
+                                        <input type="text" id="wiz-gender" class="w-full rounded border-slate-200 bg-slate-100 text-slate-600" disabled>
+                                    </div>
+                                    <div class="col-span-2">
+                                        <label class="block text-[9px] font-bold text-slate-400 uppercase mb-0.5">Địa chỉ thường trú</label>
+                                        <input type="text" id="wiz-permanent-address" class="w-full rounded border-slate-200 bg-slate-100 text-slate-600" disabled>
+                                    </div>
+                                    
+                                    <div class="col-span-2 border-t border-slate-200 my-2 pt-2"></div>
+                                    
+                                    <div class="col-span-2">
+                                        <label class="block text-[9px] font-bold text-slate-400 uppercase mb-0.5">Tên cơ sở/Hộ kinh doanh dự kiến</label>
+                                        <input type="text" id="wiz-business-name" placeholder="Ví dụ: Cửa hàng Tiện lợi Thuận Phát" class="w-full rounded border-slate-200 font-bold text-slate-800">
+                                    </div>
+                                    <div class="col-span-2">
+                                        <label class="block text-[9px] font-bold text-slate-400 uppercase mb-0.5">Địa điểm mở cơ sở kinh doanh</label>
+                                        <input type="text" id="wiz-business-address" placeholder="Số 12 Nguyễn Bỉnh Khiêm, Phường Đa Kao, Quận 1..." class="w-full rounded border-slate-200 text-slate-700">
+                                    </div>
+                                    <div>
+                                        <label class="block text-[9px] font-bold text-slate-400 uppercase mb-0.5">Vốn điều lệ kinh doanh (Triệu VND)</label>
+                                        <input type="number" id="wiz-capital" placeholder="Ví dụ: 150" class="w-full rounded border-slate-200 font-bold text-slate-700">
+                                    </div>
+                                    <div>
+                                        <label class="block text-[9px] font-bold text-slate-400 uppercase mb-0.5">Số lượng lao động dự kiến</label>
+                                        <input type="number" id="wiz-labor" placeholder="Ví dụ: 3" class="w-full rounded border-slate-200 text-slate-700">
+                                    </div>
+                                </div>
+                                <div class="flex justify-between pt-2">
+                                    <button onclick="gotoStep(1)" class="px-4 py-2 border border-slate-200 text-slate-600 font-bold rounded-lg text-xs hover:bg-slate-50">Quay lại</button>
+                                    <button onclick="gotoStep(3)" class="px-5 py-2 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-lg text-xs">Tiếp tục</button>
+                                </div>
+                            </div>
+
+                            <!-- WIZARD STEP 3 -->
+                            <div id="wizard-step-3" class="hidden space-y-4 fade-in">
+                                <h5 class="text-xs font-bold text-slate-700">Ký số phê duyệt nộp hồ sơ điện tử</h5>
+                                <p class="text-[10px] text-slate-500 leading-relaxed">
+                                    Vui lòng vẽ chữ ký tay trực tiếp lên khung canvas dưới đây hoặc sử dụng Chữ ký số USB Token để ký nộp hồ sơ.
+                                </p>
+                                
+                                <div class="space-y-2">
+                                    <canvas id="signature-canvas" width="400" height="150" class="w-full bg-slate-50 border border-slate-300 rounded-lg"></canvas>
+                                    <div class="flex justify-end gap-2">
+                                        <button onclick="clearSignatureCanvas()" class="px-3 py-1 text-[10px] border border-slate-200 text-slate-500 font-semibold rounded hover:bg-slate-100">Xóa chữ ký</button>
+                                    </div>
+                                </div>
+
+                                <div class="flex justify-between pt-2">
+                                    <button onclick="gotoStep(2)" class="px-4 py-2 border border-slate-200 text-slate-600 font-bold rounded-lg text-xs hover:bg-slate-50">Quay lại</button>
+                                    <button onclick="submitMstApplication()" class="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-lg text-xs flex items-center gap-1.5 shadow-md shadow-emerald-500/10">
+                                        <span class="material-symbols-outlined text-sm">assignment_turned_in</span> Ký &amp; Nộp hồ sơ
+                                    </button>
+                                </div>
+                            </div>
+
+                            <!-- WIZARD SUCCESS RECEIPT -->
+                            <div id="wizard-success" class="hidden p-5 bg-emerald-50/50 border border-emerald-300 rounded-2xl space-y-4 text-xs fade-in text-slate-700">
+                                <div class="text-center space-y-1">
+                                    <span class="material-symbols-outlined text-4xl text-emerald-500">check_circle</span>
+                                    <h5 class="text-sm font-extrabold text-emerald-950">Nộp hồ sơ thành công!</h5>
+                                    <p class="text-[10px] text-slate-500" id="success-submitted-at">---</p>
+                                </div>
+
+                                <div class="p-4 bg-white rounded-xl border border-emerald-100 space-y-2 leading-relaxed">
+                                    <p class="font-semibold text-slate-800 text-[11px] border-b border-slate-100 pb-1">HỒ SƠ KHAI THUẾ THÀNH CÔNG</p>
+                                    <p class="flex justify-between"><span>Mã số thuế được cấp:</span> <span class="font-mono font-black text-slate-900 text-sm" id="success-mst">---</span></p>
+                                    <p class="flex justify-between"><span>Cơ quan thuế quản lý:</span> <span class="font-bold text-slate-800" id="success-office">---</span></p>
+                                    <p class="flex justify-between"><span>Phân nhóm quy mô:</span> <span class="font-bold text-slate-800" id="success-group">---</span></p>
+                                    <p class="text-[9px] text-emerald-700 bg-emerald-100/40 p-2 rounded mt-2 border border-emerald-100/50">
+                                        * Hệ thống đã tự động liên kết tài khoản thuế với mã Định danh VNeID của bạn. Bạn đã có thể đăng nhập vào tất cả dịch vụ công.
+                                    </p>
+                                </div>
+
+                                <button onclick="resetWizard()" class="w-full py-2 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-lg text-xs">Thực hiện đăng ký mới</button>
+                            </div>
+                        </div>
+
+                        <!-- Bank Accounts Reporting form (Mẫu 01/BK-STK) -->
+                        <div class="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-4" id="bank-declare-section">
+                            <div class="flex items-center gap-2">
+                                <span class="material-symbols-outlined text-emerald-500">account_balance</span>
+                                <h4 class="text-xs font-black uppercase tracking-wider text-slate-700">Khai báo Tài khoản Ngân hàng (Mẫu 01/BK-STK)</h4>
+                            </div>
+                            <p class="text-[11px] text-slate-500 leading-relaxed">
+                                Theo NĐ 68/2026/NĐ-CP, người nộp thuế phải khai báo tất cả tài khoản ngân hàng / ví điện tử được dùng để thanh toán và thu chi phục vụ kinh doanh trong vòng 10 ngày từ khi mở.
+                            </p>
+
+                            <div class="space-y-3">
+                                <div class="grid grid-cols-2 gap-3 text-xs">
+                                    <div class="col-span-2">
+                                        <label class="block text-[9px] font-bold text-slate-400 uppercase mb-0.5">Tên ngân hàng / Ví điện tử</label>
+                                        <select id="bank-name" class="w-full rounded-lg border-slate-200 text-xs focus:ring-1 focus:ring-emerald-500 font-semibold text-slate-700">
+                                            <option value="Vietcombank">Vietcombank (Ngân hàng Ngoại thương)</option>
+                                            <option value="VietinBank">VietinBank (Ngân hàng Công thương)</option>
+                                            <option value="BIDV">BIDV (Ngân hàng Đầu tư &amp; Phát triển)</option>
+                                            <option value="Agribank">Agribank (Ngân hàng Nông nghiệp)</option>
+                                            <option value="Techcombank">Techcombank (Ngân hàng Kỹ thương)</option>
+                                            <option value="Momo">Ví điện tử MoMo</option>
+                                            <option value="ZaloPay">Ví điện tử ZaloPay</option>
+                                        </select>
+                                    </div>
+                                    <div>
+                                        <label class="block text-[9px] font-bold text-slate-400 uppercase mb-0.5">Số tài khoản / Số ví</label>
+                                        <input type="text" id="bank-account-num" placeholder="Số tài khoản..." class="w-full rounded-lg border-slate-200 text-xs focus:ring-1 focus:ring-emerald-500 font-mono font-bold text-slate-700">
+                                    </div>
+                                    <div>
+                                        <label class="block text-[9px] font-bold text-slate-400 uppercase mb-0.5">Chủ tài khoản (Không dấu)</label>
+                                        <input type="text" id="bank-account-holder" placeholder="NGUYEN VAN A" class="w-full rounded-lg border-slate-200 text-xs focus:ring-1 focus:ring-emerald-500 font-semibold text-slate-700 uppercase">
+                                    </div>
+                                </div>
+                                <button onclick="reportBankAccount()" class="w-full py-2 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-lg text-xs transition-all flex items-center justify-center gap-1.5">
+                                    <span class="material-symbols-outlined text-sm">publish</span>
+                                    Khai báo tài khoản
+                                </button>
+                            </div>
+
+                            <!-- List of declared accounts -->
+                            <div class="space-y-2 mt-4">
+                                <p class="text-[9px] font-bold text-slate-400 uppercase tracking-wider">Danh sách tài khoản đã khai báo</p>
+                                <div id="reported-bank-accounts-list" class="space-y-1.5 max-h-36 overflow-y-auto pr-1">
+                                    <!-- Accounts items -->
+                                    <p class="text-[10px] text-slate-400 italic">Đang tải danh sách...</p>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Digital Signature (CKS) comparative table -->
+                        <div class="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-4" id="digital-sig-section">
+                            <div class="flex items-center gap-2">
+                                <span class="material-symbols-outlined text-emerald-500">verified</span>
+                                <h4 class="text-xs font-black uppercase tracking-wider text-slate-700">Đăng ký Chữ ký số (CKS) &amp; HĐĐT hợp chuẩn</h4>
+                            </div>
+                            <p class="text-[11px] text-slate-500 leading-relaxed">
+                                Bảng so sánh các gói CKS và Hóa đơn điện tử phổ biến tại TP.HCM giúp Hộ kinh doanh lựa chọn giải pháp tối ưu.
+                            </p>
+
+                            <div class="overflow-x-auto rounded-lg border border-slate-100 text-[10px]">
+                                <table class="w-full border-collapse text-left">
+                                    <thead>
+                                        <tr class="bg-slate-50 border-b border-slate-200 font-bold text-slate-600">
+                                            <th class="p-2.5">Nhà cung cấp</th>
+                                            <th class="p-2.5">Chữ ký số (1 năm)</th>
+                                            <th class="p-2.5">Hóa đơn điện tử</th>
+                                            <th class="p-2.5">Đánh giá</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody class="divide-y divide-slate-100 font-semibold text-slate-700">
+                                        <tr>
+                                            <td class="p-2.5 font-bold text-slate-800">Viettel-CA</td>
+                                            <td class="p-2.5 text-slate-600">1.290.000 VNĐ</td>
+                                            <td class="p-2.5 text-slate-600">500 HĐ / 600K</td>
+                                            <td class="p-2.5 text-emerald-600">Ổn định nhất</td>
+                                        </tr>
+                                        <tr>
+                                            <td class="p-2.5 font-bold text-slate-800">VNPT-CA</td>
+                                            <td class="p-2.5 text-slate-600">1.100.000 VNĐ</td>
+                                            <td class="p-2.5 text-slate-600">500 HĐ / 550K</td>
+                                            <td class="p-2.5 text-emerald-600">Đồng bộ dịch vụ</td>
+                                        </tr>
+                                        <tr>
+                                            <td class="p-2.5 font-bold text-slate-800">MISA eSign</td>
+                                            <td class="p-2.5 text-slate-600">990.000 VNĐ</td>
+                                            <td class="p-2.5 text-slate-600">500 HĐ / 480K</td>
+                                            <td class="p-2.5 text-emerald-600">Hỗ trợ kế toán tốt</td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+
+                    </div>
+
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- Active Navigation Highlighter Script & Page Operations JS -->
+    <script src="../js/business_taxpayer_common.js"></script>
+    <script src="../js/business_registration.js?v=1.1"></script>
+    <script src="../js/business_intelligence.js"></script>
+</body>
+</html>

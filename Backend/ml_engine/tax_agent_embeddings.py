@@ -30,6 +30,8 @@ from typing import Any, Optional
 
 import numpy as np
 
+from ml_engine.tax_agent_runtime_policy import apply_offline_environment, local_files_only
+
 logger = logging.getLogger(__name__)
 
 MODEL_DIR = Path(__file__).resolve().parent.parent / "data" / "models"
@@ -244,9 +246,11 @@ class TaxAgentEmbeddingEngine:
     def _try_load_sentence_transformers(self) -> Optional[str]:
         """Try loading sentence-transformers model."""
         try:
+            apply_offline_environment()
             from sentence_transformers import SentenceTransformer
 
             last_error: Exception | None = None
+            offline_only = local_files_only()
             for candidate in self.model_candidates:
                 local_path = _local_model_path(self.model_dir, candidate)
                 explicit = bool(_EXPLICIT_EMBEDDING_MODEL and candidate == _EXPLICIT_EMBEDDING_MODEL)
@@ -255,6 +259,9 @@ class TaxAgentEmbeddingEngine:
                     logger.info("[EmbeddingEngine] Loading from local cache: %s", local_path)
                 elif candidate.lower() == "baai/bge-m3" and not explicit:
                     logger.info("[EmbeddingEngine] BGE-M3 not cached locally; using next candidate")
+                    continue
+                elif offline_only:
+                    logger.info("[EmbeddingEngine] Offline mode: %s is not cached locally; using next candidate", candidate)
                     continue
                 else:
                     model_path = candidate
@@ -349,8 +356,12 @@ class TaxAgentEmbeddingEngine:
                 providers=["CPUExecutionProvider"],
             )
             tokenizer_path = self.model_dir / "embeddings" / "tokenizer"
+            if local_files_only() and not tokenizer_path.exists():
+                logger.info("[EmbeddingEngine] Offline mode: ONNX tokenizer not found at %s", tokenizer_path)
+                return None
             self._tokenizer = AutoTokenizer.from_pretrained(
-                str(tokenizer_path) if tokenizer_path.exists() else self.model_name
+                str(tokenizer_path) if tokenizer_path.exists() else self.model_name,
+                local_files_only=local_files_only(),
             )
             self._model_tier = "onnx"
             self._loaded = True

@@ -31,8 +31,7 @@ Công cụ:
 11. causal_uplift_recommend(tax_code): Đề xuất biện pháp cưỡng chế tối ưu.
 12. revenue_forecast(tax_code): Dự báo doanh thu quý tới.
 13. macro_forecast(scenario): Mô phỏng vĩ mô tác động kinh tế.
-14. knowledge_search(query): Tra cứu luật thuế, văn bản pháp luật.
-15. escalate_to_debate(tax_code): Mở phiên tranh biện đa đặc vụ AI."""
+14. knowledge_search(query): Tra cứu luật thuế, văn bản pháp luật."""
 
 # ══════════════════════════════════════════
 # BUILDING BLOCKS - Xây dựng câu hỏi tổ hợp
@@ -168,7 +167,7 @@ LEGAL_TEMPLATES = [
     "thuế suất TNDN ưu đãi cho doanh nghiệp mới thành lập",
 ]
 
-# ── 11. DEBATE: escalate_to_debate ──
+# ── 11. DEBATE: runtime-only escalation examples ──
 DEBATE_TEMPLATES = [
     "mở phiên tòa tranh biện AI cho hồ sơ phức tạp của {tc}",
     "tổ chức Multi-Agent Debate để phân tích đa chiều MST {tc}",
@@ -238,10 +237,10 @@ THOUGHTS = {
         "Tra cứu quy định, văn bản pháp luật thuế. Dùng knowledge_search.",
         "Câu hỏi về luật, thông tư, nghị định thuế. Công cụ: knowledge_search.",
     ],
-    "escalate_to_debate": [
-        "Hồ sơ phức tạp, cần nhiều góc nhìn AI phản biện. Gọi escalate_to_debate.",
-        "Kích hoạt phiên tranh biện đa đặc vụ cho hồ sơ mâu thuẫn. Dùng escalate_to_debate.",
-        "Cần hội chẩn AI đa chiều. Công cụ: escalate_to_debate.",
+    "runtime_debate_escalation": [
+        "Hồ sơ phức tạp, cần nhiều góc nhìn AI phản biện; để orchestrator tự kích hoạt debate.",
+        "Kích hoạt hội chẩn đa đặc vụ qua điều kiện runtime, không emit tool call.",
+        "Cần hội chẩn AI đa chiều nhưng không gọi như tool.",
     ],
 }
 
@@ -341,7 +340,7 @@ def make_record(query, tool_name, tool_args):
 
 def generate(total=10000):
     dataset = []
-    per = total // 12  # 12 categories (11 tools + 1 legal deep)
+    per = total // 11  # 10 tool categories + 1 legal deep
 
     # 1. top_n
     for _ in range(per):
@@ -415,14 +414,7 @@ def generate(total=10000):
         q = q[0].upper() + q[1:]
         dataset.append(make_record(q, "knowledge_search", {"query": base_q}))
 
-    # 11. escalate_to_debate
-    for _ in range(per):
-        tc = make_tc()
-        q = f"{random.choice(P)}{random.choice(DEBATE_TEMPLATES).format(tc=tc)}{random.choice(S)}".strip()
-        q = q[0].upper() + q[1:]
-        dataset.append(make_record(q, "escalate_to_debate", {"tax_code": tc}))
-
-    # 12. legal_deep_answer
+    # 11. legal_deep_answer
     for _ in range(per):
         data_item = random.choice(LEGAL_DEEP_DATA)
         dataset.append(make_legal_record(data_item))

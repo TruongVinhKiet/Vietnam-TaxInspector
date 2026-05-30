@@ -24,6 +24,8 @@ from typing import Any, Optional
 
 import numpy as np
 
+from ml_engine.tax_agent_runtime_policy import apply_offline_environment, local_files_only
+
 logger = logging.getLogger(__name__)
 
 MODEL_DIR = Path(__file__).resolve().parent.parent / "data" / "models"
@@ -123,12 +125,16 @@ class TaxAgentCrossEncoder:
     def _try_load_cross_encoder(self) -> Optional[str]:
         """Try loading cross-encoder model."""
         try:
+            apply_offline_environment()
             from sentence_transformers import CrossEncoder
 
             local_path = self.model_dir / "reranker" / self.model_name.replace("/", "_")
             if local_path.exists():
                 model_path = str(local_path)
                 logger.info("[CrossEncoder] Loading from local cache: %s", local_path)
+            elif local_files_only():
+                logger.info("[CrossEncoder] Offline mode: %s is not cached locally", self.model_name)
+                return None
             else:
                 model_path = self.model_name
                 logger.info("[CrossEncoder] Loading from HuggingFace: %s", self.model_name)

@@ -16,6 +16,7 @@ const ROLE_LABELS = {
     analyst: 'Phân tích',
     inspector: 'Thanh tra',
     admin: 'Quản trị',
+    taxpayer: 'Người nộp thuế',
 };
 
 function showAuthToast(message, type = 'error') {
@@ -35,7 +36,11 @@ function showRegisterSuccessPanel({ badgeId, role }) {
     const roleNode = document.getElementById('register-success-role');
     if (!panel || !text || !roleNode) return;
     if (registerSuccessTimer) clearTimeout(registerSuccessTimer);
-    text.textContent = `Mã cán bộ ${badgeId} đã được tạo. Đang chuyển về tab Đăng nhập...`;
+    
+    let keyName = "Mã cán bộ";
+    if (role === 'taxpayer' || role === 'enterprise') keyName = "CCCD/MST";
+    
+    text.textContent = `Tài khoản ${keyName} ${badgeId} đã được tạo. Đang chuyển về tab Đăng nhập...`;
     roleNode.textContent = ROLE_LABELS[role] || role || 'Cán bộ';
     panel.classList.remove('hidden');
     requestAnimationFrame(() => panel.classList.add('show'));
@@ -153,16 +158,38 @@ document.addEventListener('DOMContentLoaded', () => {
             e.preventDefault();
             const badgeId = document.getElementById('login-badge').value.trim();
             const password = document.getElementById('login-pwd').value;
-            if (!badgeId || !password) { showAuthToast('Vui lòng nhập đầy đủ Mã cán bộ và Mật khẩu.'); return; }
+            if (!badgeId || !password) { 
+                showAuthToast(window.activeRole === 'inspector' ? 'Vui lòng nhập đầy đủ Mã cán bộ và Mật khẩu.' : 'Vui lòng nhập đầy đủ Tên đăng nhập và Mật khẩu.'); 
+                return; 
+            }
             const restore = setButtonLoading(loginBtn, 'Đang xác thực...');
+
             try {
+                const expectedRole = window.activeRole || 'inspector';
                 const r = await secureFetch(`${API_BASE}/auth/login`, {
-                    method: 'POST', body: JSON.stringify({ badge_id: badgeId, password }),
+                    method: 'POST', body: JSON.stringify({ badge_id: badgeId, password, expected_role: expectedRole }),
                 });
                 if (!r.ok) { showAuthToast(await parseApiError(r, 'Đăng nhập thất bại.')); return; }
+                const resJson = await r.json();
                 showAuthToast('Đăng nhập thành công, đang chuyển hướng...', 'success');
-                setTimeout(() => { window.location.href = 'dashboard.html'; }, 380);
-            } catch { showApiOfflineMessage(); }
+                
+                // Save user info in session storage immediately for faster route auth check
+                try {
+                    const cachedPayload = {
+                        full_name: resJson.full_name || "",
+                        role: resJson.role || "viewer",
+                        badge_id: badgeId,
+                        avatar_data: null,
+                    };
+                    sessionStorage.setItem("taxinspector_sidebar_identity_v1", JSON.stringify(cachedPayload));
+                } catch (e) {}
+
+                setTimeout(() => {
+                    // Route based on role: taxpayer → business portal, officer → inspector portal
+                    const isTaxpayer = (resJson.role === 'taxpayer' || resJson.role === 'enterprise');
+                    window.location.href = isTaxpayer ? 'business_dashboard.html' : 'dashboard.html';
+                }, 380);
+            } catch (err) { showApiOfflineMessage(); }
             finally { restore(); }
         });
     }
@@ -176,20 +203,40 @@ document.addEventListener('DOMContentLoaded', () => {
             const fullName = document.getElementById('reg-fullname').value.trim();
             const badgeId = document.getElementById('reg-badge').value.trim();
             const email = document.getElementById('reg-email').value.trim().toLowerCase();
-            const dept = document.getElementById('reg-dept').value;
-            const role = document.getElementById('reg-role').value;
             const pwd = document.getElementById('reg-pwd').value;
             const pwd2 = document.getElementById('reg-pwd2').value;
-            if (!fullName || !badgeId || !email || !dept || !pwd) { showAuthToast('Vui lòng điền đầy đủ các trường thông tin bắt buộc.'); return; }
+            
+            let dept, role;
+            if (window.activeRole === 'inspector') {
+                dept = document.getElementById('reg-dept').value;
+                role = 'inspector';
+                if (!fullName || !badgeId || !email || !dept || !pwd) { showAuthToast('Vui lòng điền đầy đủ các trường thông tin bắt buộc.'); return; }
+                if (!email.endsWith('@gdt.gov.vn')) { showAuthToast('Email phải là email công vụ (@gdt.gov.vn).'); return; }
+            } else {
+                dept = document.getElementById('reg-address').value.trim();
+                role = 'taxpayer'; // Always normalize to taxpayer (HKD + DN merged)
+                if (!fullName || !badgeId || !email || !dept || !pwd) { showAuthToast('Vui lòng điền đầy đủ địa chỉ kinh doanh và thông tin đăng ký.'); return; }
+            }
+
             if (pwd.length < 8) { showAuthToast('Mật khẩu phải có ít nhất 8 ký tự.'); return; }
             if (pwd !== pwd2) { showAuthToast('Mật khẩu xác nhận không khớp.'); return; }
-            if (!email.endsWith('@gdt.gov.vn')) { showAuthToast('Email phải là email công vụ (@gdt.gov.vn).'); return; }
             const restore = setButtonLoading(registerBtn, 'Đang khởi tạo...');
+
             try {
                 const r = await secureFetch(`${API_BASE}/auth/register`, {
                     method: 'POST', body: JSON.stringify({ badge_id: badgeId, full_name: fullName, department: dept, email, password: pwd, role }),
                 });
-                if (!r.ok) { showAuthToast(await parseApiError(r, 'Lỗi tạo tài khoản.')); return; }
+                if (!r.ok) {
+                    let errMsg = 'Lỗi tạo tài khoản.';
+                    try {
+                        const errData = await r.json();
+                        if (errData.detail) {
+                            errMsg = typeof errData.detail === 'string' ? errData.detail : JSON.stringify(errData.detail);
+                        }
+                    } catch (parseErr) {}
+                    showAuthToast(errMsg);
+                    return;
+                }
                 showRegisterSuccessPanel({ badgeId, role });
                 registerForm.reset();
                 const loginBadge = document.getElementById('login-badge');
@@ -301,7 +348,22 @@ async function captureFaceLogin() {
         // No 2FA → login success
         statusEl.textContent = '✅ Xác thực thành công! Đang chuyển hướng...';
         if (scanLine) { scanLine.style.background = 'linear-gradient(90deg, transparent, #4ade80, transparent)'; scanLine.style.boxShadow = '0 0 30px rgba(74,222,128,0.7)'; }
-        setTimeout(() => { closeBioOverlay(); window.location.href = 'dashboard.html'; }, 1200);
+        
+        try {
+            const cachedPayload = {
+                full_name: data.full_name || "",
+                role: data.role || "viewer",
+                badge_id: data.badge_id || "",
+                avatar_data: null,
+            };
+            sessionStorage.setItem("taxinspector_sidebar_identity_v1", JSON.stringify(cachedPayload));
+        } catch (e) {}
+
+        setTimeout(() => { 
+            closeBioOverlay(); 
+            const isTaxpayer = (data.role === 'taxpayer' || data.role === 'enterprise');
+            window.location.href = isTaxpayer ? 'business_dashboard.html' : 'dashboard.html'; 
+        }, 1200);
     } catch (err) {
         console.error('[FaceLogin]', err);
         statusEl.textContent = '❌ Lỗi kết nối API.';
@@ -360,7 +422,22 @@ async function submitCccdLogin() {
         // No 2FA → login success
         errorEl.classList.add('hidden');
         showAuthToast('Đăng nhập CCCD thành công!', 'success');
-        setTimeout(() => { closeCccdModal(); window.location.href = 'dashboard.html'; }, 800);
+
+        try {
+            const cachedPayload = {
+                full_name: data.full_name || "",
+                role: data.role || "viewer",
+                badge_id: data.badge_id || "",
+                avatar_data: null,
+            };
+            sessionStorage.setItem("taxinspector_sidebar_identity_v1", JSON.stringify(cachedPayload));
+        } catch (e) {}
+
+        setTimeout(() => { 
+            closeCccdModal(); 
+            const isTaxpayer = (data.role === 'taxpayer' || data.role === 'enterprise');
+            window.location.href = isTaxpayer ? 'business_dashboard.html' : 'dashboard.html'; 
+        }, 800);
     } catch (err) {
         console.error('[CCCD Login]', err);
         errorEl.textContent = 'Lỗi kết nối API backend.';
@@ -469,10 +546,23 @@ async function submitLoginSignature() {
         }
 
         // 2FA complete → login success!
+        const data = await response.json();
         showAuthToast('Xác thực 2 bước hoàn tất! Đang chuyển hướng...', 'success');
+
+        try {
+            const cachedPayload = {
+                full_name: data.full_name || "",
+                role: data.role || "viewer",
+                badge_id: data.badge_id || "",
+                avatar_data: null,
+            };
+            sessionStorage.setItem("taxinspector_sidebar_identity_v1", JSON.stringify(cachedPayload));
+        } catch (e) {}
+
         setTimeout(() => {
             closeLoginSigModal();
-            window.location.href = 'dashboard.html';
+            const isTaxpayer = (data.role === 'taxpayer' || data.role === 'enterprise');
+            window.location.href = isTaxpayer ? 'business_dashboard.html' : 'dashboard.html';
         }, 800);
     } catch (err) {
         console.error('[SigLogin]', err);

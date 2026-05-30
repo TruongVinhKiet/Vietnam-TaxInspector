@@ -14,12 +14,12 @@ Hãy đọc kỹ ngữ cảnh, suy nghĩ (trong thẻ <thought>) và gọi đún
 TUYỆT ĐỐI KHÔNG GỌI NHẦM CÔNG CỤ. Mỗi chế độ (VAT, Gian lận, Pháp lý, Nợ đọng, Vĩ mô) tương ứng với công cụ riêng biệt.
 
 Các công cụ hiện có:
-- run_hetero_gnn(tax_code): Mạng lưới VAT, chuỗi hóa đơn, giao dịch lòng vòng, công ty ma.
-- run_vae_anomaly(tax_code): Chấm điểm gian lận, điểm rủi ro, phát hiện hóa đơn bất thường của một doanh nghiệp độc lập.
-- predict_delinquency(tax_code): Dự báo khả năng trễ hạn nộp thuế, nợ đọng thuế.
-- causal_uplift_action(tax_code): Đề xuất biện pháp cưỡng chế thu hồi nợ tối ưu nhất.
-- query_legal_graphrag(query): Giải đáp luật thuế, văn bản pháp luật, nghị định, thông tư.
-- run_macro_simulation(gdp_change, tax_rate_change): Mô phỏng vĩ mô, tác động của GDP hoặc chính sách thuế lên tổng thu ngân sách.
+- gnn_analysis(tax_code): Mạng lưới VAT, chuỗi hóa đơn, giao dịch lòng vòng, công ty ma.
+- vae_anomaly_scan(tax_code): Chấm điểm gian lận, điểm rủi ro, phát hiện hóa đơn bất thường của một doanh nghiệp độc lập.
+- temporal_delinquency_deep(tax_code): Dự báo khả năng trễ hạn nộp thuế, nợ đọng thuế.
+- causal_uplift_recommend(tax_code): Đề xuất biện pháp cưỡng chế thu hồi nợ tối ưu nhất.
+- knowledge_search(query): Giải đáp luật thuế, văn bản pháp luật, nghị định, thông tư.
+- macro_forecast(scenario): Mô phỏng vĩ mô, tác động của GDP hoặc chính sách thuế lên tổng thu ngân sách.
 """
 
 # ==========================================
@@ -109,7 +109,7 @@ for q in set(vat_queries):
     thought = f"Yêu cầu liên quan đến việc phân tích mạng lưới, chuỗi hóa đơn, hệ sinh thái hoặc dòng chảy giao dịch của {tc}. Công cụ phân tích Mạng lưới (HeteroGNN) là chính xác nhất."
     res = '{"risk_score": 98.2, "carousel_detected": true, "layers": 4}'
     ans = f"Qua phân tích bằng thuật toán Đồ thị HeteroGNN, mạng lưới VAT của {tc} cực kỳ phức tạp. Phát hiện dấu hiệu giao dịch lòng vòng (carousel fraud) qua 4 lớp công ty. Điểm rủi ro mạng lưới đạt 98.2/100."
-    add_record(q_fmt, thought, "run_hetero_gnn", {"tax_code": tc}, res, ans)
+    add_record(q_fmt, thought, "gnn_analysis", {"tax_code": tc}, res, ans)
 
 # Tạo Fraud
 for q in set(fraud_queries):
@@ -118,7 +118,7 @@ for q in set(fraud_queries):
     thought = f"Yêu cầu đánh giá rủi ro, sự bất thường trong hóa đơn đầu vào/đầu ra của doanh nghiệp độc lập {tc}. Mô hình học sâu VAE Anomaly là công cụ phù hợp."
     res = '{"anomaly_score": 75.4, "flagged_invoices": 5}'
     ans = f"Hệ thống đã chạy mô hình VAE Anomaly. Doanh nghiệp {tc} có điểm bất thường là 75.4/100. AI nhận diện được 5 hóa đơn có giá trị chênh lệch lớn so với hành vi lịch sử."
-    add_record(q_fmt, thought, "run_vae_anomaly", {"tax_code": tc}, res, ans)
+    add_record(q_fmt, thought, "vae_anomaly_scan", {"tax_code": tc}, res, ans)
 
 # Tạo Delinquency
 for q in set(delinq_queries):
@@ -127,7 +127,7 @@ for q in set(delinq_queries):
     thought = f"Truy vấn liên quan đến tương lai: dự báo nợ đọng, chậm nộp, trễ hạn thuế của {tc}. Phải sử dụng mô hình chuỗi thời gian Temporal Transformer."
     res = '{"prob_30d": 88.0, "prob_90d": 92.5}'
     ans = f"Mô hình Temporal Transformer dự báo {tc} có xác suất nợ đọng rất cao: 88.0% sẽ trễ hạn 30 ngày và 92.5% sẽ nợ dai dẳng qua 90 ngày. Cần đưa vào danh sách đôn đốc thu ngay."
-    add_record(q_fmt, thought, "predict_delinquency", {"tax_code": tc}, res, ans)
+    add_record(q_fmt, thought, "temporal_delinquency_deep", {"tax_code": tc}, res, ans)
 
 # Tạo Uplift
 for q in set(uplift_queries):
@@ -136,14 +136,14 @@ for q in set(uplift_queries):
     thought = f"Người dùng muốn tìm 'giải pháp', 'biện pháp cưỡng chế', 'thu hồi nợ' tốt nhất cho {tc}. Mô hình nhân quả Causal Uplift Action sẽ đề xuất hành động tối ưu."
     res = '{"best_action": "Ngừng sử dụng hóa đơn", "uplift_score": 0.45}'
     ans = f"Thuật toán Causal Uplift phân tích rằng biện pháp 'Ngừng sử dụng hóa đơn' sẽ mang lại hiệu quả cao nhất cho {tc} (Uplift Score: 0.45). Các biện pháp khác như nhắn tin nhắc nhở sẽ không có tác dụng với đối tượng này."
-    add_record(q_fmt, thought, "causal_uplift_action", {"tax_code": tc}, res, ans)
+    add_record(q_fmt, thought, "causal_uplift_recommend", {"tax_code": tc}, res, ans)
 
 # Tạo Legal
 for q in set(legal_expanded):
     thought = f"Đây là một câu hỏi tra cứu kiến thức pháp luật, quy định, thông tư hoặc nghị định thuế. Không có MST cụ thể. Cần truy vấn cơ sở dữ liệu tri thức bằng GraphRAG."
     res = '{"articles": ["Điều 17 Nghị định 125/2020"], "content": "Xử phạt hành vi trốn thuế..."}'
     ans = f"Dựa trên truy xuất từ Knowledge Graph: Căn cứ Điều 17 Nghị định 125/2020/NĐ-CP quy định chi tiết về xử phạt vi phạm hành chính đối với hành vi trốn thuế..."
-    add_record(q, thought, "query_legal_graphrag", {"query": q}, res, ans)
+    add_record(q, thought, "knowledge_search", {"query": q}, res, ans)
 
 # Tạo Macro
 for _ in range(1000):
@@ -153,7 +153,7 @@ for _ in range(1000):
     thought = f"Người dùng cung cấp thông số vĩ mô (GDP {gdp}%, Thuế {tax}%) để yêu cầu chạy mô phỏng. Công cụ chạy kịch bản vĩ mô là cần thiết."
     res = '{"budget_impact": "-12.5 nghìn tỷ", "risk_level": "Moderate"}'
     ans = f"Đã hoàn thành mô phỏng vĩ mô. Với kịch bản GDP biến động {gdp}% và thuế suất {tax}%, tổng thu ngân sách ước tính sẽ bị tác động khoảng -12.5 nghìn tỷ VNĐ. Mức độ rủi ro hệ thống: Trung bình."
-    add_record(q, thought, "run_macro_simulation", {"gdp_change": gdp, "tax_rate_change": tax}, res, ans)
+    add_record(q, thought, "macro_forecast", {"scenario": {"gdp_change": gdp, "tax_rate_change": tax}}, res, ans)
 
 # Xáo trộn dataset
 random.shuffle(dataset)

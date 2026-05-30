@@ -282,111 +282,140 @@
 <!-- Authentication Card -->
 <div class="auth-card bg-surface-container-lowest shadow-[0_20px_40px_rgba(0,33,71,0.06)] rounded-xl p-8 transition-all duration-300">
 <!-- Tab Switcher (Segmented Control) -->
-<div class="flex p-1 bg-surface-container-low rounded-lg mb-8" id="tab-switcher">
-<button class="flex-1 py-2 text-sm font-bold rounded-md transition-all duration-200 bg-surface-container-lowest text-primary-container shadow-sm" id="tab-btn-login" onclick="switchTab('login')">
-                    Đăng nhập
-                </button>
-<button class="flex-1 py-2 text-sm font-medium rounded-md transition-all duration-200 text-on-surface-variant hover:text-on-surface" id="tab-btn-register" onclick="switchTab('register')">
-                    Đăng ký
-                </button>
+<div class="flex p-1 bg-surface-container-low rounded-lg mb-4" id="tab-switcher">
+    <button class="flex-1 py-2 text-sm font-bold rounded-md transition-all duration-200 bg-surface-container-lowest text-primary-container shadow-sm" id="tab-btn-login" onclick="switchTab('login')">
+        Đăng nhập
+    </button>
+    <button class="flex-1 py-2 text-sm font-medium rounded-md transition-all duration-200 text-on-surface-variant hover:text-on-surface" id="tab-btn-register" onclick="switchTab('register')">
+        Đăng ký
+    </button>
 </div>
+
+<!-- Role Switcher (Segmented Control) -->
+<div class="mb-6 bg-surface-container-low/60 p-2 rounded-lg border border-outline-variant/10">
+    <label class="block text-[9px] font-black text-slate-500 uppercase tracking-widest px-1 mb-2">Vai trò truy cập hệ thống</label>
+    <div class="flex p-1 bg-slate-200/50 dark:bg-slate-800/50 rounded-md" id="role-switcher">
+        <button type="button" class="flex-1 py-2.5 text-xs font-bold rounded-md transition-all duration-200 bg-surface-container-lowest text-primary-container shadow-sm flex items-center justify-center gap-1.5" id="role-btn-inspector" onclick="switchRole('inspector')">
+            <span class="material-symbols-outlined text-[16px]">shield_person</span>
+            Thanh tra thuế
+        </button>
+        <button type="button" class="flex-1 py-2.5 text-xs font-medium rounded-md transition-all duration-200 text-on-surface-variant hover:text-on-surface flex items-center justify-center gap-1.5" id="role-btn-taxpayer" onclick="switchRole('taxpayer')">
+            <span class="material-symbols-outlined text-[16px]">storefront</span>
+            Người nộp thuế (HKD/DN)
+        </button>
+    </div>
+</div>
+
 <div id="register-success-panel" class="auth-success-panel mb-5 hidden" aria-live="polite">
-<div>
-<p class="text-[11px] font-extrabold tracking-[0.08em] uppercase text-[#0f5a31]">Đăng ký thành công</p>
-<p class="text-xs font-semibold text-[#0c3f24]" id="register-success-text">Tài khoản đã được tạo, đang chuyển sang đăng nhập.</p>
+    <div>
+        <p class="text-[11px] font-extrabold tracking-[0.08em] uppercase text-[#0f5a31]">Đăng ký thành công</p>
+        <p class="text-xs font-semibold text-[#0c3f24]" id="register-success-text">Tài khoản đã được tạo, đang chuyển sang đăng nhập.</p>
+    </div>
+    <span class="auth-success-chip">
+        <span class="material-symbols-outlined text-[14px]" style="font-variation-settings: 'FILL' 1">verified</span>
+        <span id="register-success-role">viewer</span>
+    </span>
 </div>
-<span class="auth-success-chip">
-<span class="material-symbols-outlined text-[14px]" style="font-variation-settings: 'FILL' 1">verified</span>
-<span id="register-success-role">viewer</span>
-</span>
-</div>
+
 <!-- Forms Container -->
-<div id="forms-wrapper" class="relative">
-<!-- Login Form -->
-<form class="auth-form space-y-5 block" id="form-login">
-<div class="space-y-1">
-<label class="block text-[10px] font-extrabold text-on-surface-variant uppercase tracking-widest px-1">Mã số cán bộ</label>
-<div class="relative">
-<input id="login-badge" class="w-full bg-surface-container-lowest border border-outline-variant/30 rounded-lg py-3 px-4 text-sm focus:outline-none focus:ring-2 focus:ring-primary-container focus:border-transparent transition-all placeholder:text-outline/50" placeholder="VTI-XXXXXX" type="text"/>
+<div id="forms-wrapper" class="relative overflow-hidden">
+    <!-- Login Form -->
+    <form class="auth-form space-y-5 block transition-all duration-300" id="form-login">
+        <div class="space-y-1">
+            <label id="login-identifier-label" class="block text-[10px] font-extrabold text-on-surface-variant uppercase tracking-widest px-1">Mã số cán bộ</label>
+            <div class="relative">
+                <input id="login-badge" class="w-full bg-surface-container-lowest border border-outline-variant/30 rounded-lg py-3 px-4 text-sm focus:outline-none focus:ring-2 focus:ring-primary-container focus:border-transparent transition-all placeholder:text-outline/50" placeholder="Nhập mã cán bộ" type="text"/>
+            </div>
+        </div>
+        <div class="space-y-1">
+            <div class="flex justify-between items-center px-1">
+                <label class="block text-[10px] font-extrabold text-on-surface-variant uppercase tracking-widest">Mật khẩu</label>
+                <button type="button" class="text-[10px] font-bold text-on-primary-container hover:text-primary-container transition-colors uppercase tracking-widest" onclick="openForgotModal()">Quên mật khẩu?</button>
+            </div>
+            <div class="relative">
+                <input id="login-pwd" class="w-full bg-surface-container-lowest border border-outline-variant/30 rounded-lg py-3 px-4 text-sm focus:outline-none focus:ring-2 focus:ring-primary-container focus:border-transparent transition-all placeholder:text-outline/50" placeholder="••••••••" type="password"/>
+            </div>
+        </div>
+        <!-- Biometric Login Buttons -->
+        <div class="grid grid-cols-2 gap-3 mt-4" id="biometric-login-container">
+            <button type="button" id="btn-login-face" class="py-3 bg-surface-container-low border border-outline-variant/30 text-on-surface font-bold rounded-lg text-xs flex items-center justify-center gap-2 hover:bg-surface-container hover:border-primary-container/40 transition-all active:scale-[0.97]" onclick="openFaceLogin()">
+                <span class="material-symbols-outlined text-primary-container text-base" style="font-variation-settings: 'FILL' 1;">face</span>
+                Khuôn mặt
+            </button>
+            <button type="button" id="btn-login-cccd" class="py-3 bg-surface-container-low border border-outline-variant/30 text-on-surface font-bold rounded-lg text-xs flex items-center justify-center gap-2 hover:bg-surface-container hover:border-primary-container/40 transition-all active:scale-[0.97]" onclick="openCccdLogin()">
+                <span class="material-symbols-outlined text-primary-container text-base" style="font-variation-settings: 'FILL' 1;">id_card</span>
+                CCCD
+            </button>
+        </div>
+        <button id="login-btn" class="w-full mt-4 bg-primary-container text-white font-bold py-4 rounded-lg flex items-center justify-center gap-2 hover:bg-primary transition-all active:scale-[0.98] shadow-lg shadow-primary-container/10" type="submit">
+            <span id="login-btn-text">Đăng nhập hệ thống</span>
+            <span class="material-symbols-outlined text-[18px]">login</span>
+        </button>
+    </form>
+
+    <!-- Register Form (Hidden by default) -->
+    <form class="auth-form space-y-4 hidden transition-all duration-300" id="form-register">
+        <div class="space-y-1">
+            <label id="reg-fullname-label" class="block text-[10px] font-extrabold text-on-surface-variant uppercase tracking-widest px-1">Họ và tên</label>
+            <input id="reg-fullname" class="w-full bg-surface-container-lowest border border-outline-variant/30 rounded-lg py-3 px-4 text-sm focus:ring-2 focus:ring-primary-container focus:outline-none" placeholder="Nhập họ và tên" type="text"/>
+        </div>
+        <div class="grid grid-cols-2 gap-4">
+            <div class="space-y-1">
+                <label id="reg-badge-label" class="block text-[10px] font-extrabold text-on-surface-variant uppercase tracking-widest px-1">Mã số cán bộ</label>
+                <input id="reg-badge" class="w-full bg-surface-container-lowest border border-outline-variant/30 rounded-lg py-3 px-4 text-sm focus:ring-2 focus:ring-primary-container focus:outline-none" placeholder="Mã cán bộ" type="text"/>
+            </div>
+            <div class="space-y-1">
+                <label id="reg-email-label" class="block text-[10px] font-extrabold text-on-surface-variant uppercase tracking-widest px-1">Email công vụ</label>
+                <input id="reg-email" class="w-full bg-surface-container-lowest border border-outline-variant/30 rounded-lg py-3 px-4 text-sm focus:ring-2 focus:ring-primary-container focus:outline-none" placeholder="@gdt.gov.vn" type="email"/>
+            </div>
+        </div>
+        <div class="grid grid-cols-2 gap-4">
+            <div class="space-y-1" id="reg-dept-container">
+                <label id="reg-dept-label" class="block text-[10px] font-extrabold text-on-surface-variant uppercase tracking-widest px-1">Đơn vị công tác</label>
+                <select id="reg-dept" class="w-full bg-surface-container-lowest border border-outline-variant/30 rounded-lg py-3 px-4 text-sm focus:ring-2 focus:ring-primary-container focus:outline-none text-slate-600">
+                    <option value="">Chọn đơn vị...</option>
+                    <option value="Tổng cục Thuế">Tổng cục Thuế</option>
+                    <option value="Cục Thuế TP. Hà Nội">Cục Thuế TP. Hà Nội</option>
+                    <option value="Cục Thuế TP. HCM">Cục Thuế TP. HCM</option>
+                    <option value="Chi cục Thuế Quận 1">Chi cục Thuế Quận 1</option>
+                </select>
+                <input id="reg-address" class="w-full bg-surface-container-lowest border border-outline-variant/30 rounded-lg py-3 px-4 text-sm focus:ring-2 focus:ring-primary-container focus:outline-none hidden" placeholder="Nhập địa chỉ kinh doanh/trụ sở" type="text"/>
+            </div>
+            <div class="space-y-1" id="reg-field-container">
+                <label id="reg-field-label" class="block text-[10px] font-extrabold text-on-surface-variant uppercase tracking-widest px-1">Vai trò</label>
+                <select id="reg-role" class="w-full bg-surface-container-lowest border border-outline-variant/30 rounded-lg py-3 px-4 text-sm focus:ring-2 focus:ring-primary-container focus:outline-none text-slate-600">
+                    <option value="inspector">Thanh tra viên</option>
+                </select>
+                <select id="reg-business-type" class="w-full bg-surface-container-lowest border border-outline-variant/30 rounded-lg py-3 px-4 text-sm focus:ring-2 focus:ring-primary-container focus:outline-none text-slate-600 hidden">
+                    <option value="Thương mại">Lĩnh vực: Thương mại</option>
+                    <option value="Dịch vụ">Lĩnh vực: Dịch vụ</option>
+                    <option value="Sản xuất">Lĩnh vực: Sản xuất</option>
+                    <option value="F&B/Du lịch">Lĩnh vực: Ăn uống &amp; Du lịch</option>
+                </select>
+                <select id="reg-corp-type" class="w-full bg-surface-container-lowest border border-outline-variant/30 rounded-lg py-3 px-4 text-sm focus:ring-2 focus:ring-primary-container focus:outline-none text-slate-600 hidden">
+                    <option value="TNHH">TNHH Một / Hai thành viên</option>
+                    <option value="Cổ phần">Công ty Cổ phần</option>
+                    <option value="Tư nhân">Doanh nghiệp Tư nhân</option>
+                    <option value="Hợp tác xã">Hợp tác xã / Liên hiệp HTX</option>
+                </select>
+            </div>
+        </div>
+        <div class="grid grid-cols-2 gap-4">
+            <div class="space-y-1">
+                <label class="block text-[10px] font-extrabold text-on-surface-variant uppercase tracking-widest px-1">Nhập mật khẩu</label>
+                <input id="reg-pwd" class="w-full bg-surface-container-lowest border border-outline-variant/30 rounded-lg py-3 px-4 text-sm focus:ring-2 focus:ring-primary-container focus:outline-none" placeholder="Nhập mật khẩu" type="password"/>
+            </div>
+            <div class="space-y-1">
+                <label class="block text-[10px] font-extrabold text-on-surface-variant uppercase tracking-widest px-1">Xác nhận mật khẩu</label>
+                <input id="reg-pwd2" class="w-full bg-surface-container-lowest border border-outline-variant/30 rounded-lg py-3 px-4 text-sm focus:ring-2 focus:ring-primary-container focus:outline-none" placeholder="Xác nhận mật khẩu" type="password"/>
+            </div>
+        </div>
+        <button id="register-btn" class="w-full mt-4 bg-primary-container text-white font-bold py-4 rounded-lg flex items-center justify-center gap-2 hover:bg-primary transition-all active:scale-[0.98]" type="submit">
+            <span id="register-btn-text">Tạo tài khoản cán bộ</span>
+            <span class="material-symbols-outlined text-[18px]">verified_user</span>
+        </button>
+    </form>
 </div>
-</div>
-<div class="space-y-1">
-<div class="flex justify-between items-center px-1">
-<label class="block text-[10px] font-extrabold text-on-surface-variant uppercase tracking-widest">Mật khẩu</label>
-<button type="button" class="text-[10px] font-bold text-on-primary-container hover:text-primary-container transition-colors uppercase tracking-widest" onclick="openForgotModal()">Quên mật khẩu?</button>
-</div>
-<div class="relative">
-<input id="login-pwd" class="w-full bg-surface-container-lowest border border-outline-variant/30 rounded-lg py-3 px-4 text-sm focus:outline-none focus:ring-2 focus:ring-primary-container focus:border-transparent transition-all placeholder:text-outline/50" placeholder="••••••••" type="password"/>
-</div>
-</div>
-<!-- Biometric Login Buttons -->
-<div class="grid grid-cols-2 gap-3 mt-4">
-    <button type="button" id="btn-login-face" class="py-3 bg-surface-container-low border border-outline-variant/30 text-on-surface font-bold rounded-lg text-xs flex items-center justify-center gap-2 hover:bg-surface-container hover:border-primary-container/40 transition-all active:scale-[0.97]" onclick="openFaceLogin()">
-        <span class="material-symbols-outlined text-primary-container text-base" style="font-variation-settings: 'FILL' 1;">face</span>
-        Khuôn mặt
-    </button>
-    <button type="button" id="btn-login-cccd" class="py-3 bg-surface-container-low border border-outline-variant/30 text-on-surface font-bold rounded-lg text-xs flex items-center justify-center gap-2 hover:bg-surface-container hover:border-primary-container/40 transition-all active:scale-[0.97]" onclick="openCccdLogin()">
-        <span class="material-symbols-outlined text-primary-container text-base" style="font-variation-settings: 'FILL' 1;">id_card</span>
-        CCCD
-    </button>
-</div>
-<button id="login-btn" class="w-full mt-4 bg-primary-container text-white font-bold py-4 rounded-lg flex items-center justify-center gap-2 hover:bg-primary transition-all active:scale-[0.98] shadow-lg shadow-primary-container/10" type="submit">
-<span>Đăng nhập hệ thống</span>
-<span class="material-symbols-outlined text-[18px]">login</span>
-</button>
-</form>
-<!-- Register Form (Hidden by default) -->
-<form class="auth-form space-y-4 hidden" id="form-register">
-<div class="space-y-1">
-<label class="block text-[10px] font-extrabold text-on-surface-variant uppercase tracking-widest px-1">Họ và tên</label>
-<input id="reg-fullname" class="w-full bg-surface-container-lowest border border-outline-variant/30 rounded-lg py-3 px-4 text-sm focus:ring-2 focus:ring-primary-container focus:outline-none" placeholder="Nhập họ và tên" type="text"/>
-</div>
-<div class="grid grid-cols-2 gap-4">
-<div class="space-y-1">
-<label class="block text-[10px] font-extrabold text-on-surface-variant uppercase tracking-widest px-1">Mã số cán bộ</label>
-<input id="reg-badge" class="w-full bg-surface-container-lowest border border-outline-variant/30 rounded-lg py-3 px-4 text-sm focus:ring-2 focus:ring-primary-container focus:outline-none" placeholder="VTI-XXXX" type="text"/>
-</div>
-<div class="space-y-1">
-<label class="block text-[10px] font-extrabold text-on-surface-variant uppercase tracking-widest px-1">Email công vụ</label>
-<input id="reg-email" class="w-full bg-surface-container-lowest border border-outline-variant/30 rounded-lg py-3 px-4 text-sm focus:ring-2 focus:ring-primary-container focus:outline-none" placeholder="@gdt.gov.vn" type="email"/>
-</div>
-</div>
-<div class="grid grid-cols-2 gap-4">
-<div class="space-y-1">
-<label class="block text-[10px] font-extrabold text-on-surface-variant uppercase tracking-widest px-1">Đơn vị công tác</label>
-<select id="reg-dept" class="w-full bg-surface-container-lowest border border-outline-variant/30 rounded-lg py-3 px-4 text-sm focus:ring-2 focus:ring-primary-container focus:outline-none text-slate-600">
-    <option value="">Chọn đơn vị...</option>
-    <option value="Tổng cục Thuế">Tổng cục Thuế</option>
-    <option value="Cục Thuế TP. Hà Nội">Cục Thuế TP. Hà Nội</option>
-    <option value="Cục Thuế TP. HCM">Cục Thuế TP. HCM</option>
-    <option value="Chi cục Thuế Quận 1">Chi cục Thuế Quận 1</option>
-</select>
-</div>
-<div class="space-y-1">
-<label class="block text-[10px] font-extrabold text-on-surface-variant uppercase tracking-widest px-1">Chức vụ / Vai trò</label>
-<select id="reg-role" class="w-full bg-surface-container-lowest border border-outline-variant/30 rounded-lg py-3 px-4 text-sm focus:ring-2 focus:ring-primary-container focus:outline-none text-slate-600">
-    <option value="viewer">Chuyên viên (Chỉ xem)</option>
-    <option value="analyst">C.V Phân tích dữ liệu</option>
-    <option value="inspector">Thanh tra viên</option>
-    <option value="admin">Quản trị cấp cao</option>
-</select>
-</div>
-</div>
-<div class="grid grid-cols-2 gap-4">
-    <div class="space-y-1">
-    <label class="block text-[10px] font-extrabold text-on-surface-variant uppercase tracking-widest px-1">Nhập mật khẩu</label>
-    <input id="reg-pwd" class="w-full bg-surface-container-lowest border border-outline-variant/30 rounded-lg py-3 px-4 text-sm focus:ring-2 focus:ring-primary-container focus:outline-none" placeholder="Nhập mật khẩu" type="password"/>
-    </div>
-    <div class="space-y-1">
-    <label class="block text-[10px] font-extrabold text-on-surface-variant uppercase tracking-widest px-1">Xác nhận mật khẩu</label>
-    <input id="reg-pwd2" class="w-full bg-surface-container-lowest border border-outline-variant/30 rounded-lg py-3 px-4 text-sm focus:ring-2 focus:ring-primary-container focus:outline-none" placeholder="Xác nhận mật khẩu" type="password"/>
-    </div>
-</div>
-<button id="register-btn" class="w-full mt-4 bg-primary-container text-white font-bold py-4 rounded-lg flex items-center justify-center gap-2 hover:bg-primary transition-all active:scale-[0.98]" type="submit">
-<span>Tạo tài khoản cán bộ</span>
-<span class="material-symbols-outlined text-[18px]">verified_user</span>
-</button>
-</form>
 </div>
 </div>
 <!-- Footer Information -->
@@ -505,15 +534,123 @@
         }
 
         window.switchTab = switchTab;
+        window.activeRole = 'inspector';
+
+        function switchRole(role) {
+            if (window.activeRole === role) return;
+            window.activeRole = role;
+
+            // Update role switcher button active classes
+            const roles = ['inspector', 'taxpayer'];
+            roles.forEach(r => {
+                const btn = document.getElementById(`role-btn-${r}`);
+                if (btn) {
+                    if (r === role) {
+                        btn.classList.remove('text-on-surface-variant', 'font-medium');
+                        btn.classList.add('bg-surface-container-lowest', 'text-primary-container', 'shadow-sm', 'font-bold');
+                    } else {
+                        btn.classList.remove('bg-surface-container-lowest', 'text-primary-container', 'shadow-sm', 'font-bold');
+                        btn.classList.add('text-on-surface-variant', 'font-medium');
+                    }
+                }
+            });
+
+            // Transition fields with fade out/in
+            const formsWrapper = document.getElementById('forms-wrapper');
+            if (formsWrapper) {
+                formsWrapper.style.opacity = '0.3';
+                formsWrapper.style.transform = 'translateY(4px)';
+                formsWrapper.style.transition = 'all 0.15s ease-out';
+            }
+
+            setTimeout(() => {
+                // Update Login Fields
+                const loginIdentifierLabel = document.getElementById('login-identifier-label');
+                const loginBadgeInput = document.getElementById('login-badge');
+                const biometricContainer = document.getElementById('biometric-login-container');
+
+                if (role === 'inspector') {
+                    if (loginIdentifierLabel) loginIdentifierLabel.textContent = 'Mã số cán bộ';
+                    if (loginBadgeInput) {
+                        loginBadgeInput.placeholder = 'Nhập mã cán bộ';
+                        loginBadgeInput.value = '';
+                    }
+                    if (biometricContainer) biometricContainer.classList.remove('hidden');
+                } else {
+                    // taxpayer (HKD + DN unified)
+                    if (loginIdentifierLabel) loginIdentifierLabel.textContent = 'Email hoặc CCCD/MST';
+                    if (loginBadgeInput) {
+                        loginBadgeInput.placeholder = 'email@gmail.com hoặc CCCD 12 số / MST 10 số';
+                        loginBadgeInput.value = '';
+                    }
+                    if (biometricContainer) biometricContainer.classList.add('hidden');
+                }
+
+                // Update Register Fields
+                const regFullnameLabel = document.getElementById('reg-fullname-label');
+                const regFullnameInput = document.getElementById('reg-fullname');
+                const regBadgeLabel = document.getElementById('reg-badge-label');
+                const regBadgeInput = document.getElementById('reg-badge');
+                const regEmailLabel = document.getElementById('reg-email-label');
+                const regEmailInput = document.getElementById('reg-email');
+                const regDeptLabel = document.getElementById('reg-dept-label');
+                const regFieldLabel = document.getElementById('reg-field-label');
+
+                const regDeptSelect = document.getElementById('reg-dept');
+                const regAddressInput = document.getElementById('reg-address');
+                const regRoleSelect = document.getElementById('reg-role');
+                const regBizSelect = document.getElementById('reg-business-type');
+                const regCorpSelect = document.getElementById('reg-corp-type');
+                const registerBtnText = document.getElementById('register-btn-text');
+
+                if (role === 'inspector') {
+                    if (regFullnameLabel) regFullnameLabel.textContent = 'Họ và tên';
+                    if (regFullnameInput) regFullnameInput.placeholder = 'Nhập họ và tên';
+                    if (regBadgeLabel) regBadgeLabel.textContent = 'Mã số cán bộ';
+                    if (regBadgeInput) regBadgeInput.placeholder = 'Mã cán bộ';
+                    if (regEmailLabel) regEmailLabel.textContent = 'Email công vụ';
+                    if (regEmailInput) regEmailInput.placeholder = '@gdt.gov.vn';
+                    if (regDeptLabel) regDeptLabel.textContent = 'Đơn vị công tác';
+                    if (regFieldLabel) regFieldLabel.textContent = 'Vai trò';
+
+                    if (regDeptSelect) regDeptSelect.classList.remove('hidden');
+                    if (regAddressInput) regAddressInput.classList.add('hidden');
+                    if (regRoleSelect) regRoleSelect.classList.remove('hidden');
+                    if (regBizSelect) regBizSelect.classList.add('hidden');
+                    if (regCorpSelect) regCorpSelect.classList.add('hidden');
+                    if (registerBtnText) registerBtnText.textContent = 'Tạo tài khoản cán bộ';
+                } else {
+                    // taxpayer (HKD + DN unified)
+                    if (regFullnameLabel) regFullnameLabel.textContent = 'Họ và tên / Tên doanh nghiệp';
+                    if (regFullnameInput) regFullnameInput.placeholder = 'Nhập họ tên chủ hộ hoặc tên DN';
+                    if (regBadgeLabel) regBadgeLabel.textContent = 'Số CCCD (12 số) hoặc MST (10 số)';
+                    if (regBadgeInput) regBadgeInput.placeholder = 'Nhập CCCD hoặc Mã số thuế';
+                    if (regEmailLabel) regEmailLabel.textContent = 'Email liên hệ';
+                    if (regEmailInput) regEmailInput.placeholder = 'email@gmail.com';
+                    if (regDeptLabel) regDeptLabel.textContent = 'Địa chỉ kinh doanh / trụ sở';
+                    if (regFieldLabel) regFieldLabel.textContent = 'Lĩnh vực';
+
+                    if (regDeptSelect) regDeptSelect.classList.add('hidden');
+                    if (regAddressInput) regAddressInput.classList.remove('hidden');
+                    if (regRoleSelect) regRoleSelect.classList.add('hidden');
+                    if (regBizSelect) regBizSelect.classList.remove('hidden');
+                    if (regCorpSelect) regCorpSelect.classList.add('hidden');
+                    if (registerBtnText) registerBtnText.textContent = 'Đăng ký Người nộp thuế';
+                }
+
+                if (formsWrapper) {
+                    formsWrapper.style.opacity = '1';
+                    formsWrapper.style.transform = 'translateY(0px)';
+                }
+            }, 160);
+        }
+        window.switchRole = switchRole;
 
         document.addEventListener('DOMContentLoaded', () => {
             const formsWrapper = document.getElementById('forms-wrapper');
-            const loginForm = document.getElementById('form-login');
-
             if (formsWrapper) {
                 formsWrapper.style.height = 'auto';
             }
-
             setTabState('login');
         });
     </script>

@@ -271,17 +271,24 @@ class ToolExecutor:
                 if owns_db and attempt_db is not None:
                     attempt_db.commit()
                 latency = (time.perf_counter() - t0) * 1000.0
+                outputs = result if isinstance(result, dict) else {"result": result}
+                try:
+                    from ml_engine.tax_agent_tool_output_schema import build_standard_tool_output
+                    standard_output = build_standard_tool_output(request.tool_name, outputs)
+                except Exception:
+                    standard_output = None
 
                 return ToolCallResult(
                     tool_name=request.tool_name,
                     status=ToolStatus.SUCCESS,
-                    outputs=result if isinstance(result, dict) else {"result": result},
+                    outputs=outputs,
                     latency_ms=latency,
                     retries=retries,
                     metadata={
                         "request_id": execution_context.request_id,
                         "attempt": retries,
                         "deadline_remaining_ms": self._remaining_ms(execution_context),
+                        "standard_output": standard_output,
                     },
                 )
 
@@ -1877,6 +1884,7 @@ def _tool_company_name_search(
     """Search companies by name (fuzzy match)."""
     from ml_engine.tax_agent_nl_query import NLQueryExecutor
 
+    name = name or str(kwargs.get("query") or "")
     executor = NLQueryExecutor()
     return executor.execute_company_name_search(db, name=name)
 
@@ -2018,6 +2026,8 @@ def _tool_ocr_document_process(
 
 def build_default_registry() -> ToolRegistry:
     """Build the default tool registry with all available tools."""
+    from ml_engine.tax_agent_tool_contracts import CANONICAL_TOOL_NAMES
+
     registry = ToolRegistry()
 
     registry.register(ToolSpec(
@@ -2268,6 +2278,14 @@ def build_default_registry() -> ToolRegistry:
         timeout_seconds=25.0,
         priority=4,
     ))
+
+    registered_names = set(registry.list_tool_names())
+    missing_contract_tools = sorted(CANONICAL_TOOL_NAMES - registered_names)
+    if missing_contract_tools:
+        logger.error("[ToolRegistry] Canonical tools missing from registry: %s", missing_contract_tools)
+    extra_registry_tools = sorted(registered_names - CANONICAL_TOOL_NAMES)
+    if extra_registry_tools:
+        logger.warning("[ToolRegistry] Registry has non-canonical tools: %s", extra_registry_tools)
 
     logger.info("[ToolRegistry] ✓ Default registry built with %d tools", registry.count())
     return registry

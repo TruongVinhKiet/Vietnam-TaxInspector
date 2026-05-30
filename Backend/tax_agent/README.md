@@ -3,207 +3,173 @@ base_model: Qwen/Qwen2.5-1.5B-Instruct
 library_name: peft
 pipeline_tag: text-generation
 tags:
-- base_model:adapter:Qwen/Qwen2.5-1.5B-Instruct
-- lora
-- sft
-- transformers
-- trl
+  - taxinspector
+  - tax-agent
+  - tool-calling
+  - lora
+  - sft
+  - offline-runtime
 ---
 
-# Model Card for Model ID
-
-<!-- Provide a quick summary of what the model is/does. -->
-
-
+# TaxInspector Tax Agent LoRA V5
 
 ## Model Details
 
-### Model Description
+This directory contains the local LoRA adapter used by the TaxInspector
+multi-agent tax assistant.  The adapter is trained to classify Vietnamese tax
+requests, emit constrained tool calls, and support grounded legal/RAG workflows.
 
-<!-- Provide a longer summary of what this model is. -->
+- Base model: `Qwen/Qwen2.5-1.5B-Instruct`
+- Adapter type: PEFT LoRA
+- Target modules: `q_proj`, `k_proj`, `v_proj`, `o_proj`
+- LoRA rank/alpha/dropout: `r=16`, `alpha=32`, `dropout=0.05`
+- Primary runtime role: planning/tool selection only
+- Production runtime default: offline/local artifacts only
+- Last model-card update: 2026-05-27
 
+## Intended Use
 
+Use this adapter inside the TaxInspector orchestrator, not as a standalone legal
+authority.  The model may suggest one canonical backend tool call; the backend
+must still enforce `ToolRegistry`, `AgentModeContractRegistry`, schema
+validation, GraphRAG citation checks, compliance gates, and audit logging.
 
-- **Developed by:** [More Information Needed]
-- **Funded by [optional]:** [More Information Needed]
-- **Shared by [optional]:** [More Information Needed]
-- **Model type:** [More Information Needed]
-- **Language(s) (NLP):** [More Information Needed]
-- **License:** [More Information Needed]
-- **Finetuned from model [optional]:** [More Information Needed]
+Suitable uses:
 
-### Model Sources [optional]
+- Route officer questions to tax-risk, VAT, debt, macro, OCR, or legal tools.
+- Produce structured `<tool_call>` JSON for local backend tools.
+- Help synthesize tool-backed answers after the orchestrator has retrieved
+evidence.
+
+Out-of-scope uses:
 
-<!-- Provide the basic links for the model. -->
+- Final legal decisions without citation/effective-date verification.
+- Automatic enforcement actions without officer review.
+- Runtime calls to external LLM APIs or remote model repositories.
+- General-purpose chatbot use outside the TaxInspector workflow.
 
-- **Repository:** [More Information Needed]
-- **Paper [optional]:** [More Information Needed]
-- **Demo [optional]:** [More Information Needed]
+## Offline Deployment Policy
+
+Runtime deployments must set no external model-download dependency.  The code
+defaults to offline behavior unless `TAX_AGENT_ALLOW_MODEL_DOWNLOAD=1` is set on
+a development/training machine.
+
+Expected runtime behavior:
+
+- Load adapter/tokenizer from this directory.
+- Load the base model only from a pre-populated local Hugging Face cache or an
+  exported local artifact.
+- Fall back to deterministic planner/templates if local model files are missing.
+- Prefer GGUF/llama.cpp or an OpenAI-compatible local endpoint for CPU serving
+  on 12GB RAM machines.
 
-## Uses
+Optional local GGUF server profile:
+
+```powershell
+$env:TAX_AGENT_LOCAL_LLM_ENDPOINT = "http://127.0.0.1:8080"
+$env:TAX_AGENT_LOCAL_LLM_MODEL = "tax-agent-qwen2.5-1.5b-q4"
+```
 
-<!-- Address questions around how the model is intended to be used, including the foreseeable users of the model and those affected by the model. -->
+## Training Data
 
-### Direct Use
+The current production generator is:
 
-<!-- This section is for the model use without fine-tuning or plugging into a larger ecosystem/app. -->
+- `Backend/scripts/generate_mega_agent_dataset_v4.py`
+- Default output: `Backend/data/agent_ultimate_dataset_v4.jsonl`
+- Legacy alias: `Backend/data/agent_ultimate_dataset.jsonl`
 
-[More Information Needed]
+The generator now validates every emitted tool call against the canonical
+backend tool contract and adds stable `train/dev/test` split metadata.  Deprecated
+training names such as `gnn_vat_fraud`, `run_hetero_gnn`, and
+`escalate_to_debate` must not appear in new model outputs.
 
-### Downstream Use [optional]
+Recommended next release gate:
 
-<!-- This section is for the model use when fine-tuned for a task, or when plugged into a larger ecosystem/app -->
+- At least 1,000 intent/mode cases.
+- At least 300 legal-grounding cases.
+- At least 200 tool-call cases.
+- At least 100 adversarial/prompt-injection cases.
+- At least 100 CSV/Excel/OCR workflow cases.
 
-[More Information Needed]
+## Evaluation Requirements
 
-### Out-of-Scope Use
+A model release is acceptable only if it improves or preserves:
 
-<!-- This section addresses misuse, malicious use, and uses that the model will not work well for. -->
+- Tool-call exact match and F1.
+- Intent and mode routing accuracy.
+- Legal groundedness and citation coverage.
+- Hallucination/unsupported-claim rate.
+- CPU latency and peak memory on Core i7 8th gen, 12GB RAM.
+- No network access during runtime smoke tests.
 
-[More Information Needed]
+DPO/RLHF may be run only after enough approved feedback/correction pairs exist
+and the post-DPO model passes the same groundedness and safety gates.
 
-## Bias, Risks, and Limitations
+## Known Limitations
 
-<!-- This section is meant to convey both technical and sociotechnical limitations. -->
+- A 1.5B model is too small to be the source of all tax knowledge.
+- Legal answers must come from GraphRAG/RAG evidence and citation verification.
+- The adapter may still emit malformed JSON; runtime schema validation is
+  mandatory.
+- CPU Transformer inference can be slow; GGUF quantized serving is preferred for
+  office workstations.
+- Synthetic data can overfit tool names unless evaluated against real anonymized
+  officer workflows.
 
-[More Information Needed]
+## Artifact Checksums
 
-### Recommendations
+SHA256:
 
-<!-- This section is meant to convey recommendations with respect to the bias, risk, and technical limitations. -->
+- `adapter_config.json`: `6B7D8C6F0CDFF1660679E70F7805F1952E721BE95362E6FA2504E4B55B095B26`
+- `adapter_model.safetensors`: `3843966C3F2916128BAD45534E03FF024C7FAB77E4F4BE2EB4414C35A513D3BA`
+- `tokenizer.json`: `3FD169731D2CBDE95E10BF356D66D5997FD885DD8DBB6FB4684DA3F23B2585D8`
+- `tax_agent_lora_v5.zip`: `996DC7AEE9C65ACA2BB39DD11F68A4201C4B2F1E463FE6EF2583F9259369F83A`
 
-Users (both direct and downstream) should be made aware of the risks, biases and limitations of the model. More information needed for further recommendations.
+## 2026-05-27 Retrain/Export Smoke Artifacts
 
-## How to Get Started with the Model
+These artifacts prove the local PEFT/llama.cpp pipeline on the target machine,
+but they are not promoted as the production adapter because they were trained
+for one CPU step only.
 
-Use the code below to get started with the model.
+- 1.5B LoRA smoke run:
+  `Backend/data/models/tax_agent_lora_v5_retrain_1p5b_onestep`
+  - Base: `Qwen/Qwen2.5-1.5B-Instruct`
+  - Training data: `Backend/data/agent_ultimate_dataset_v4.jsonl`
+  - Examples/epochs: `1` example, `1` epoch
+  - Target modules: `q_proj`
+  - LoRA rank/alpha: `r=1`, `alpha=2`
+  - Trainable/total params: `86,016 / 1,543,800,320`
+  - CPU train time: `524.7s`
+  - Adapter SHA256: `266162C15DAC4757E922F496C4BD9B88509D69C12F2AA19E07B555556B54817A`
 
-[More Information Needed]
+- LoRA GGUF:
+  `Backend/data/models/tax_agent_lora_v5_retrain_1p5b_onestep.gguf`
+  - Size: `176,480` bytes
+  - SHA256: `0AD0458F9B84A8E59E2F40D3499AF97831E7800B272F3896F5EE0340F5644B91`
 
-## Training Details
+- Base GGUF for local runtime smoke:
+  `Backend/data/models/qwen2_5_0_5b_instruct_q4_k_m.gguf`
+  - Source: local cache for `Qwen/Qwen2.5-0.5B-Instruct`
+  - Quantization: `Q4_K_M` from F16 using `llama-quantize`
+  - Size: `397,807,520` bytes
+  - SHA256: `0E1AFF558BE982D8755DD403DE67EECBD65F5616FC5E9ABEEA1EA97B964EE27F`
 
-### Training Data
+Telemetry screenshots from the same run:
 
-<!-- This should link to a Dataset Card, perhaps with a short stub of information on what the training data is all about as well as documentation related to data pre-processing or additional filtering. -->
+- `Backend/data/screenshots/telemetry_desktop.png`
+- `Backend/data/screenshots/telemetry_mobile.png`
+- `Backend/data/screenshots/telemetry_capture_diagnostics.json`
 
-[More Information Needed]
+## Reproducibility Notes
 
-### Training Procedure
+Training and export should happen on a development machine or Colab, then the
+resulting artifacts should be copied into the on-prem deployment.  Runtime nodes
+should not need Hugging Face network access.
 
-<!-- This relates heavily to the Technical Specifications. Content here should link to that section when it is relevant to the training procedure. -->
+For development downloads only:
 
-#### Preprocessing [optional]
+```powershell
+$env:TAX_AGENT_ALLOW_MODEL_DOWNLOAD = "1"
+```
 
-[More Information Needed]
-
-
-#### Training Hyperparameters
-
-- **Training regime:** [More Information Needed] <!--fp32, fp16 mixed precision, bf16 mixed precision, bf16 non-mixed precision, fp16 non-mixed precision, fp8 mixed precision -->
-
-#### Speeds, Sizes, Times [optional]
-
-<!-- This section provides information about throughput, start/end time, checkpoint size if relevant, etc. -->
-
-[More Information Needed]
-
-## Evaluation
-
-<!-- This section describes the evaluation protocols and provides the results. -->
-
-### Testing Data, Factors & Metrics
-
-#### Testing Data
-
-<!-- This should link to a Dataset Card if possible. -->
-
-[More Information Needed]
-
-#### Factors
-
-<!-- These are the things the evaluation is disaggregating by, e.g., subpopulations or domains. -->
-
-[More Information Needed]
-
-#### Metrics
-
-<!-- These are the evaluation metrics being used, ideally with a description of why. -->
-
-[More Information Needed]
-
-### Results
-
-[More Information Needed]
-
-#### Summary
-
-
-
-## Model Examination [optional]
-
-<!-- Relevant interpretability work for the model goes here -->
-
-[More Information Needed]
-
-## Environmental Impact
-
-<!-- Total emissions (in grams of CO2eq) and additional considerations, such as electricity usage, go here. Edit the suggested text below accordingly -->
-
-Carbon emissions can be estimated using the [Machine Learning Impact calculator](https://mlco2.github.io/impact#compute) presented in [Lacoste et al. (2019)](https://arxiv.org/abs/1910.09700).
-
-- **Hardware Type:** [More Information Needed]
-- **Hours used:** [More Information Needed]
-- **Cloud Provider:** [More Information Needed]
-- **Compute Region:** [More Information Needed]
-- **Carbon Emitted:** [More Information Needed]
-
-## Technical Specifications [optional]
-
-### Model Architecture and Objective
-
-[More Information Needed]
-
-### Compute Infrastructure
-
-[More Information Needed]
-
-#### Hardware
-
-[More Information Needed]
-
-#### Software
-
-[More Information Needed]
-
-## Citation [optional]
-
-<!-- If there is a paper or blog post introducing the model, the APA and Bibtex information for that should go in this section. -->
-
-**BibTeX:**
-
-[More Information Needed]
-
-**APA:**
-
-[More Information Needed]
-
-## Glossary [optional]
-
-<!-- If relevant, include terms and calculations in this section that can help readers understand the model or model card. -->
-
-[More Information Needed]
-
-## More Information [optional]
-
-[More Information Needed]
-
-## Model Card Authors [optional]
-
-[More Information Needed]
-
-## Model Card Contact
-
-[More Information Needed]
-### Framework versions
-
-- PEFT 0.19.1
+For production/offline runtime, leave that variable unset.

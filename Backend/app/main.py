@@ -11,8 +11,9 @@ Changes:
 from contextlib import asynccontextmanager
 import os
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Depends
 from fastapi.middleware.cors import CORSMiddleware
+from .auth import get_current_officer
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 
@@ -36,6 +37,9 @@ from .routers import (
     tax_agent,
     ml_api,
     legal,
+    registration,
+    calculator,
+    taxpayer,
 )
 from .security import limiter, SecurityHeadersMiddleware, rate_limit_exceeded_handler
 
@@ -1601,23 +1605,29 @@ app.add_middleware(SecurityHeadersMiddleware)
 
 # --- Register Routers ---
 app.include_router(auth.router)
-app.include_router(scoring.router)
-app.include_router(graph.router)
-app.include_router(delinquency.router)
-app.include_router(ai_analysis.router)
-app.include_router(monitoring.router)
-app.include_router(simulation.router)
-app.include_router(osint.router)
-app.include_router(invoice_risk.router)
-app.include_router(vat_refund.router)
-app.include_router(entity_resolution.router)
-app.include_router(transfer_pricing.router)
-app.include_router(audit_selection.router)
-app.include_router(collections.router)
-app.include_router(case_triage.router)
-app.include_router(tax_agent.router)
-app.include_router(ml_api.router)
 app.include_router(legal.router)
+app.include_router(registration.router)
+app.include_router(calculator.router)
+app.include_router(taxpayer.router)
+
+# Protect officer/inspector endpoints
+officer_dependency = [Depends(get_current_officer)]
+app.include_router(scoring.router, dependencies=officer_dependency)
+app.include_router(graph.router, dependencies=officer_dependency)
+app.include_router(delinquency.router, dependencies=officer_dependency)
+app.include_router(ai_analysis.router, dependencies=officer_dependency)
+app.include_router(monitoring.router, dependencies=officer_dependency)
+app.include_router(simulation.router, dependencies=officer_dependency)
+app.include_router(osint.router, dependencies=officer_dependency)
+app.include_router(invoice_risk.router, dependencies=officer_dependency)
+app.include_router(vat_refund.router, dependencies=officer_dependency)
+app.include_router(entity_resolution.router, dependencies=officer_dependency)
+app.include_router(transfer_pricing.router, dependencies=officer_dependency)
+app.include_router(audit_selection.router, dependencies=officer_dependency)
+app.include_router(collections.router, dependencies=officer_dependency)
+app.include_router(case_triage.router, dependencies=officer_dependency)
+app.include_router(tax_agent.router, dependencies=officer_dependency)
+app.include_router(ml_api.router, dependencies=officer_dependency)
 
 
 @app.get("/", tags=["Health"])

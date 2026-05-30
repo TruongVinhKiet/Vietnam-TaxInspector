@@ -5,6 +5,7 @@ sys.path.append("e:/TaxInspector/Backend")
 
 from ml_engine.tax_agent_conversation_intelligence import ConversationIntelligence
 from ml_engine.tax_agent_enhanced_intent import EnhancedIntentClassifier
+from ml_engine.tax_agent_tool_contracts import CANONICAL_TOOL_NAMES
 from scripts.generate_mega_agent_dataset_v4 import (
     TOOL_BLUEPRINTS,
     generate,
@@ -14,32 +15,9 @@ from scripts.generate_mega_agent_dataset_v4 import (
 
 
 def test_v4_generator_covers_real_backend_tool_surface():
-    expected_tools = {
-        "gnn_vat_fraud",
-        "knowledge_search",
-        "company_risk_lookup",
-        "delinquency_check",
-        "invoice_risk_scan",
-        "vat_refund_risk",
-        "gnn_analysis",
-        "motif_detection",
-        "ring_scoring",
-        "ownership_analysis",
-        "temporal_delinquency_deep",
-        "hetero_gnn_risk",
-        "vae_anomaly_scan",
-        "causal_uplift_recommend",
-        "top_n_risky_companies",
-        "company_name_search",
-        "nlp_red_flag_scan",
-        "revenue_forecast",
-        "entity_resolution_check",
-        "ocr_document_process",
-        "macro_forecast",
-    }
     actual_tools = {spec["name"] for spec in TOOL_BLUEPRINTS}
 
-    assert expected_tools <= actual_tools
+    assert actual_tools == CANONICAL_TOOL_NAMES
 
 
 def test_v4_generator_loads_deep_legal_and_citizen_topics():
