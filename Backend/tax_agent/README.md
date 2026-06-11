@@ -11,21 +11,54 @@ tags:
   - offline-runtime
 ---
 
-# TaxInspector Tax Agent LoRA V5
+# TaxInspector Tax Agent LoRA V5 — Production
 
 ## Model Details
 
-This directory contains the local LoRA adapter used by the TaxInspector
-multi-agent tax assistant.  The adapter is trained to classify Vietnamese tax
-requests, emit constrained tool calls, and support grounded legal/RAG workflows.
+This directory contains the **production LoRA adapter** used by the TaxInspector
+multi-agent tax assistant. The adapter was trained on the full canonical dataset
+(101,465 training records + 16,718 evaluation records) using QLoRA on Google
+Colab T4 GPU.
 
 - Base model: `Qwen/Qwen2.5-1.5B-Instruct`
-- Adapter type: PEFT LoRA
+- Adapter type: PEFT LoRA (QLoRA 4-bit NF4)
 - Target modules: `q_proj`, `k_proj`, `v_proj`, `o_proj`
 - LoRA rank/alpha/dropout: `r=16`, `alpha=32`, `dropout=0.05`
 - Primary runtime role: planning/tool selection only
 - Production runtime default: offline/local artifacts only
-- Last model-card update: 2026-05-27
+- Last model-card update: 2026-06-11
+
+## Training Results (Production V5)
+
+| Metric | Value |
+|---|---|
+| Total training records | 101,465 |
+| Total evaluation records | 16,718 |
+| Training steps completed | 6,342 |
+| Epochs | 1 |
+| **Final Training Loss** | **0.029538** |
+| **Final Validation Loss** | **0.135369** |
+| Trainable parameters | 4,358,144 / 1,548,072,448 (0.28%) |
+| Batch size (effective) | 16 (per_device=2 × grad_accum=8) |
+| Learning rate | 2e-4 |
+| Optimizer | AdamW 8-bit |
+| Precision | FP16 (mixed) |
+| Quantization (training) | QLoRA NF4 double-quant |
+| Max sequence length | 1,024 tokens |
+| Hardware | Google Colab T4 GPU (15GB VRAM) |
+| Training time (approx.) | ~18 hours across multiple sessions |
+
+### Training Loss Progression
+
+| Checkpoint | Training Loss | Notes |
+|---|---|---|
+| Step 1,000 | ~0.12 | Early convergence |
+| Step 2,000 | ~0.07 | Strong tool-call learning |
+| Step 3,000 | ~0.05 | Legal grounding improving |
+| Step 4,000 | ~0.04 | Near convergence |
+| Step 5,000 | ~0.03 | Stabilized |
+| Step 6,000 | ~0.03 | Final plateau |
+| **Step 6,342** | **0.0295** | **Final (Validation: 0.1354)** |
 
 ## Intended Use
 
@@ -83,13 +116,11 @@ backend tool contract and adds stable `train/dev/test` split metadata.  Deprecat
 training names such as `gnn_vat_fraud`, `run_hetero_gnn`, and
 `escalate_to_debate` must not appear in new model outputs.
 
-Recommended next release gate:
+Dataset composition (130,000 total records):
 
-- At least 1,000 intent/mode cases.
-- At least 300 legal-grounding cases.
-- At least 200 tool-call cases.
-- At least 100 adversarial/prompt-injection cases.
-- At least 100 CSV/Excel/OCR workflow cases.
+- Training split: 101,465 records (78%)
+- Dev/Eval split: 16,718 records (13%)
+- Test split: 11,817 records (9%)
 
 ## Evaluation Requirements
 
@@ -116,49 +147,27 @@ and the post-DPO model passes the same groundedness and safety gates.
 - Synthetic data can overfit tool names unless evaluated against real anonymized
   officer workflows.
 
-## Artifact Checksums
+## Artifact Checksums (Production V5 Final)
 
 SHA256:
 
-- `adapter_config.json`: `6B7D8C6F0CDFF1660679E70F7805F1952E721BE95362E6FA2504E4B55B095B26`
-- `adapter_model.safetensors`: `3843966C3F2916128BAD45534E03FF024C7FAB77E4F4BE2EB4414C35A513D3BA`
-- `tokenizer.json`: `3FD169731D2CBDE95E10BF356D66D5997FD885DD8DBB6FB4684DA3F23B2585D8`
-- `tax_agent_lora_v5.zip`: `996DC7AEE9C65ACA2BB39DD11F68A4201C4B2F1E463FE6EF2583F9259369F83A`
+- `adapter_config.json`: `20AA6FF2E87483540449D3E273ABED03B0C2F1AEBB09200B24D12DAC522CD2D5`
+- `adapter_model.safetensors`: `BE03521F76C03812BF79FF5DEC58A0AB89D89CB9ED4172FCC6589A17160B8C55`
+- `tokenizer.json`: `2F55E63353D3D978B390D346BAE531BE8B83BC9532C0BE500D62B7253AA4C595`
 
-## 2026-05-27 Retrain/Export Smoke Artifacts
+## Checkpoint History
 
-These artifacts prove the local PEFT/llama.cpp pipeline on the target machine,
-but they are not promoted as the production adapter because they were trained
-for one CPU step only.
+Training was performed across multiple Colab sessions with resume capability:
 
-- 1.5B LoRA smoke run:
-  `Backend/data/models/tax_agent_lora_v5_retrain_1p5b_onestep`
-  - Base: `Qwen/Qwen2.5-1.5B-Instruct`
-  - Training data: `Backend/data/agent_ultimate_dataset_v4.jsonl`
-  - Examples/epochs: `1` example, `1` epoch
-  - Target modules: `q_proj`
-  - LoRA rank/alpha: `r=1`, `alpha=2`
-  - Trainable/total params: `86,016 / 1,543,800,320`
-  - CPU train time: `524.7s`
-  - Adapter SHA256: `266162C15DAC4757E922F496C4BD9B88509D69C12F2AA19E07B555556B54817A`
-
-- LoRA GGUF:
-  `Backend/data/models/tax_agent_lora_v5_retrain_1p5b_onestep.gguf`
-  - Size: `176,480` bytes
-  - SHA256: `0AD0458F9B84A8E59E2F40D3499AF97831E7800B272F3896F5EE0340F5644B91`
-
-- Base GGUF for local runtime smoke:
-  `Backend/data/models/qwen2_5_0_5b_instruct_q4_k_m.gguf`
-  - Source: local cache for `Qwen/Qwen2.5-0.5B-Instruct`
-  - Quantization: `Q4_K_M` from F16 using `llama-quantize`
-  - Size: `397,807,520` bytes
-  - SHA256: `0E1AFF558BE982D8755DD403DE67EECBD65F5616FC5E9ABEEA1EA97B964EE27F`
-
-Telemetry screenshots from the same run:
-
-- `Backend/data/screenshots/telemetry_desktop.png`
-- `Backend/data/screenshots/telemetry_mobile.png`
-- `Backend/data/screenshots/telemetry_capture_diagnostics.json`
+| Checkpoint | Date | Status |
+|---|---|---|
+| checkpoint-1000 | 2026-05-28 | ✅ Archived |
+| checkpoint-2000 | 2026-05-30 | ✅ Archived |
+| checkpoint-3000 | 2026-06-04 | ✅ Archived |
+| checkpoint-4000 | 2026-06-05 | ✅ Archived |
+| checkpoint-5000 | 2026-06-06 | ✅ Archived |
+| checkpoint-6000 | 2026-06-10 | ✅ Archived |
+| **final_adapter** | **2026-06-11** | **✅ Production** |
 
 ## Reproducibility Notes
 
@@ -173,3 +182,10 @@ $env:TAX_AGENT_ALLOW_MODEL_DOWNLOAD = "1"
 ```
 
 For production/offline runtime, leave that variable unset.
+
+### Framework versions
+
+- PEFT 0.19.1
+- Transformers (latest as of 2026-06)
+- BitsAndBytes (QLoRA NF4)
+- PyTorch 2.x (CUDA, FP16)
