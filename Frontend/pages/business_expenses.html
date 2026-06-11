@@ -260,6 +260,26 @@
                     </div>
 
                 </div>
+
+                <!-- AI Anomaly Detection Panel (F7) -->
+                <div class="bg-white p-6 rounded-xl border border-slate-200 shadow-sm space-y-4">
+                    <div class="flex items-center justify-between">
+                        <div class="flex items-center gap-2">
+                            <span class="material-symbols-outlined text-rose-500">dangerous</span>
+                            <h4 class="text-xs font-black uppercase tracking-wider text-slate-700">Phát hiện chi phí bất thường (Isolation Forest AI)</h4>
+                        </div>
+                        <button onclick="runExpenseAnomalyDetection()" class="px-3 py-1.5 bg-rose-500 hover:bg-rose-600 text-white font-bold rounded-lg text-[10px] uppercase transition-all flex items-center gap-1">
+                            <span class="material-symbols-outlined text-xs">troubleshoot</span> Chạy rà soát chi phí
+                        </button>
+                    </div>
+                    <div id="anomaly-summary-container" class="hidden grid grid-cols-1 md:grid-cols-4 gap-4 p-4 bg-slate-50 rounded-lg border border-slate-100 text-xs">
+                        <!-- Filled by JS -->
+                    </div>
+                    <div id="anomaly-details-container" class="hidden overflow-x-auto border border-slate-100 rounded-lg">
+                        <!-- Table of flagged anomalies -->
+                    </div>
+                </div>
+
             </div>
         </main>
     </div>
@@ -287,6 +307,10 @@
     </script>
     <script src="../js/business_taxpayer_common.js"></script>
     <script src="../js/business_expenses.js"></script>
+    <script src="../js/taxpayer_ai_registry.js"></script>
+    <script src="../js/taxpayer_ai_client.js"></script>
+    <script src="../js/taxpayer_ai_panels_core.js"></script>
+    <script src="../js/taxpayer_ai_panels_advanced.js"></script>
     <script src="../js/business_intelligence.js"></script>
 </body>
 </html>

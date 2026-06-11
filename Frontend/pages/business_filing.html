@@ -219,6 +219,41 @@
                                 </div>
                             </div>
 
+                            <!-- F17: Document Safe & Proof Store -->
+                            <div class="p-4 bg-slate-50 border border-slate-200 rounded-xl space-y-3">
+                                <h5 class="text-[10px] font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1.5">
+                                    <span class="material-symbols-outlined text-sm text-emerald-500">folder_zip</span>
+                                    Hồ sơ chứng từ &amp; Minh chứng doanh thu (AI Pre-filing Validation)
+                                </h5>
+                                
+                                <div class="grid grid-cols-1 md:grid-cols-2 gap-3 text-[11px]">
+                                    <div class="bg-white p-3 rounded-lg border border-slate-200 space-y-2">
+                                        <p class="font-bold text-slate-700">Đính kèm hóa đơn / chứng từ mới</p>
+                                        <div class="space-y-1.5">
+                                            <input type="text" id="proof-billing-id" placeholder="Mã hóa đơn (ví dụ: HD0001)" class="w-full rounded border-slate-200 text-[10px] py-1">
+                                            <input type="number" id="proof-amount" placeholder="Số tiền thanh toán (VND)" class="w-full rounded border-slate-200 text-[10px] py-1 font-mono">
+                                            <button onclick="simulateUploadProof()" class="w-full py-1 bg-slate-900 text-white font-bold rounded text-[10px]">Tải lên chứng từ nháp</button>
+                                        </div>
+                                    </div>
+
+                                    <div class="bg-white p-3 rounded-lg border border-slate-200 flex flex-col">
+                                        <p class="font-bold text-slate-700">Chứng từ đã nạp</p>
+                                        <div id="proofs-list" class="space-y-1 max-h-[80px] overflow-y-auto font-mono text-[9px] text-slate-600 flex-1">
+                                            Đang tải...
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <button onclick="runPreFilingAIValidation()" class="w-full py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded text-[10px] transition-all flex items-center justify-center gap-1">
+                                    <span class="material-symbols-outlined text-xs">analytics</span>
+                                    Chạy AI rà soát chứng từ &amp; tờ khai
+                                </button>
+
+                                <div id="ai-validation-box" class="hidden p-3 rounded-lg border text-[11px] space-y-2">
+                                    <!-- Results dynamically populated -->
+                                </div>
+                            </div>
+
                             <div class="flex justify-between gap-3 pt-2">
                                 <button onclick="exportXml()" class="flex-1 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-lg text-xs transition-all flex items-center justify-center gap-1">
                                     <span class="material-symbols-outlined text-sm">download</span> Xuất XML tờ khai
@@ -292,6 +327,10 @@
     </script>
     <script src="../js/business_taxpayer_common.js"></script>
     <script src="../js/business_filing.js"></script>
+    <script src="../js/taxpayer_ai_registry.js"></script>
+    <script src="../js/taxpayer_ai_client.js"></script>
+    <script src="../js/taxpayer_ai_panels_core.js"></script>
+    <script src="../js/taxpayer_ai_panels_advanced.js"></script>
     <script src="../js/business_intelligence.js"></script>
 </body>
 </html>

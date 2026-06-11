@@ -325,6 +325,102 @@
                         </table>
                     </div>
                 </div>
+
+                <!-- PageRank Supplier Trust Score Panel (F10) -->
+                <div class="bg-white p-6 rounded-xl border border-slate-200 shadow-sm space-y-4">
+                    <div class="flex items-center justify-between">
+                        <div class="flex items-center gap-2">
+                            <span class="material-symbols-outlined text-indigo-500">hub</span>
+                            <h4 class="text-xs font-black uppercase tracking-wider text-slate-700">Đánh giá tín nhiệm nhà cung cấp (PageRank AI)</h4>
+                        </div>
+                        <button onclick="runSupplierTrustAssessment()" class="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-lg text-[10px] uppercase transition-all flex items-center gap-1">
+                            <span class="material-symbols-outlined text-xs">analytics</span> Phân tích mạng lưới nhà cung cấp
+                        </button>
+                    </div>
+                    <div id="supplier-trust-result" class="hidden space-y-4 text-xs">
+                        <div class="border border-slate-100 rounded-lg overflow-x-auto">
+                            <table class="w-full text-left border-collapse">
+                                <thead>
+                                    <tr class="bg-slate-100/50 text-slate-400 font-bold uppercase tracking-wider text-[9px] border-b border-slate-200">
+                                        <th class="px-4 py-2">Nhà cung cấp (Supplier)</th>
+                                        <th class="px-4 py-2 text-right">Số tiền giao dịch</th>
+                                        <th class="px-4 py-2 text-center">Tỷ lệ tương tác</th>
+                                        <th class="px-4 py-2 text-center">PageRank Score</th>
+                                        <th class="px-4 py-2 text-center">Trust Rating</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="supplier-trust-body" class="divide-y divide-slate-200 text-slate-700"></tbody>
+                            </table>
+                        </div>
+                        <div class="p-3 bg-indigo-50 border border-indigo-100 text-[10px] text-indigo-800 flex items-start gap-1 rounded-lg">
+                            <span class="material-symbols-outlined text-xs mt-0.5">info</span>
+                            <div>
+                                <strong>Đề xuất rủi ro chuỗi cung ứng:</strong> <span id="supplier-trust-alert"></span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- GNN Spectral Evasion Cascade & Collusion Panel (F21) -->
+                <div class="bg-white p-6 rounded-xl border border-slate-200 shadow-sm space-y-4">
+                    <div class="flex items-center justify-between">
+                        <div class="flex items-center gap-2">
+                            <span class="material-symbols-outlined text-indigo-500">leak_add</span>
+                            <h4 class="text-xs font-black uppercase tracking-wider text-slate-700">Đồ thị GNN - Phát hiện trốn thuế vòng lặp & lan truyền rủi ro</h4>
+                        </div>
+                        <button onclick="runSpectralEvasionCascade()" class="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-lg text-[10px] uppercase transition-all flex items-center gap-1">
+                            <span class="material-symbols-outlined text-xs">share_windows</span> Quét cấu trúc GNN
+                        </button>
+                    </div>
+                    <div id="gnn-spectral-result" class="hidden space-y-4 text-xs">
+                        <div class="grid grid-cols-2 gap-4">
+                            <div class="bg-slate-50 p-3 rounded-lg border border-slate-100 space-y-1">
+                                <p class="text-[10px] font-bold text-slate-400 uppercase">Khoảng phổ Spectral Gap (Laplacian)</p>
+                                <p id="res-gnn-gap" class="text-lg font-black text-indigo-700">0.0</p>
+                                <p class="text-[10px] text-slate-500">Chỉ số càng thấp thể hiện tính kết dính cao, cảnh báo cấu trúc vòng lặp mua bán hóa đơn bất hợp pháp.</p>
+                            </div>
+                            <div class="bg-slate-50 p-3 rounded-lg border border-slate-100 space-y-1">
+                                <p class="text-[10px] font-bold text-slate-400 uppercase">Phát hiện vòng lặp hóa đơn</p>
+                                <p id="res-gnn-loops" class="text-lg font-black text-slate-800">--</p>
+                                <p class="text-[10px] text-slate-500">Phát hiện mua bán hóa đơn khống lòng vòng (circular invoicing) để tối ưu khấu trừ thuế GTGT.</p>
+                            </div>
+                        </div>
+
+                        <!-- Cascade risk list -->
+                        <div class="space-y-2">
+                            <h5 class="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Mô phỏng Lan truyền rủi ro chuỗi cung ứng (GNN Risk Cascade)</h5>
+                            <div class="border border-slate-100 rounded-lg overflow-hidden">
+                                <table class="w-full text-left border-collapse">
+                                    <thead>
+                                        <tr class="bg-slate-50 text-slate-400 font-bold uppercase tracking-wider text-[9px] border-b border-slate-200">
+                                            <th class="px-4 py-2">Mã số thuế doanh nghiệp</th>
+                                            <th class="px-4 py-2 text-center">Mức độ lan truyền rủi ro</th>
+                                            <th class="px-4 py-2 text-center">Băng thông kết nối</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="gnn-cascade-body" class="divide-y divide-slate-100 text-slate-700"></tbody>
+                                </table>
+                            </div>
+                        </div>
+
+                        <!-- Adamic-Adar Collusion List -->
+                        <div class="space-y-2">
+                            <h5 class="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Chỉ số cấu trúc thông đồng đồng lõa (Adamic-Adar Similarity Index)</h5>
+                            <div class="p-3 bg-slate-50 rounded-lg border border-slate-100 text-[10px] space-y-1.5" id="gnn-collusion-container">
+                                Đang tính toán cấu trúc thông đồng...
+                            </div>
+                        </div>
+
+                        <div class="p-3 bg-emerald-50 border border-emerald-100 text-[10px] text-emerald-800 flex items-start gap-1 rounded-lg">
+                            <span class="material-symbols-outlined text-xs mt-0.5">policy</span>
+                            <div>
+                                <strong>Đánh giá kiểm soát hệ thống:</strong> <span id="gnn-verdict">--</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                </div>
             </div>
         </main>
     </div>
@@ -352,6 +448,10 @@
     </script>
     <script src="../js/business_taxpayer_common.js"></script>
     <script src="../js/business_invoices.js"></script>
+    <script src="../js/taxpayer_ai_registry.js"></script>
+    <script src="../js/taxpayer_ai_client.js"></script>
+    <script src="../js/taxpayer_ai_panels_core.js"></script>
+    <script src="../js/taxpayer_ai_panels_advanced.js"></script>
     <script src="../js/business_intelligence.js"></script>
 </body>
 </html>

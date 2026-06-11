@@ -26,6 +26,10 @@ def test_business_pages_load_common_and_page_specific_taxpayer_js() -> None:
     for page, script in PAGES_TO_SCRIPTS.items():
         html = (FRONTEND / "pages" / page).read_text(encoding="utf-8")
         assert "business_taxpayer_common.js" in html
+        assert "taxpayer_ai_registry.js" in html
+        assert "taxpayer_ai_client.js" in html
+        assert "taxpayer_ai_panels_core.js" in html
+        assert "taxpayer_ai_panels_advanced.js" in html
         assert "business_intelligence.js" in html
         assert script in html
 
@@ -33,7 +37,7 @@ def test_business_pages_load_common_and_page_specific_taxpayer_js() -> None:
 def test_stub_functions_are_bound_by_page_scripts() -> None:
     contracts = {
         "business_calendar.js": ["syncCalendar", "saveNotificationSettings"],
-        "business_invoices.js": ["issueInvoice", "scanInvoice"],
+        "business_invoices.js": ["issueInvoice", "scanInvoice", "runSupplierTrustAssessment", "runSpectralEvasionCascade"],
         "business_filing.js": ["exportXml", "signFiling", "generateQr", "confirmPayment"],
         "business_debts.js": ["downloadReceipt", "checkPassportBan"],
         "business_legal.js": ["sendChatMessage", "handleKeyPress"],
@@ -49,7 +53,16 @@ def test_stub_functions_are_bound_by_page_scripts() -> None:
 
 
 def test_business_intelligence_frontend_contract() -> None:
-    source = (FRONTEND / "js" / "business_intelligence.js").read_text(encoding="utf-8")
+    source = "\n".join(
+        (FRONTEND / "js" / name).read_text(encoding="utf-8")
+        for name in [
+            "taxpayer_ai_registry.js",
+            "taxpayer_ai_client.js",
+            "taxpayer_ai_panels_core.js",
+            "taxpayer_ai_panels_advanced.js",
+            "business_intelligence.js",
+        ]
+    )
     for endpoint in [
         "/intelligence/overview",
         "/intelligence/forecast",
@@ -94,6 +107,18 @@ def test_business_intelligence_frontend_contract() -> None:
         "/intelligence/model-governance/production",
         "/intelligence/legal-chat",
         "/intelligence/feedback",
+        "/intelligence/benford-analysis",
+        "/intelligence/seasonal-decomposition",
+        "/intelligence/survival-analysis",
+        "/intelligence/bayesian-forecast",
+        "/intelligence/explainability",
+        "/intelligence/autoencoder-bank-anomaly",
+        "/intelligence/rfm-customer-segmentation",
+        "/intelligence/working-capital",
+        "/intelligence/regulatory-change-diff",
+        "/intelligence/compliance-risk-heatmap",
+        "/intelligence/tax-calendar-optimization",
+        "/intelligence/cohort-analysis",
     ]:
         assert endpoint in source
     assert "taxpayer-ai-overview-panel" in source
@@ -112,3 +137,9 @@ def test_business_intelligence_frontend_contract() -> None:
     assert "window.reconcile4WayAI" in source
     assert "window.taxReserveOptimizerAI" in source
     assert "window.evidenceBundleAI" in source
+    assert "TaxpayerAIRegistry" in source
+    assert "TaxpayerAIClient" in source
+    assert "TaxpayerAIPanelsCore" in source
+    assert "TaxpayerAIPanelsAdvanced" in source
+    assert "primary: 3" in source
+    assert "loadTaxpayerAICapability" in source

@@ -16,8 +16,8 @@
                     </div>
                     <p class="text-[10px] text-slate-500 mt-1">${UI.escapeHtml(item.description)}</p>
                     <div class="mt-2 text-[10px] text-slate-400 flex gap-4">
-                        <span>Han cuoi: ${UI.escapeHtml(item.due_date)}</span>
-                        <span>Mau: ${UI.escapeHtml(item.form_code)}</span>
+                        <span>Hạn cuối: ${UI.escapeHtml(item.due_date)}</span>
+                        <span>Mẫu: ${UI.escapeHtml(item.form_code)}</span>
                     </div>
                 </div>
             </div>
@@ -31,18 +31,18 @@
             target.innerHTML = data.deadlines.map(deadlineRow).join("");
         }
         const threshold = await UI.get("/calendar/revenue-threshold");
-        UI.panel("calendar-revenue-threshold-panel", "Theo doi doanh thu luy ke", "monitoring", `
+        UI.panel("calendar-revenue-threshold-panel", "Theo dõi doanh thu lũy kế", "monitoring", `
             <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
                 <div class="p-3 bg-slate-50 rounded-lg border border-slate-200">
-                    <p class="text-[9px] font-bold uppercase text-slate-400">Doanh thu luy ke</p>
+                    <p class="text-[9px] font-bold uppercase text-slate-400">Doanh thu lũy kế</p>
                     <p class="text-lg font-black text-slate-800">${UI.fmtVnd(threshold.cumulative_revenue)}</p>
                 </div>
                 <div class="p-3 bg-slate-50 rounded-lg border border-slate-200">
-                    <p class="text-[9px] font-bold uppercase text-slate-400">Nguong ke tiep</p>
+                    <p class="text-[9px] font-bold uppercase text-slate-400">Ngưỡng kế tiếp</p>
                     <p class="text-lg font-black text-slate-800">${UI.fmtVnd(threshold.next_threshold)}</p>
                 </div>
                 <div class="p-3 bg-slate-50 rounded-lg border border-slate-200">
-                    <p class="text-[9px] font-bold uppercase text-slate-400">Canh bao</p>
+                    <p class="text-[9px] font-bold uppercase text-slate-400">Cảnh báo</p>
                     <p class="text-sm font-black text-emerald-700">${UI.escapeHtml(threshold.alert)}</p>
                 </div>
             </div>
@@ -58,7 +58,7 @@
             if (data.download_path) {
                 window.open(`${API_BASE.replace(/\/api$/, "/api")}/taxpayer/calendar/export.ics`, "_blank");
             }
-            UI.toast(data.message || "Da dong bo lich thue.");
+            UI.toast(data.message || "Đã đồng bộ lịch thuế.");
         } catch (e) {
             UI.toast(e.message, "error");
         }
@@ -72,7 +72,7 @@
                 email_enabled: UI.readValue("toggle-email", true),
                 days_before: [days, 3, 0],
             });
-            UI.toast("Da luu cau hinh nhac nho.");
+            UI.toast("Đã lưu cấu hình nhắc nhở.");
         } catch (e) {
             UI.toast(e.message, "error");
         }

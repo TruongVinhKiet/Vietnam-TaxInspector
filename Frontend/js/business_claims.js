@@ -12,7 +12,7 @@
             barEl.style.width = `${score}%`;
             barEl.className = `h-full rounded-full transition-all duration-300 ${score >= 70 ? "bg-rose-500" : score >= 40 ? "bg-amber-500" : "bg-emerald-500"}`;
         }
-        if (textEl) textEl.textContent = score >= 70 ? "Trang thai: RUI RO CAO - Nen chuan bi ho so" : score >= 40 ? "Trang thai: RUI RO TRUNG BINH" : "Trang thai: RUI RO THAP - An toan";
+        if (textEl) textEl.textContent = score >= 70 ? "Trạng thái: RỦI RO CAO - Nên chuẩn bị hồ sơ" : score >= 40 ? "Trạng thái: RỦI RO TRUNG BÌNH" : "Trạng thái: RỦI RO THẤP - An toàn";
     };
 
     async function loadClaims() {
@@ -20,19 +20,19 @@
             UI.get("/claims/rights"),
             UI.get("/claims/timeline"),
         ]);
-        UI.panel("claim-rights-panel", "Quyen cua nguoi nop thue", "shield", `
+        UI.panel("claim-rights-panel", "Quyền của người nộp thuế", "shield", `
             <div class="grid grid-cols-1 md:grid-cols-2 gap-2">
                 ${rights.rights.map((right) => `<div class="p-3 rounded-lg bg-slate-50 border border-slate-200 text-[11px] font-semibold text-slate-700">${UI.escapeHtml(right)}</div>`).join("")}
             </div>
             <div class="mt-3 flex flex-wrap gap-2">
-                <button id="complaint-btn" class="px-3 py-2 rounded-lg bg-slate-100 text-slate-700 text-[10px] font-bold">To cao sach nhieu</button>
-                <button id="appointment-btn" class="px-3 py-2 rounded-lg bg-[#002147] text-white text-[10px] font-bold">Dat lich gap can bo thue</button>
+                <button id="complaint-btn" class="px-3 py-2 rounded-lg bg-slate-100 text-slate-700 text-[10px] font-bold">Tố cáo sách nhiễu</button>
+                <button id="appointment-btn" class="px-3 py-2 rounded-lg bg-[#002147] text-white text-[10px] font-bold">Đặt lịch gặp cán bộ thuế</button>
                 <span class="px-3 py-2 rounded-lg bg-emerald-50 text-emerald-700 text-[10px] font-bold">Hotline ${UI.escapeHtml(rights.hotline)}</span>
             </div>
         `);
         document.getElementById("complaint-btn").onclick = submitComplaint;
         document.getElementById("appointment-btn").onclick = bookAppointment;
-        UI.panel("claim-timeline-panel", "Timeline ho so khieu nai", "timeline", `
+        UI.panel("claim-timeline-panel", "Lịch trình hồ sơ khiếu nại", "timeline", `
             <div class="space-y-2">
                 ${(timeline.claims || []).map((item) => `
                     <div class="p-3 rounded-lg bg-slate-50 border border-slate-200 flex items-center justify-between gap-3">
@@ -42,7 +42,7 @@
                         </div>
                         ${UI.statusBadge(item.status)}
                     </div>
-                `).join("") || `<p class="text-slate-400">Chua co ho so khieu nai.</p>`}
+                `).join("") || `<p class="text-slate-400">Chưa có hồ sơ khiếu nại.</p>`}
             </div>
         `);
     }
@@ -55,7 +55,7 @@
                 description: UI.readValue("appeal-desc"),
             };
             const data = await UI.post("/claims/appeal", payload);
-            UI.toast(`Da gui ho so ${data.claim.external_ref}`);
+            UI.toast(`Đã gửi hồ sơ ${data.claim.external_ref}`);
             await loadClaims();
         } catch (e) {
             UI.toast(e.message, "error");
@@ -63,14 +63,14 @@
     };
 
     async function submitComplaint() {
-        const data = await UI.post("/claims/complaint", { description: "Phan anh sach nhieu sandbox" });
-        UI.toast(`Da ghi nhan phan anh ${data.claim.external_ref}`);
+        const data = await UI.post("/claims/complaint", { description: "Phản ánh sách nhiễu sandbox" });
+        UI.toast(`Đã ghi nhận phản ánh ${data.claim.external_ref}`);
         await loadClaims();
     }
 
     async function bookAppointment() {
-        const data = await UI.post("/claims/appointment", { appointment_date: new Date().toISOString().slice(0, 10), purpose: "Tu van HKD" });
-        UI.toast(`Da dat lich ${data.appointment_ref}`);
+        const data = await UI.post("/claims/appointment", { appointment_date: new Date().toISOString().slice(0, 10), purpose: "Tư vấn HKD" });
+        UI.toast(`Đã đặt lịch ${data.appointment_ref}`);
     }
 
     document.addEventListener("DOMContentLoaded", () => UI.boot(loadClaims));

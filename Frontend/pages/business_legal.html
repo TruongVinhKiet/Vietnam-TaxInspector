@@ -242,6 +242,83 @@
                     </div>
 
                 </div>
+
+                <!-- F18: Multi-Agent Debate Forensic Analyst panel -->
+                <div class="bg-white p-6 rounded-xl border border-slate-200 shadow-sm space-y-4">
+                    <div class="flex items-center justify-between pb-3 border-b">
+                        <div class="flex items-center gap-2">
+                            <span class="material-symbols-outlined text-emerald-500">forum</span>
+                            <h4 class="text-xs font-black uppercase tracking-wider text-slate-700">Đối thoại Đa Đại lý (Multi-Agent Compliance Debate)</h4>
+                        </div>
+                        <span class="px-2 py-0.5 bg-emerald-50 text-emerald-600 font-bold rounded text-[9px]">COMPLIANCE SHIELD V4</span>
+                    </div>
+
+                    <p class="text-xs text-slate-500 leading-relaxed">
+                        Chạy mô phỏng đối thoại phản biện giữa 2 chuyên gia tư vấn thuế ảo (Chuyên gia Hộ Kinh Doanh vs Chuyên gia Doanh Nghiệp TNHH) để tìm ra mô hình hoạt động tối ưu thuế và dòng tiền của bạn.
+                    </p>
+
+                    <div class="grid grid-cols-1 md:grid-cols-4 gap-4 items-end text-xs">
+                        <div>
+                            <label class="block text-[9px] font-bold text-slate-400 uppercase mb-1">Chủ đề thảo luận</label>
+                            <select id="debate-topic" class="w-full rounded-lg border-slate-200 text-xs py-1.5 focus:ring-1 focus:ring-emerald-500">
+                                <option value="hkd_vs_llc">Hộ kinh doanh vs Doanh nghiệp TNHH</option>
+                                <option value="deductibles">Hóa đơn chứng từ chi phí đầu vào</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="block text-[9px] font-bold text-slate-400 uppercase mb-1">Doanh thu dự kiến (VND)</label>
+                            <input type="number" id="debate-revenue" value="850000000" class="w-full rounded-lg border-slate-200 text-xs py-1.5 focus:ring-1 focus:ring-emerald-500 font-mono">
+                        </div>
+                        <div>
+                            <label class="block text-[9px] font-bold text-slate-400 uppercase mb-1">Chi phí thực tế (VND)</label>
+                            <input type="number" id="debate-expenses" value="450000000" class="w-full rounded-lg border-slate-200 text-xs py-1.5 focus:ring-1 focus:ring-emerald-500 font-mono">
+                        </div>
+                        <button onclick="startForensicDebate()" class="py-2 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-lg text-xs transition-all flex items-center justify-center gap-1.5">
+                            <span class="material-symbols-outlined text-sm">smart_toy</span> Bắt đầu đối thoại AI
+                        </button>
+                    </div>
+
+                    <!-- Debate Board (Hidden by default) -->
+                    <div id="debate-board" class="hidden border border-slate-200 rounded-xl overflow-hidden text-xs">
+                        <div class="bg-slate-50/50 p-4 border-b border-slate-200 grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div class="space-y-1.5">
+                                <span class="text-[9px] font-black uppercase text-rose-500">Lập luận Hộ Kinh Doanh:</span>
+                                <ul id="debate-hkd-points" class="list-disc pl-4 space-y-1 text-[11px] text-slate-600"></ul>
+                            </div>
+                            <div class="space-y-1.5">
+                                <span class="text-[9px] font-black uppercase text-emerald-500">Lập luận Doanh Nghiệp TNHH:</span>
+                                <ul id="debate-llc-points" class="list-disc pl-4 space-y-1 text-[11px] text-slate-600"></ul>
+                            </div>
+                        </div>
+
+                        <!-- Debate Dialogue Feed -->
+                        <div id="debate-dialogue" class="p-4 space-y-4 max-h-[300px] overflow-y-auto bg-slate-50/20">
+                            <!-- Populated dynamically -->
+                        </div>
+
+                        <!-- Verdict Box -->
+                        <div class="p-4 bg-emerald-50 border-t border-emerald-100 flex flex-col md:flex-row justify-between items-center gap-4 text-emerald-800">
+                            <div class="space-y-1">
+                                <div class="flex items-center gap-1.5 font-bold">
+                                    <span class="material-symbols-outlined text-sm">gavel</span>
+                                    Phán quyết tối ưu: <span id="debate-winner" class="underline font-black font-sans">...</span>
+                                </div>
+                                <p id="debate-verdict" class="text-[11px] text-emerald-950 font-medium leading-relaxed"></p>
+                            </div>
+                            <div class="w-full md:w-48 text-center space-y-1 shrink-0">
+                                <span class="text-[9px] font-bold uppercase text-emerald-700">Tỷ lệ ưu tiên mô hình (HKD vs TNHH)</span>
+                                <div class="w-full bg-slate-200 h-2.5 rounded-full overflow-hidden flex">
+                                    <div id="debate-gauge-bar" class="bg-emerald-500 h-full" style="width: 50%"></div>
+                                </div>
+                                <div class="flex justify-between text-[8px] font-mono text-slate-400">
+                                    <span>Hộ kinh doanh</span>
+                                    <span>TNHH</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
             </div>
         </main>
     </div>
@@ -269,6 +346,10 @@
     </script>
     <script src="../js/business_taxpayer_common.js"></script>
     <script src="../js/business_legal.js"></script>
+    <script src="../js/taxpayer_ai_registry.js"></script>
+    <script src="../js/taxpayer_ai_client.js"></script>
+    <script src="../js/taxpayer_ai_panels_core.js"></script>
+    <script src="../js/taxpayer_ai_panels_advanced.js"></script>
     <script src="../js/business_intelligence.js"></script>
 </body>
 </html>

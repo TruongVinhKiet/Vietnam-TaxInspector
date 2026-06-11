@@ -400,6 +400,27 @@
                                         <p class="text-emerald-600 font-bold mt-1 text-[11px]" id="res-compare-llc">0 VNĐ</p>
                                     </div>
                                 </div>
+                                <div class="space-y-2.5 my-2.5 border-t border-b border-slate-200/60 py-2.5">
+                                    <p class="font-bold text-[9px] uppercase text-slate-400">Trực quan tỷ lệ thuế / doanh thu:</p>
+                                    <div class="space-y-1 text-[10px]">
+                                        <div class="flex justify-between"><span>Thuế Khoán</span><span id="pct-compare-khoan" class="font-bold text-slate-700">0%</span></div>
+                                        <div class="w-full bg-slate-200 h-2 rounded-full overflow-hidden">
+                                            <div id="bar-compare-khoan" class="h-full bg-rose-500 rounded-full" style="width: 0%"></div>
+                                        </div>
+                                    </div>
+                                    <div class="space-y-1 text-[10px]">
+                                        <div class="flex justify-between"><span>Thuế Kê khai</span><span id="pct-compare-kekhai" class="font-bold text-slate-700">0%</span></div>
+                                        <div class="w-full bg-slate-200 h-2 rounded-full overflow-hidden">
+                                            <div id="bar-compare-kekhai" class="h-full bg-amber-500 rounded-full" style="width: 0%"></div>
+                                        </div>
+                                    </div>
+                                    <div class="space-y-1 text-[10px]">
+                                        <div class="flex justify-between"><span>Thuế Doanh nghiệp TNHH</span><span id="pct-compare-llc" class="font-bold text-slate-700">0%</span></div>
+                                        <div class="w-full bg-slate-200 h-2 rounded-full overflow-hidden">
+                                            <div id="bar-compare-llc" class="h-full bg-emerald-500 rounded-full" style="width: 0%"></div>
+                                        </div>
+                                    </div>
+                                </div>
                                 <div class="p-2.5 bg-emerald-50 border border-emerald-100 rounded text-emerald-800 font-medium leading-relaxed" id="compare-advice">
                                     Khuyên dùng: ...
                                 </div>
@@ -724,6 +745,413 @@
                         </div>
                     </div>
 
+                    <!-- Card 9: Mô phỏng Thuế Monte Carlo (AI-Powered) -->
+                    <div class="calculator-card bg-white p-6 rounded-2xl border border-indigo-200 shadow-sm flex flex-col justify-between h-full space-y-6">
+                        <div class="space-y-4 flex-1">
+                            <div class="flex justify-between items-start">
+                                <div class="flex items-center gap-2.5">
+                                    <span class="material-symbols-outlined text-indigo-600 bg-indigo-50 p-1.5 rounded-lg text-lg">model_training</span>
+                                    <h4 class="text-sm font-bold tracking-tight text-slate-800">Mô phỏng rủi ro Thuế Monte Carlo</h4>
+                                </div>
+                                <span class="text-[10px] px-2.5 py-1 bg-indigo-50 text-indigo-700 font-bold rounded-full">AI Stochastic</span>
+                            </div>
+                            
+                            <p class="text-xs text-slate-500 leading-relaxed">Mô phỏng 10,000 kịch bản doanh thu ngẫu nhiên dựa trên mức trung bình và độ biến động dự kiến để tính toán khoảng phân bố nghĩa vụ thuế.</p>
+                            
+                            <div class="space-y-4">
+                                <div class="grid grid-cols-2 gap-4">
+                                    <div>
+                                        <label class="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">Doanh thu dự tính (VNĐ)</label>
+                                        <input type="number" id="monte-revenue" placeholder="Ví dụ: 120000000..." value="150000000" class="w-full rounded-lg border-slate-200 text-xs focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 py-2">
+                                    </div>
+                                    <div>
+                                        <label class="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">Độ biến động doanh thu (%)</label>
+                                        <input type="number" id="monte-volatility" placeholder="Mức độ dao động..." value="20" class="w-full rounded-lg border-slate-200 text-xs focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 py-2">
+                                    </div>
+                                </div>
+                                <div class="grid grid-cols-2 gap-4">
+                                    <div>
+                                        <label class="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">Thuế suất áp dụng (%)</label>
+                                        <select id="monte-tax-rate" class="w-full rounded-lg border-slate-200 text-xs focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 py-2">
+                                            <option value="1.5">Thương mại (1.5%)</option>
+                                            <option value="7.0">Dịch vụ, môi giới (7.0%)</option>
+                                            <option value="4.5">Sản xuất, xây dựng (4.5%)</option>
+                                            <option value="3.0">Kinh doanh khác (3.0%)</option>
+                                            <option value="20.0">Doanh nghiệp TNDN (20.0%)</option>
+                                        </select>
+                                    </div>
+                                    <div>
+                                        <label class="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">Số lần mô phỏng</label>
+                                        <input type="number" id="monte-iterations" value="10000" readonly class="w-full rounded-lg border-slate-200 text-xs bg-slate-50 text-slate-400 py-2 cursor-not-allowed">
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="space-y-4">
+                            <div class="flex gap-2">
+                                <button onclick="runMonteCarloSimulation()" class="flex-1 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-lg text-xs transition-all shadow-sm">Chạy 10k kịch bản mô phỏng</button>
+                                <button onclick="saveToHistory('monte_carlo')" id="save-monte-btn" class="hidden px-3.5 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-lg text-xs transition-all" title="Lưu lịch sử">
+                                    <span class="material-symbols-outlined text-sm block">save</span>
+                                </button>
+                            </div>
+
+                            <!-- Result Section -->
+                            <div id="monte-result" class="hidden fade-in p-4 bg-indigo-50/50 border border-indigo-200 rounded-xl space-y-3.5 text-xs text-indigo-950">
+                                <div class="flex justify-between font-bold border-b border-indigo-200 pb-2">
+                                    <span>VALUE AT RISK (VaR 95% THUẾ)</span>
+                                    <span id="res-monte-var" class="text-rose-600 font-semibold text-sm">0 VNĐ</span>
+                                </div>
+                                <div class="space-y-1.5">
+                                    <p class="font-bold text-[10px] uppercase text-indigo-800">Khoảng phân vị nghĩa vụ thuế (Percentiles):</p>
+                                    <div class="grid grid-cols-5 gap-1 text-[9px] text-center">
+                                        <div class="bg-white p-1 rounded border border-indigo-100">
+                                            <p class="font-bold text-slate-400">P5</p>
+                                            <p id="res-monte-p5" class="font-bold text-slate-700">0</p>
+                                        </div>
+                                        <div class="bg-white p-1 rounded border border-indigo-100">
+                                            <p class="font-bold text-slate-400">P25</p>
+                                            <p id="res-monte-p25" class="font-bold text-slate-700">0</p>
+                                        </div>
+                                        <div class="bg-white p-1 rounded border border-indigo-100">
+                                            <p class="font-bold text-slate-400">P50 (Median)</p>
+                                            <p id="res-monte-p50" class="font-bold text-slate-700">0</p>
+                                        </div>
+                                        <div class="bg-white p-1 rounded border border-indigo-100">
+                                            <p class="font-bold text-slate-400">P75</p>
+                                            <p id="res-monte-p75" class="font-bold text-slate-700">0</p>
+                                        </div>
+                                        <div class="bg-white p-1 rounded border border-indigo-100 bg-rose-50/50 border-rose-200">
+                                            <p class="font-bold text-rose-500">P95 (VaR)</p>
+                                            <p id="res-monte-p95" class="font-bold text-rose-600">0</p>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="p-2.5 bg-white border border-indigo-100 rounded-lg space-y-2">
+                                    <p class="font-bold text-[9px] uppercase text-slate-400">Đường phân phối xác suất thuế:</p>
+                                    <div id="monte-histogram" class="flex items-end gap-0.5 h-16 pt-2">
+                                        <!-- Simulated bars -->
+                                    </div>
+                                </div>
+                                <p class="text-[10px] text-indigo-700 leading-relaxed font-medium bg-white/70 p-2 rounded border border-indigo-50" id="res-monte-message">
+                                    Đang phân tích rủi ro...
+                                </p>
+                                <div class="pt-2 flex justify-end">
+                                    <button onclick="printReceipt('monte_carlo')" class="text-[10px] text-indigo-600 hover:underline flex items-center gap-1 font-bold">
+                                        <span class="material-symbols-outlined text-xs">print</span> Xuất PDF biên lai
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Card 10: Phân tích Điểm hòa vốn & Lợi nhuận mục tiêu CVP (AI-Powered) -->
+                    <div class="calculator-card bg-white p-6 rounded-2xl border border-indigo-200 shadow-sm flex flex-col justify-between h-full space-y-6">
+                        <div class="space-y-4 flex-1">
+                            <div class="flex justify-between items-start">
+                                <div class="flex items-center gap-2.5">
+                                    <span class="material-symbols-outlined text-indigo-600 bg-indigo-50 p-1.5 rounded-lg text-lg">balance</span>
+                                    <h4 class="text-sm font-bold tracking-tight text-slate-800">Phân tích Điểm hòa vốn & Lợi nhuận mục tiêu</h4>
+                                </div>
+                                <span class="text-[10px] px-2.5 py-1 bg-indigo-50 text-indigo-700 font-bold rounded-full">AI CVP Engine</span>
+                            </div>
+                            
+                            <p class="text-xs text-slate-500 leading-relaxed">Xác định doanh thu tối thiểu để bù đắp toàn bộ chi phí cố định & chi phí biến đổi, đồng thời tính toán mục tiêu doanh thu để đạt mức lợi nhuận mong muốn.</p>
+                            
+                            <div class="space-y-4">
+                                <div class="grid grid-cols-2 gap-4">
+                                    <div>
+                                        <label class="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">Chi phí cố định (VNĐ)</label>
+                                        <input type="number" id="cvp-fixed-costs" placeholder="Ví dụ: 30000000..." value="30000000" class="w-full rounded-lg border-slate-200 text-xs focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 py-2">
+                                    </div>
+                                    <div>
+                                        <label class="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">Tỷ lệ chi phí biến đổi (%)</label>
+                                        <input type="number" id="cvp-variable-ratio" placeholder="Tỷ lệ % doanh thu..." value="60" class="w-full rounded-lg border-slate-200 text-xs focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 py-2">
+                                    </div>
+                                </div>
+                                <div class="grid grid-cols-2 gap-4">
+                                    <div>
+                                        <label class="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">Doanh thu hiện tại (VNĐ)</label>
+                                        <input type="number" id="cvp-current-revenue" placeholder="Doanh thu thực tế..." value="80000000" class="w-full rounded-lg border-slate-200 text-xs focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 py-2">
+                                    </div>
+                                    <div>
+                                        <label class="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">Lợi nhuận mục tiêu (VNĐ)</label>
+                                        <input type="number" id="cvp-target-profit" placeholder="Mục tiêu mong muốn..." value="20000000" class="w-full rounded-lg border-slate-200 text-xs focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 py-2">
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="space-y-4">
+                            <div class="flex gap-2">
+                                <button onclick="runBreakevenAnalysis()" class="flex-1 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-lg text-xs transition-all shadow-sm">Phân tích điểm hòa vốn</button>
+                                <button onclick="saveToHistory('breakeven')" id="save-cvp-btn" class="hidden px-3.5 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-lg text-xs transition-all" title="Lưu lịch sử">
+                                    <span class="material-symbols-outlined text-sm block">save</span>
+                                </button>
+                            </div>
+
+                            <!-- Result Section -->
+                            <div id="cvp-result" class="hidden fade-in p-4 bg-indigo-50/50 border border-indigo-200 rounded-xl space-y-3.5 text-xs text-indigo-950">
+                                <div class="flex justify-between font-bold border-b border-indigo-200 pb-2">
+                                    <span>DOANH THU HÒA VỐN</span>
+                                    <span id="res-cvp-breakeven" class="text-indigo-600 font-semibold text-sm">0 VNĐ</span>
+                                </div>
+                                <div class="grid grid-cols-2 gap-3 text-[10px]">
+                                    <div class="bg-white p-2 rounded border border-indigo-100">
+                                        <p class="font-bold text-slate-400">Biên an toàn</p>
+                                        <p id="res-cvp-safety-margin" class="font-black text-slate-800 text-xs mt-0.5">0%</p>
+                                    </div>
+                                    <div class="bg-white p-2 rounded border border-indigo-100">
+                                        <p class="font-bold text-slate-400">DT để đạt LN mục tiêu</p>
+                                        <p id="res-cvp-target-revenue" class="font-black text-slate-800 text-xs mt-0.5">0 VNĐ</p>
+                                    </div>
+                                </div>
+                                <div class="p-2.5 bg-white border border-indigo-100 rounded-lg space-y-2">
+                                    <p class="font-bold text-[9px] uppercase text-slate-400">Trực quan hóa cấu trúc chi phí (CVP):</p>
+                                    <div class="space-y-1.5">
+                                        <div class="flex justify-between text-[8px] text-slate-500">
+                                            <span>Hòa vốn vs. Thực tế</span>
+                                            <span id="res-cvp-verdict-label" class="font-bold text-emerald-600">--</span>
+                                        </div>
+                                        <div class="h-2 bg-slate-100 rounded-full overflow-hidden border border-slate-200 relative">
+                                            <div id="res-cvp-bar" class="h-full bg-emerald-500 transition-all" style="width: 0%"></div>
+                                        </div>
+                                    </div>
+                                </div>
+                                <p class="text-[10px] text-indigo-700 leading-relaxed font-medium bg-white/70 p-2 rounded border border-indigo-50" id="res-cvp-message">
+                                    Đang tính toán cấu trúc chi phí...
+                                </p>
+                                <div class="pt-2 flex justify-end">
+                                    <button onclick="printReceipt('breakeven')" class="text-[10px] text-indigo-600 hover:underline flex items-center gap-1 font-bold">
+                                        <span class="material-symbols-outlined text-xs">print</span> Xuất PDF biên lai
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Card 11: Phân tích Độ nhạy Giá & Doanh thu (AI-Powered) -->
+                    <div class="calculator-card bg-white p-6 rounded-2xl border border-indigo-200 shadow-sm flex flex-col justify-between h-full space-y-6">
+                        <div class="space-y-4 flex-1">
+                            <div class="flex justify-between items-start">
+                                <div class="flex items-center gap-2.5">
+                                    <span class="material-symbols-outlined text-indigo-600 bg-indigo-50 p-1.5 rounded-lg text-lg">trending_up</span>
+                                    <h4 class="text-sm font-bold tracking-tight text-slate-800">Độ co giãn & Nhạy cảm Doanh thu</h4>
+                                </div>
+                                <span class="text-[10px] px-2.5 py-1 bg-indigo-50 text-indigo-700 font-bold rounded-full">AI Elasticity Engine</span>
+                            </div>
+                            
+                            <p class="text-xs text-slate-500 leading-relaxed">Mô phỏng thay đổi giá bán ảnh hưởng thế nào đến sản lượng, doanh thu dự kiến và nghĩa vụ thuế GTGT & TNCN dựa trên độ co giãn của cầu.</p>
+                            
+                            <div class="space-y-4">
+                                <div class="grid grid-cols-2 gap-4">
+                                    <div>
+                                        <label class="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">Giá bán hiện tại (VNĐ)</label>
+                                        <input type="number" id="elasticity-current-price" placeholder="Ví dụ: 100000" value="100000" class="w-full rounded-lg border-slate-200 text-xs focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 py-2">
+                                    </div>
+                                    <div>
+                                        <label class="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">Sản lượng bán hiện tại</label>
+                                        <input type="number" id="elasticity-current-qty" placeholder="Ví dụ: 500" value="500" class="w-full rounded-lg border-slate-200 text-xs focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 py-2">
+                                    </div>
+                                </div>
+                                <div class="grid grid-cols-2 gap-4">
+                                    <div>
+                                        <label class="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">Giá bán mới đề xuất (VNĐ)</label>
+                                        <input type="number" id="elasticity-new-price" placeholder="Ví dụ: 120000" value="120000" class="w-full rounded-lg border-slate-200 text-xs focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 py-2">
+                                    </div>
+                                    <div>
+                                        <label class="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">Hệ số co giãn (PED)</label>
+                                        <input type="number" step="0.1" id="elasticity-coeff" placeholder="Thường từ -2.0 đến -0.5" value="-1.5" class="w-full rounded-lg border-slate-200 text-xs focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 py-2">
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="space-y-4">
+                            <div class="flex gap-2">
+                                <button onclick="runPriceElasticitySimulation()" class="flex-1 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-lg text-xs transition-all shadow-sm">Phân tích độ nhạy doanh thu</button>
+                                <button onclick="saveToHistory('price_elasticity')" id="save-elasticity-btn" class="hidden px-3.5 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-lg text-xs transition-all" title="Lưu lịch sử">
+                                    <span class="material-symbols-outlined text-sm block">save</span>
+                                </button>
+                            </div>
+
+                            <!-- Result Section -->
+                            <div id="elasticity-result" class="hidden fade-in p-4 bg-indigo-50/50 border border-indigo-200 rounded-xl space-y-3.5 text-xs text-indigo-950">
+                                <div class="flex justify-between font-bold border-b border-indigo-200 pb-2">
+                                    <span>TỔNG DOANH THU MỚI</span>
+                                    <span id="res-elasticity-new-rev" class="text-indigo-600 font-semibold text-sm">0 VNĐ</span>
+                                </div>
+                                <div class="grid grid-cols-2 gap-3 text-[10px]">
+                                    <div class="bg-white p-2 rounded border border-indigo-100">
+                                        <p class="font-bold text-slate-400">Doanh thu hiện tại</p>
+                                        <p id="res-elasticity-cur-rev" class="font-black text-slate-800 text-xs mt-0.5">0 VNĐ</p>
+                                    </div>
+                                    <div class="bg-white p-2 rounded border border-indigo-100">
+                                        <p class="font-bold text-slate-400">Sản lượng mới</p>
+                                        <p id="res-elasticity-new-qty" class="font-black text-slate-800 text-xs mt-0.5">0 sản phẩm</p>
+                                    </div>
+                                </div>
+                                <div class="grid grid-cols-2 gap-3 text-[10px]">
+                                    <div class="bg-white p-2 rounded border border-indigo-100">
+                                        <p class="font-bold text-slate-400">Biến động Doanh thu</p>
+                                        <p id="res-elasticity-change-rev" class="font-black text-xs mt-0.5">0 VNĐ</p>
+                                    </div>
+                                    <div class="bg-white p-2 rounded border border-indigo-100">
+                                        <p class="font-bold text-slate-400">Ước tính Thuế chênh lệch</p>
+                                        <p id="res-elasticity-tax-change" class="font-black text-xs mt-0.5">0 VNĐ</p>
+                                    </div>
+                                </div>
+                                <div class="p-2.5 bg-white border border-indigo-100 rounded-lg space-y-1">
+                                    <p class="font-bold text-[9px] uppercase text-slate-400">Phân loại nhu cầu thị trường:</p>
+                                    <p id="res-elasticity-verdict" class="font-bold text-emerald-600 text-xs">--</p>
+                                </div>
+                                <p class="text-[10px] text-indigo-700 leading-relaxed font-medium bg-white/70 p-2 rounded border border-indigo-50" id="res-elasticity-message">
+                                    Đang tính toán độ nhạy cảm...
+                                </p>
+                                <div class="pt-2 flex justify-end">
+                                    <button onclick="printReceipt('price_elasticity')" class="text-[10px] text-indigo-600 hover:underline flex items-center gap-1 font-bold">
+                                        <span class="material-symbols-outlined text-xs">print</span> Xuất PDF biên lai
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Card 12: Đánh giá Rủi ro Giao dịch Liên kết (Transfer Pricing - F19) -->
+                    <div class="calculator-card bg-white p-6 rounded-2xl border border-indigo-200 shadow-sm flex flex-col justify-between h-full space-y-6">
+                        <div class="space-y-4 flex-1">
+                            <div class="flex justify-between items-start">
+                                <div class="flex items-center gap-2.5">
+                                    <span class="material-symbols-outlined text-indigo-600 bg-indigo-50 p-1.5 rounded-lg text-lg">supervised_user_circle</span>
+                                    <h4 class="text-sm font-bold tracking-tight text-slate-800">Rà soát Giá giao dịch liên kết (Nghị định 132)</h4>
+                                </div>
+                                <span class="text-[10px] px-2.5 py-1 bg-indigo-50 text-indigo-700 font-bold rounded-full">Mahalanobis Distance</span>
+                            </div>
+                            
+                            <p class="text-xs text-slate-500 leading-relaxed">Đo lường độ lệch đa chiều của giá bán nội bộ/giao dịch liên kết so với khoảng giao dịch độc lập của thị trường theo <strong class="text-indigo-900 font-bold">NĐ 132/2020/NĐ-CP</strong>.</p>
+                            
+                            <div class="space-y-4">
+                                <div class="grid grid-cols-2 gap-4">
+                                    <div>
+                                        <label class="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">Giá đơn vị đề xuất (VNĐ)</label>
+                                        <input type="number" id="tp-unit-price" placeholder="Ví dụ: 95000" value="95000" class="w-full rounded-lg border-slate-200 text-xs focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 py-2">
+                                    </div>
+                                    <div>
+                                        <label class="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">Sản lượng giao dịch</label>
+                                        <input type="number" id="tp-qty" placeholder="Ví dụ: 180" value="180" class="w-full rounded-lg border-slate-200 text-xs focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 py-2">
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="space-y-4">
+                            <div class="flex gap-2">
+                                <button onclick="runTransferPricingEvaluation()" class="flex-1 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-lg text-xs transition-all shadow-sm">Đánh giá rủi ro chuyển giá</button>
+                                <button onclick="saveToHistory('transfer_pricing')" id="save-tp-btn" class="hidden px-3.5 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-lg text-xs transition-all" title="Lưu lịch sử">
+                                    <span class="material-symbols-outlined text-sm block">save</span>
+                                </button>
+                            </div>
+
+                            <!-- Result Section -->
+                            <div id="tp-result" class="hidden fade-in p-4 bg-indigo-50/50 border border-indigo-200 rounded-xl space-y-3.5 text-xs text-indigo-950">
+                                <div class="flex justify-between font-bold border-b border-indigo-200 pb-2">
+                                    <span>RỦI RO GIAO DỊCH LIÊN KẾT</span>
+                                    <span id="res-tp-risk" class="font-bold text-sm uppercase">--</span>
+                                </div>
+                                <div class="grid grid-cols-2 gap-3 text-[10px]">
+                                    <div class="bg-white p-2 rounded border border-indigo-100">
+                                        <p class="font-bold text-slate-400">Khoảng cách Mahalanobis</p>
+                                        <p id="res-tp-dist" class="font-black text-slate-800 text-xs mt-0.5">0.0</p>
+                                    </div>
+                                    <div class="bg-white p-2 rounded border border-indigo-100">
+                                        <p class="font-bold text-slate-400">Chỉ số p-value tin cậy</p>
+                                        <p id="res-tp-pvalue" class="font-black text-slate-800 text-xs mt-0.5">0.0</p>
+                                    </div>
+                                </div>
+                                <div class="bg-white p-2.5 rounded border border-indigo-100 text-[10px] space-y-1">
+                                    <p class="font-bold text-slate-400">Khoảng giá độc lập Arm's Length (Peer IQR):</p>
+                                    <p class="font-bold text-slate-800 text-xs" id="res-tp-range">0 VNĐ - 0 VNĐ</p>
+                                </div>
+                                <p class="text-[10px] text-indigo-700 leading-relaxed font-medium bg-white/70 p-2 rounded border border-indigo-50" id="res-tp-verdict">
+                                    Đang phân tích cấu trúc giá...
+                                </p>
+                                <p class="text-[9px] text-slate-500 leading-relaxed font-mono bg-white/30 p-1.5 rounded" id="res-tp-advice">
+                                    --
+                                </p>
+                                <div class="pt-2 flex justify-end">
+                                    <button onclick="printReceipt('transfer_pricing')" class="text-[10px] text-indigo-600 hover:underline flex items-center gap-1 font-bold">
+                                        <span class="material-symbols-outlined text-xs">print</span> Xuất PDF biên lai
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Card 13: Mô phỏng Căng thẳng nộp Thuế GEV (Extreme Value Theory - F20) -->
+                    <div class="calculator-card bg-white p-6 rounded-2xl border border-indigo-200 shadow-sm flex flex-col justify-between h-full space-y-6">
+                        <div class="space-y-4 flex-1">
+                            <div class="flex justify-between items-start">
+                                <div class="flex items-center gap-2.5">
+                                    <span class="material-symbols-outlined text-indigo-600 bg-indigo-50 p-1.5 rounded-lg text-lg">emergency_home</span>
+                                    <h4 class="text-sm font-bold tracking-tight text-slate-800">Mô phỏng khủng hoảng nợ Thuế GEV</h4>
+                                </div>
+                                <span class="text-[10px] px-2.5 py-1 bg-indigo-50 text-indigo-700 font-bold rounded-full">Extreme Value GEV</span>
+                            </div>
+                            
+                            <p class="text-xs text-slate-500 leading-relaxed">Áp dụng lý thuyết giá trị cực hạn (Block Maxima) ước tính tổn thất thanh khoản nộp thuế lớn nhất ở phân vị 99% trong điều kiện thị trường bất lợi.</p>
+                            
+                            <div class="space-y-4 text-xs text-slate-500">
+                                <p class="bg-slate-50 p-2 rounded border leading-relaxed">• Thu thập dữ liệu nghĩa vụ thuế hàng tháng từ hệ thống hóa đơn và dòng tiền ngân hàng liên kết.</p>
+                            </div>
+                        </div>
+
+                        <div class="space-y-4">
+                            <div class="flex gap-2">
+                                <button onclick="runTaxOutflowStressSimulation()" class="flex-1 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-lg text-xs transition-all shadow-sm">Kích hoạt Stress-Test thanh khoản</button>
+                                <button onclick="saveToHistory('outflow_stress')" id="save-stress-btn" class="hidden px-3.5 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-lg text-xs transition-all" title="Lưu lịch sử">
+                                    <span class="material-symbols-outlined text-sm block">save</span>
+                                </button>
+                            </div>
+
+                            <!-- Result Section -->
+                            <div id="stress-result" class="hidden fade-in p-4 bg-indigo-50/50 border border-indigo-200 rounded-xl space-y-3.5 text-xs text-indigo-950">
+                                <div class="flex justify-between font-bold border-b border-indigo-200 pb-2">
+                                    <span>TỔN THẤT THUẾ CỰC HẠN (VaR 99%)</span>
+                                    <span id="res-stress-var" class="text-rose-600 font-semibold text-sm">0 VNĐ</span>
+                                </div>
+                                <div class="grid grid-cols-2 gap-3 text-[10px]">
+                                    <div class="bg-white p-2 rounded border border-indigo-100">
+                                        <p class="font-bold text-slate-400">Tổn thất thanh khoản ES 99%</p>
+                                        <p id="res-stress-es" class="font-black text-rose-600 text-xs mt-0.5">0 VNĐ</p>
+                                    </div>
+                                    <div class="bg-white p-2 rounded border border-indigo-100">
+                                        <p class="font-bold text-slate-400">Xác suất khủng hoảng thặng dư</p>
+                                        <p id="res-stress-prob" class="font-black text-slate-800 text-xs mt-0.5">0%</p>
+                                    </div>
+                                </div>
+                                <div class="bg-white p-2.5 rounded border border-indigo-100 text-[10px] space-y-1.5">
+                                    <p class="font-bold text-slate-400 uppercase text-[8px]">Chu kỳ xuất hiện rủi ro (Return Levels):</p>
+                                    <div class="grid grid-cols-2 gap-2 text-[9px] font-mono">
+                                        <div>1 năm (12 thg): <span class="font-bold" id="res-stress-t12">0</span></div>
+                                        <div>2 năm (24 thg): <span class="font-bold" id="res-stress-t24">0</span></div>
+                                        <div>5 năm (60 thg): <span class="font-bold" id="res-stress-t60">0</span></div>
+                                        <div>10 năm (120 thg): <span class="font-bold" id="res-stress-t100">0</span></div>
+                                    </div>
+                                </div>
+                                <p class="text-[10px] text-indigo-700 leading-relaxed font-medium bg-white/70 p-2 rounded border border-indigo-50" id="res-stress-verdict">
+                                    Stress simulation details...
+                                </p>
+                                <div class="pt-2 flex justify-end">
+                                    <button onclick="printReceipt('outflow_stress')" class="text-[10px] text-indigo-600 hover:underline flex items-center gap-1 font-bold">
+                                        <span class="material-symbols-outlined text-xs">print</span> Xuất PDF biên lai
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                </div>
+
                 </div>
 
                 <!-- Lịch sử tính toán thuế Section -->
@@ -815,6 +1243,10 @@
     <!-- Script loading -->
     <script src="../js/business_taxpayer_common.js"></script>
     <script src="../js/business_calculator.js?v=1.1"></script>
+    <script src="../js/taxpayer_ai_registry.js"></script>
+    <script src="../js/taxpayer_ai_client.js"></script>
+    <script src="../js/taxpayer_ai_panels_core.js"></script>
+    <script src="../js/taxpayer_ai_panels_advanced.js"></script>
     <script src="../js/business_intelligence.js"></script>
 </body>
 </html>

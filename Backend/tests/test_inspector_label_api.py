@@ -66,6 +66,8 @@ def test_inspector_label_requires_authentication(client):
         yield fake_db
 
     app.dependency_overrides[get_db] = _override_get_db
+    if auth.get_current_user in app.dependency_overrides:
+        del app.dependency_overrides[auth.get_current_user]
 
     payload = {
         "tax_code": "0101000001",

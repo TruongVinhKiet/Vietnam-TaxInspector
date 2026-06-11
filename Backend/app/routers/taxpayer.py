@@ -13,7 +13,7 @@ import hashlib
 import io
 import json
 import os
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
@@ -700,6 +700,7 @@ def ensure_taxpayer_schema(conn) -> None:
     conn.execute(text("CREATE INDEX IF NOT EXISTS idx_taxpayer_expense_user_date ON business_expense_entries(user_id, expense_date DESC);"))
     conn.execute(text("CREATE INDEX IF NOT EXISTS idx_taxpayer_invoice_user_date ON taxpayer_einvoices(user_id, issue_date DESC);"))
     conn.execute(text("CREATE INDEX IF NOT EXISTS idx_taxpayer_predictions_user_type ON taxpayer_model_predictions(user_id, prediction_type, created_at DESC);"))
+    conn.execute(text("CREATE INDEX IF NOT EXISTS idx_taxpayer_predictions_cache ON taxpayer_model_predictions(user_id, prediction_type, input_hash, created_at DESC);"))
     conn.execute(text("CREATE INDEX IF NOT EXISTS idx_taxpayer_recommendations_user_status ON taxpayer_recommendations(user_id, status, priority);"))
     conn.execute(text("CREATE INDEX IF NOT EXISTS idx_taxpayer_bank_user_date ON taxpayer_bank_transactions(user_id, transaction_date DESC);"))
     conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS idx_taxpayer_bank_idempotency ON taxpayer_bank_transactions(user_id, idempotency_key);"))
@@ -1128,6 +1129,95 @@ def _save_prediction(db: Session, user: models.User, prediction_type: str, resul
             },
         )
     return prediction_id
+
+
+def _prediction_fingerprint(prediction_type: str, dataset: dict[str, Any] | None = None, payload: dict[str, Any] | None = None) -> str:
+    dataset = dataset or {}
+    payload = payload or {}
+    profile = dataset.get("profile") or {}
+    counts = {
+        key: len(dataset.get(key) or [])
+        for key in [
+            "revenue_entries",
+            "expense_entries",
+            "invoices",
+            "filings",
+            "payments",
+            "debts",
+            "documents",
+            "claims",
+            "bank_transactions",
+            "platform_orders",
+            "inventory_movements",
+            "reconciliation_cases",
+            "ledger_entries",
+        ]
+    }
+    fingerprint_payload = {
+        "prediction_type": prediction_type,
+        "model_version": INTELLIGENCE.model_version,
+        "year": dataset.get("year"),
+        "today": dataset.get("today"),
+        "profile": {
+            "tax_code": profile.get("tax_code"),
+            "household_group": profile.get("household_group"),
+            "annual_revenue": profile.get("annual_revenue"),
+            "industry": profile.get("industry"),
+        },
+        "counts": counts,
+        "payload": payload,
+    }
+    return INTELLIGENCE.input_hash(fingerprint_payload)
+
+
+def _cached_prediction(db: Session, user: models.User, prediction_type: str, input_hash: str, ttl_seconds: int = 600) -> tuple[int | None, dict[str, Any] | None]:
+    ensure_taxpayer_schema(db.connection())
+    cutoff = datetime.utcnow() - timedelta(seconds=max(0, ttl_seconds))
+    row = db.execute(
+        text("""
+            SELECT id, output_json
+            FROM taxpayer_model_predictions
+            WHERE user_id = :user_id
+              AND prediction_type = :prediction_type
+              AND input_hash = :input_hash
+              AND created_at >= :cutoff
+            ORDER BY created_at DESC
+            LIMIT 1
+        """),
+        {
+            "user_id": user.id,
+            "prediction_type": prediction_type,
+            "input_hash": input_hash,
+            "cutoff": cutoff,
+        },
+    ).first()
+    if not row:
+        return None, None
+    output = row._mapping["output_json"]
+    if isinstance(output, str):
+        try:
+            output = json.loads(output)
+        except Exception:
+            output = {}
+    if not isinstance(output, dict):
+        output = {}
+    return _to_int(row._mapping["id"], None), _serialize(output)
+
+
+def _stamp_prediction_contract(result: dict[str, Any], input_hash: str, cache_status: str) -> dict[str, Any]:
+    model = result.setdefault("model", {})
+    model["input_hash"] = input_hash
+    result["input_hash"] = input_hash
+    result["cache_status"] = cache_status
+    result.setdefault("model_name", model.get("model_name") or INTELLIGENCE.model_name)
+    result.setdefault("model_version", model.get("model_version") or INTELLIGENCE.model_version)
+    result.setdefault("confidence", model.get("confidence") or "low")
+    result.setdefault("confidence_score", model.get("confidence_score"))
+    if "data_sufficiency" not in result:
+        sufficiency = INTELLIGENCE.data_sufficiency(result.get("snapshot") or result)
+        result["data_sufficiency"] = sufficiency
+        result["data_sufficiency_score"] = sufficiency["score"]
+    return result
 
 
 def _upsert_recommendations(db: Session, user: models.User, recommendations: list[dict[str, Any]]) -> None:
@@ -2107,6 +2197,87 @@ def submit_filing(
     return {"status": "success", "filing": _row(updated), "gateway": gateway}
 
 
+@router.post("/filings/{filing_id}/validate-proof")
+def validate_filing_proof(
+    filing_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_taxpayer),
+):
+    ensure_taxpayer_schema(db.connection())
+    filing = db.execute(
+        text("SELECT * FROM taxpayer_filings WHERE id = :id AND user_id = :user_id"),
+        {"id": filing_id, "user_id": current_user.id},
+    ).first()
+    if not filing:
+        raise HTTPException(status_code=404, detail="Không tìm thấy tờ khai.")
+    filing_dict = _row(filing)
+
+    docs = db.execute(
+        text("SELECT * FROM business_documents WHERE user_id = :user_id ORDER BY created_at DESC"),
+        {"user_id": current_user.id},
+    ).all()
+    docs_list = _rows(docs)
+
+    declared_rev = float(filing_dict.get("revenue") or 0)
+    total_proof_amount = 0.0
+    matched_docs = []
+    issues = []
+
+    for d in docs_list:
+        meta = d.get("metadata_json") or {}
+        amount = float(meta.get("amount") or 0)
+        if d.get("doc_type") in ["evidence", "invoice", "bank_proof"]:
+            total_proof_amount += amount
+            matched_docs.append({
+                "id": d["id"],
+                "filename": d["filename"],
+                "doc_type": d["doc_type"],
+                "amount": amount,
+                "billing_id": meta.get("billing_id") or ("HD-" + d["sha256"][:8].upper() if d.get("sha256") else f"HD-{d['id']}")
+            })
+
+    if total_proof_amount < declared_rev:
+        diff = declared_rev - total_proof_amount
+        issues.append({
+            "code": "UNDER_PROOFED",
+            "severity": "high",
+            "title": "Chênh lệch minh chứng doanh thu",
+            "message": f"Tổng số tiền trên các minh chứng đính kèm ({total_proof_amount:,.0f} VND) thấp hơn doanh thu kê khai ({declared_rev:,.0f} VND) là {diff:,.0f} VND.",
+            "suggestion": "Vui lòng đính kèm thêm hóa đơn hoặc sao kê ngân hàng."
+        })
+    elif total_proof_amount > declared_rev * 1.05:
+        issues.append({
+            "code": "OVER_PROOFED",
+            "severity": "medium",
+            "title": "Minh chứng vượt doanh thu kê khai",
+            "message": f"Tổng số tiền trên các hóa đơn/chứng từ ({total_proof_amount:,.0f} VND) vượt quá doanh thu kê khai.",
+            "suggestion": "Rà soát lại các hóa đơn nháp hoặc trùng lặp mã thanh toán."
+        })
+
+    for md in matched_docs:
+        if not md["billing_id"] or len(md["billing_id"]) < 5:
+            issues.append({
+                "code": "INVALID_BILLING_ID",
+                "severity": "medium",
+                "title": "Mã hóa đơn không hợp lệ",
+                "message": f"Tài liệu {md['filename']} có mã hóa đơn/chứng từ không hợp lệ.",
+                "suggestion": "Cập nhật mã hóa đơn theo định dạng chuẩn của Tổng cục Thuế."
+            })
+
+    status = "valid" if not issues else "warning"
+    if any(i["severity"] == "high" for i in issues):
+        status = "invalid"
+
+    return {
+        "status": "success",
+        "validation_status": status,
+        "declared_revenue": declared_rev,
+        "total_proof_amount": total_proof_amount,
+        "issues": issues,
+        "matched_documents": matched_docs
+    }
+
+
 @router.post("/filings/{filing_id}/amend")
 def amend_filing(
     filing_id: int,
@@ -2665,6 +2836,8 @@ def export_accounting_pdf(
 async def upload_document(
     file: UploadFile = File(...),
     doc_type: str = "evidence",
+    billing_id: str | None = Form(default=None),
+    amount: float | None = Form(default=None),
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_taxpayer),
 ):
@@ -2678,6 +2851,13 @@ async def upload_document(
     safe_name = f"{digest[:16]}-{Path(file.filename).name}"
     target = user_dir / safe_name
     target.write_bytes(content)
+    
+    metadata = {
+        "stored_name": safe_name,
+        "billing_id": billing_id,
+        "amount": amount
+    }
+    
     row = db.execute(
         text("""
             INSERT INTO business_documents
@@ -2693,7 +2873,7 @@ async def upload_document(
             "size": len(content),
             "sha256": digest,
             "path": str(target),
-            "metadata": _json({"stored_name": safe_name}),
+            "metadata": _json(metadata),
         },
     ).first()
     db.commit()
@@ -2874,6 +3054,13 @@ def claims_timeline(
 # ---------------------------------------------------------------------------
 
 
+@router.get("/intelligence/capabilities")
+def intelligence_capabilities(
+    current_user: models.User = Depends(get_current_taxpayer),
+):
+    return {"status": "success", **INTELLIGENCE.capability_registry()}
+
+
 @router.get("/intelligence/overview")
 def intelligence_overview(
     year: int | None = None,
@@ -2881,7 +3068,12 @@ def intelligence_overview(
     current_user: models.User = Depends(get_current_taxpayer),
 ):
     dataset = _load_intelligence_dataset(db, current_user, year)
+    cache_hash = _prediction_fingerprint("overview", dataset)
+    cached_id, cached = _cached_prediction(db, current_user, "overview", cache_hash, ttl_seconds=600)
+    if cached:
+        return {"status": "success", "prediction_id": cached_id, **_stamp_prediction_contract(cached, cache_hash, "hit")}
     result = INTELLIGENCE.overview(dataset)
+    result = _stamp_prediction_contract(result, cache_hash, "miss")
     _save_feature_snapshot(db, current_user, result["snapshot"])
     prediction_id = _save_prediction(db, current_user, "overview", result)
     _upsert_recommendations(db, current_user, result.get("top_recommendations") or [])
@@ -2896,7 +3088,12 @@ def intelligence_forecast(
     current_user: models.User = Depends(get_current_taxpayer),
 ):
     dataset = _load_intelligence_dataset(db, current_user, year)
+    cache_hash = _prediction_fingerprint("forecast", dataset)
+    cached_id, cached = _cached_prediction(db, current_user, "forecast", cache_hash, ttl_seconds=600)
+    if cached:
+        return {"status": "success", "prediction_id": cached_id, **_stamp_prediction_contract(cached, cache_hash, "hit")}
     result = INTELLIGENCE.forecast(dataset)
+    result = _stamp_prediction_contract(result, cache_hash, "miss")
     prediction_id = _save_prediction(db, current_user, "forecast", result)
     db.commit()
     return {"status": "success", "prediction_id": prediction_id, **result}
@@ -3130,7 +3327,12 @@ def intelligence_cashflow_risk(
     current_user: models.User = Depends(get_current_taxpayer),
 ):
     dataset = _load_intelligence_dataset(db, current_user, year)
+    cache_hash = _prediction_fingerprint("cashflow_risk", dataset)
+    cached_id, cached = _cached_prediction(db, current_user, "cashflow_risk", cache_hash, ttl_seconds=600)
+    if cached:
+        return {"status": "success", "prediction_id": cached_id, **_stamp_prediction_contract(cached, cache_hash, "hit")}
     result = INTELLIGENCE.cashflow_risk(dataset)
+    result = _stamp_prediction_contract(result, cache_hash, "miss")
     prediction_id = _save_prediction(db, current_user, "cashflow_risk", result)
     db.commit()
     return {"status": "success", "prediction_id": prediction_id, **result}
@@ -3222,7 +3424,12 @@ def intelligence_advanced_dashboard(
     current_user: models.User = Depends(get_current_taxpayer),
 ):
     dataset = _load_intelligence_dataset(db, current_user, year)
+    cache_hash = _prediction_fingerprint("advanced_dashboard", dataset)
+    cached_id, cached = _cached_prediction(db, current_user, "advanced_dashboard", cache_hash, ttl_seconds=600)
+    if cached:
+        return {"status": "success", "prediction_id": cached_id, **_stamp_prediction_contract(cached, cache_hash, "hit")}
     result = INTELLIGENCE.advanced_dashboard(dataset)
+    result = _stamp_prediction_contract(result, cache_hash, "miss")
     _save_feature_snapshot(db, current_user, result.get("probabilistic_forecast", {}))
     _upsert_recommendations(db, current_user, result.get("top_actions") or [])
     prediction_id = _save_prediction(db, current_user, "advanced_dashboard", result)
@@ -3461,10 +3668,30 @@ def intelligence_cashflow_delinquency(
     current_user: models.User = Depends(get_current_taxpayer),
 ):
     dataset = _load_intelligence_dataset(db, current_user, year)
+    cache_hash = _prediction_fingerprint("cashflow_delinquency", dataset)
+    cached_id, cached = _cached_prediction(db, current_user, "cashflow_delinquency", cache_hash, ttl_seconds=600)
+    if cached:
+        return {"status": "success", "prediction_id": cached_id, **_stamp_prediction_contract(cached, cache_hash, "hit")}
     result = INTELLIGENCE.cashflow_delinquency(dataset)
+    result = _stamp_prediction_contract(result, cache_hash, "miss")
     prediction_id = _save_prediction(db, current_user, "cashflow_delinquency", result)
     db.commit()
     return {"status": "success", "prediction_id": prediction_id, **result}
+
+
+@router.get("/intelligence/explainability")
+def intelligence_explainability(
+    year: int | None = None,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_taxpayer),
+):
+    """F9: SHAP Explainability Engine for Compliance Risk Scoring"""
+    dataset = _load_intelligence_dataset(db, current_user, year)
+    result = INTELLIGENCE.explainability(dataset)
+    prediction_id = _save_prediction(db, current_user, "explainability_shap", result)
+    db.commit()
+    return {"status": "success", "prediction_id": prediction_id, **result}
+
 
 
 @router.post("/intelligence/legal/graphrag")
@@ -3572,7 +3799,12 @@ def intelligence_reconciliation_cases(
     current_user: models.User = Depends(get_current_taxpayer),
 ):
     dataset = _load_intelligence_dataset(db, current_user, year)
+    cache_hash = _prediction_fingerprint("reconciliation_cases", dataset)
+    cached_id, cached = _cached_prediction(db, current_user, "reconciliation_cases", cache_hash, ttl_seconds=300)
+    if cached:
+        return {"status": "success", "prediction_id": cached_id, **_stamp_prediction_contract(cached, cache_hash, "hit")}
     result = INTELLIGENCE.reconciliation_cases(dataset)
+    result = _stamp_prediction_contract(result, cache_hash, "miss")
     prediction_id = _save_prediction(db, current_user, "reconciliation_cases", result)
     db.commit()
     return {"status": "success", "prediction_id": prediction_id, **result}
@@ -3602,6 +3834,45 @@ def intelligence_tax_reserve_optimize(
     dataset = _load_intelligence_dataset(db, current_user, _to_int(payload.get("year"), date.today().year))
     result = INTELLIGENCE.tax_reserve_optimize(payload, dataset)
     prediction_id = _save_prediction(db, current_user, "tax_reserve_optimize", result)
+    db.commit()
+    return {"status": "success", "prediction_id": prediction_id, **result}
+
+
+@router.post("/intelligence/price-elasticity")
+def intelligence_price_elasticity(
+    payload: dict[str, Any] | None = Body(default=None),
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_taxpayer),
+):
+    payload = payload or {}
+    result = INTELLIGENCE.price_elasticity(payload)
+    prediction_id = _save_prediction(db, current_user, "price_elasticity", result)
+    db.commit()
+    return {"status": "success", "prediction_id": prediction_id, **result}
+
+
+@router.get("/intelligence/ecommerce/reconcile")
+def intelligence_ecommerce_reconcile(
+    year: int | None = None,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_taxpayer),
+):
+    dataset = _load_intelligence_dataset(db, current_user, year)
+    result = INTELLIGENCE.ecommerce_reconcile(dataset)
+    prediction_id = _save_prediction(db, current_user, "ecommerce_reconcile", result)
+    db.commit()
+    return {"status": "success", "prediction_id": prediction_id, **result}
+
+
+@router.post("/intelligence/debate")
+def intelligence_debate(
+    payload: dict[str, Any] | None = Body(default=None),
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_taxpayer),
+):
+    payload = payload or {}
+    result = INTELLIGENCE.debate_agents(payload)
+    prediction_id = _save_prediction(db, current_user, "debate_agents", result)
     db.commit()
     return {"status": "success", "prediction_id": prediction_id, **result}
 
@@ -3737,6 +4008,115 @@ def intelligence_legal_chat(
     return {"status": "success", "prediction_id": prediction_id, **result}
 
 
+@router.get("/intelligence/benford-analysis")
+def intelligence_benford_analysis(
+    year: int | None = None,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_taxpayer),
+):
+    """F1: Benford's Law first-digit fraud scanner — chi-square GoF test."""
+    dataset = _load_intelligence_dataset(db, current_user, year)
+    result = INTELLIGENCE.benford_analysis(dataset)
+    prediction_id = _save_prediction(db, current_user, "benford_analysis", result)
+    db.commit()
+    return {"status": "success", "prediction_id": prediction_id, **result}
+
+
+@router.get("/intelligence/seasonal-decomposition")
+def intelligence_seasonal_decomposition(
+    year: int | None = None,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_taxpayer),
+):
+    """F2: Seasonal decomposition (Trend / Seasonal / Residual)."""
+    dataset = _load_intelligence_dataset(db, current_user, year)
+    result = INTELLIGENCE.seasonal_decomposition(dataset)
+    prediction_id = _save_prediction(db, current_user, "seasonal_decomposition", result)
+    return {"status": "success", "prediction_id": prediction_id, **result}
+
+
+@router.post("/intelligence/monte-carlo-simulation")
+def intelligence_monte_carlo_simulation(
+    payload: dict[str, Any] = Body(...),
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_taxpayer),
+):
+    """F3: Monte Carlo Tax Simulation — stochastically simulates future tax outcomes."""
+    rev_mean = float(payload.get("revenue_mean") or 0.0)
+    vol = float(payload.get("volatility_pct") or 15.0)
+    exp = float(payload.get("expense_ratio_pct") or 50.0)
+    tax_rate = float(payload.get("tax_rate_pct") or 1.5)
+    iters = int(payload.get("iterations") or 10000)
+
+    if rev_mean <= 0:
+        raise HTTPException(status_code=400, detail="Doanh thu phai lon hon 0.")
+
+    result = INTELLIGENCE.monte_carlo_simulation(
+        revenue_mean=rev_mean,
+        volatility_pct=vol,
+        expense_ratio_pct=exp,
+        tax_rate_pct=tax_rate,
+        iterations=iters
+    )
+    prediction_id = _save_prediction(db, current_user, "monte_carlo_simulation", result)
+    db.commit()
+    return {"status": "success", "prediction_id": prediction_id, **result}
+
+
+@router.get("/intelligence/survival-analysis")
+def intelligence_survival_analysis(
+    year: int | None = None,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_taxpayer),
+):
+    """F4: Survival Analysis — Delinquency hazard model."""
+    dataset = _load_intelligence_dataset(db, current_user, year)
+    result = INTELLIGENCE.survival_analysis(dataset)
+    prediction_id = _save_prediction(db, current_user, "survival_analysis", result)
+    db.commit()
+    return {"status": "success", "prediction_id": prediction_id, **result}
+
+
+@router.post("/intelligence/breakeven-analysis")
+def intelligence_breakeven_analysis(
+    payload: dict[str, Any] = Body(...),
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_taxpayer),
+):
+    """F4: Breakeven Analysis (CVP) Engine"""
+    fixed_costs = float(payload.get("fixed_costs") or 0.0)
+    var_ratio = float(payload.get("variable_cost_ratio_pct") or 50.0)
+    current_rev = float(payload.get("current_revenue") or 0.0)
+    target_prof = float(payload.get("target_profit") or 0.0)
+
+    if fixed_costs <= 0:
+        raise HTTPException(status_code=400, detail="Chi phi co dinh phai lon hon 0.")
+
+    result = INTELLIGENCE.breakeven_analysis(
+        fixed_costs=fixed_costs,
+        variable_cost_ratio=var_ratio,
+        current_revenue=current_rev,
+        target_profit=target_prof
+    )
+    prediction_id = _save_prediction(db, current_user, "breakeven_analysis", result)
+    db.commit()
+    return {"status": "success", "prediction_id": prediction_id, **result}
+
+
+@router.get("/intelligence/bayesian-forecast")
+def intelligence_bayesian_forecast(
+    year: int | None = None,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_taxpayer),
+):
+    """F6: Bayesian Revenue Forecasting with Uncertainty Engine."""
+    dataset = _load_intelligence_dataset(db, current_user, year)
+    result = INTELLIGENCE.bayesian_forecast(dataset)
+    prediction_id = _save_prediction(db, current_user, "bayesian_forecast", result)
+    db.commit()
+    return {"status": "success", "prediction_id": prediction_id, **result}
+
+
 @router.post("/intelligence/feedback")
 def intelligence_feedback(
     payload: dict[str, Any] = Body(...),
@@ -3766,3 +4146,283 @@ def intelligence_feedback(
     ).first()
     db.commit()
     return {"status": "success", "feedback": _row(row)}
+
+
+@router.get("/intelligence/isolation-forest-expenses")
+def intelligence_isolation_forest_expenses(
+    year: int | None = None,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_taxpayer),
+):
+    dataset = _load_intelligence_dataset(db, current_user, year)
+    result = INTELLIGENCE.isolation_forest_expenses(dataset)
+    prediction_id = _save_prediction(db, current_user, "isolation_forest_expenses", result)
+    db.commit()
+    return {"status": "success", "prediction_id": prediction_id, **result}
+
+
+@router.get("/intelligence/markov-chain-prediction")
+def intelligence_markov_chain_prediction(
+    year: int | None = None,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_taxpayer),
+):
+    dataset = _load_intelligence_dataset(db, current_user, year)
+    result = INTELLIGENCE.markov_chain_prediction(dataset)
+    prediction_id = _save_prediction(db, current_user, "markov_chain_prediction", result)
+    db.commit()
+    return {"status": "success", "prediction_id": prediction_id, **result}
+
+
+@router.get("/intelligence/pagerank-supplier-trust")
+def intelligence_pagerank_supplier_trust(
+    year: int | None = None,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_taxpayer),
+):
+    dataset = _load_intelligence_dataset(db, current_user, year)
+    result = INTELLIGENCE.pagerank_supplier_trust(dataset)
+    prediction_id = _save_prediction(db, current_user, "pagerank_supplier_trust", result)
+    db.commit()
+    return {"status": "success", "prediction_id": prediction_id, **result}
+
+
+@router.get("/intelligence/autoencoder-bank-anomaly")
+def intelligence_autoencoder_bank_anomaly(
+    year: int | None = None,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_taxpayer),
+):
+    dataset = _load_intelligence_dataset(db, current_user, year)
+    result = INTELLIGENCE.autoencoder_bank_anomaly(dataset)
+    prediction_id = _save_prediction(db, current_user, "autoencoder_bank_anomaly", result)
+    db.commit()
+    return {"status": "success", "prediction_id": prediction_id, **result}
+
+
+@router.get("/intelligence/rfm-customer-segmentation")
+def intelligence_rfm_customer_segmentation(
+    year: int | None = None,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_taxpayer),
+):
+    dataset = _load_intelligence_dataset(db, current_user, year)
+    result = INTELLIGENCE.rfm_customer_segmentation(dataset)
+    prediction_id = _save_prediction(db, current_user, "rfm_customer_segmentation", result)
+    db.commit()
+    return {"status": "success", "prediction_id": prediction_id, **result}
+
+
+@router.get("/intelligence/working-capital")
+def intelligence_working_capital(
+    year: int | None = None,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_taxpayer),
+):
+    dataset = _load_intelligence_dataset(db, current_user, year)
+    result = INTELLIGENCE.working_capital_optimization(dataset)
+    prediction_id = _save_prediction(db, current_user, "working_capital_optimization", result)
+    db.commit()
+    return {"status": "success", "prediction_id": prediction_id, **result}
+
+
+@router.get("/intelligence/regulatory-change-diff")
+def intelligence_regulatory_change_diff(
+    year: int | None = None,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_taxpayer),
+):
+    dataset = _load_intelligence_dataset(db, current_user, year)
+    result = INTELLIGENCE.regulatory_change_diff(dataset)
+    prediction_id = _save_prediction(db, current_user, "regulatory_change_diff", result)
+    db.commit()
+    return {"status": "success", "prediction_id": prediction_id, **result}
+
+
+@router.get("/intelligence/compliance-risk-heatmap")
+def intelligence_compliance_risk_heatmap(
+    year: int | None = None,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_taxpayer),
+):
+    dataset = _load_intelligence_dataset(db, current_user, year)
+    result = INTELLIGENCE.compliance_risk_heatmap(dataset)
+    prediction_id = _save_prediction(db, current_user, "compliance_risk_heatmap", result)
+    db.commit()
+    return {"status": "success", "prediction_id": prediction_id, **result}
+
+
+@router.get("/intelligence/tax-calendar-optimization")
+def intelligence_tax_calendar_optimization(
+    year: int | None = None,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_taxpayer),
+):
+    dataset = _load_intelligence_dataset(db, current_user, year)
+    result = INTELLIGENCE.tax_calendar_optimization(dataset)
+    prediction_id = _save_prediction(db, current_user, "tax_calendar_optimization", result)
+    db.commit()
+    return {"status": "success", "prediction_id": prediction_id, **result}
+
+
+@router.get("/intelligence/cohort-analysis")
+def intelligence_cohort_analysis(
+    year: int | None = None,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_taxpayer),
+):
+    dataset = _load_intelligence_dataset(db, current_user, year)
+    result = INTELLIGENCE.cohort_analysis(dataset)
+    prediction_id = _save_prediction(db, current_user, "cohort_analysis", result)
+    db.commit()
+    return {"status": "success", "prediction_id": prediction_id, **result}
+
+
+@router.post("/intelligence/transfer-pricing")
+def intelligence_transfer_pricing(
+    payload: dict[str, Any] = Body(...),
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_taxpayer),
+):
+    """F19: Transfer Pricing Risk Evaluator (Arm's Length Deviation) using Mahalanobis Distance."""
+    dataset = _load_intelligence_dataset(db, current_user, None)
+    if "profile" not in dataset or not dataset["profile"]:
+        dataset["profile"] = {}
+    dataset["profile"]["target_unit_price"] = float(payload.get("target_unit_price") or 95000.0)
+    dataset["profile"]["target_quantity"] = float(payload.get("target_quantity") or 180.0)
+    
+    result = INTELLIGENCE.transfer_pricing_evaluator(dataset)
+    prediction_id = _save_prediction(db, current_user, "transfer_pricing_evaluator", result)
+    db.commit()
+    return {"status": "success", "prediction_id": prediction_id, **result}
+
+
+@router.post("/intelligence/outflow-stress")
+def intelligence_outflow_stress(
+    payload: dict[str, Any] = Body(None),
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_taxpayer),
+):
+    """F20: Tax Outflow GEV Stress Simulator (Extreme Value Theory)."""
+    dataset = _load_intelligence_dataset(db, current_user, None)
+    result = INTELLIGENCE.tax_cash_stress_simulator(dataset)
+    prediction_id = _save_prediction(db, current_user, "tax_cash_stress_simulator", result)
+    db.commit()
+    return {"status": "success", "prediction_id": prediction_id, **result}
+
+
+@router.get("/intelligence/spectral-cascade")
+def intelligence_spectral_cascade(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_taxpayer),
+):
+    """F21: GNN-Simulated Spectral Evasion Cascade and Collusion Analysis."""
+    dataset = _load_intelligence_dataset(db, current_user, None)
+    result = INTELLIGENCE.gnn_spectral_fraud_cascade(dataset)
+    prediction_id = _save_prediction(db, current_user, "gnn_spectral_fraud_cascade", result)
+    db.commit()
+    return {"status": "success", "prediction_id": prediction_id, **result}
+
+
+@router.get("/intelligence/entropy-revenue")
+def intelligence_entropy_revenue(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_taxpayer),
+):
+    """F22: Shannon Entropy Revenue Anomaly — kiểm tra chất lượng dữ liệu doanh thu."""
+    dataset = _load_intelligence_dataset(db, current_user, None)
+    result = INTELLIGENCE.entropy_revenue_anomaly(dataset)
+    prediction_id = _save_prediction(db, current_user, "entropy_revenue_anomaly", result)
+    db.commit()
+    return {"status": "success", "prediction_id": prediction_id, **result}
+
+
+@router.get("/intelligence/hmm-financial-state")
+def intelligence_hmm_financial_state(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_taxpayer),
+):
+    """F23: Hidden Markov Model — cảnh báo sớm trạng thái tài chính."""
+    dataset = _load_intelligence_dataset(db, current_user, None)
+    result = INTELLIGENCE.hmm_financial_state(dataset)
+    prediction_id = _save_prediction(db, current_user, "hmm_financial_state", result)
+    db.commit()
+    return {"status": "success", "prediction_id": prediction_id, **result}
+
+
+@router.get("/intelligence/cusum-change-detection")
+def intelligence_cusum_change_detection(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_taxpayer),
+):
+    """F24: CUSUM Change-Point Detection — phát hiện điểm chuyển đổi doanh thu."""
+    dataset = _load_intelligence_dataset(db, current_user, None)
+    result = INTELLIGENCE.cusum_change_detection(dataset)
+    prediction_id = _save_prediction(db, current_user, "cusum_change_detection", result)
+    db.commit()
+    return {"status": "success", "prediction_id": prediction_id, **result}
+
+
+@router.get("/intelligence/svd-expense-decomposition")
+def intelligence_svd_expense_decomposition(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_taxpayer),
+):
+    """F25: Singular Value Decomposition — phân tích cấu trúc chi phí."""
+    dataset = _load_intelligence_dataset(db, current_user, None)
+    result = INTELLIGENCE.svd_expense_decomposition(dataset)
+    prediction_id = _save_prediction(db, current_user, "svd_expense_decomposition", result)
+    db.commit()
+    return {"status": "success", "prediction_id": prediction_id, **result}
+
+
+@router.get("/intelligence/wavelet-revenue")
+def intelligence_wavelet_revenue(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_taxpayer),
+):
+    """F26: Haar Wavelet Multi-Resolution — tách xu hướng và biến động mùa vụ."""
+    dataset = _load_intelligence_dataset(db, current_user, None)
+    result = INTELLIGENCE.wavelet_revenue_decomposition(dataset)
+    prediction_id = _save_prediction(db, current_user, "wavelet_revenue_decomposition", result)
+    db.commit()
+    return {"status": "success", "prediction_id": prediction_id, **result}
+
+
+@router.get("/intelligence/altman-zscore")
+def intelligence_altman_zscore(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_taxpayer),
+):
+    """F27: Altman Z-Score Bankruptcy Prediction — đánh giá sức khỏe tài chính & khả năng phá sản."""
+    dataset = _load_intelligence_dataset(db, current_user, None)
+    result = INTELLIGENCE.altman_zscore_bankruptcy(dataset)
+    prediction_id = _save_prediction(db, current_user, "altman_zscore_bankruptcy", result)
+    db.commit()
+    return {"status": "success", "prediction_id": prediction_id, **result}
+
+
+@router.get("/intelligence/kmeans-supplier-clustering")
+def intelligence_kmeans_supplier_clustering(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_taxpayer),
+):
+    """F28: K-Means++ Supplier Clustering — phân nhóm rủi ro đối tác/nhà cung cấp."""
+    dataset = _load_intelligence_dataset(db, current_user, None)
+    result = INTELLIGENCE.kmeans_supplier_clustering(dataset)
+    prediction_id = _save_prediction(db, current_user, "kmeans_supplier_clustering", result)
+    db.commit()
+    return {"status": "success", "prediction_id": prediction_id, **result}
+
+
+@router.get("/intelligence/composite-risk-score")
+def intelligence_composite_risk_score(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_taxpayer),
+):
+    """F29: Gradient Boosting Composite Risk — điểm sức khỏe thuế tổng hợp."""
+    dataset = _load_intelligence_dataset(db, current_user, None)
+    result = INTELLIGENCE.composite_risk_score(dataset)
+    prediction_id = _save_prediction(db, current_user, "composite_risk_score", result)
+    db.commit()
+    return {"status": "success", "prediction_id": prediction_id, **result}

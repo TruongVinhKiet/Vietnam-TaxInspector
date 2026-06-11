@@ -235,6 +235,52 @@
                     </div>
 
                 </div>
+
+                <!-- Markov Chain Business State Prediction Panel (F8) -->
+                <div class="bg-white p-6 rounded-xl border border-slate-200 shadow-sm space-y-4">
+                    <div class="flex items-center justify-between">
+                        <div class="flex items-center gap-2">
+                            <span class="material-symbols-outlined text-emerald-500">query_stats</span>
+                            <h4 class="text-xs font-black uppercase tracking-wider text-slate-700">Dự báo chuyển trạng thái kinh doanh (Chuỗi Markov AI)</h4>
+                        </div>
+                        <button onclick="runMarkovChainPrediction()" class="px-3 py-1.5 bg-emerald-500 hover:bg-emerald-600 text-white font-bold rounded-lg text-[10px] uppercase transition-all flex items-center gap-1">
+                            <span class="material-symbols-outlined text-xs">timeline</span> Chạy dự báo Markov
+                        </button>
+                    </div>
+                    <div id="markov-result-container" class="hidden space-y-4 text-xs">
+                        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                            <div class="p-3 bg-slate-50 border border-slate-100 rounded-lg">
+                                <p class="text-[9px] uppercase font-bold text-slate-400">Trạng thái hiện tại (Current State)</p>
+                                <p id="markov-current-state" class="text-base font-black text-slate-800 uppercase mt-1">-</p>
+                            </div>
+                            <div id="markov-steady-state" class="p-3 bg-slate-50 border border-slate-100 rounded-lg col-span-2">
+                                <p class="text-[9px] uppercase font-bold text-slate-400">Trạng thái hội tụ dài hạn (Steady State)</p>
+                                <div id="markov-steady-probs" class="flex gap-4 mt-2"></div>
+                            </div>
+                        </div>
+                        <div class="border border-slate-100 rounded-lg overflow-x-auto">
+                            <table class="w-full text-left border-collapse">
+                                <thead>
+                                    <tr class="bg-slate-100/50 text-slate-400 font-bold uppercase tracking-wider text-[9px] border-b border-slate-200">
+                                        <th class="px-4 py-2">Chu kỳ dự báo</th>
+                                        <th class="px-4 py-2 text-center">Tăng trưởng (Growth)</th>
+                                        <th class="px-4 py-2 text-center">Ổn định (Stable)</th>
+                                        <th class="px-4 py-2 text-center">Suy giảm (Decline)</th>
+                                        <th class="px-4 py-2">Trạng thái kỳ vọng nhất</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="markov-forecast-body" class="divide-y divide-slate-200 text-slate-700"></tbody>
+                            </table>
+                        </div>
+                        <div class="p-3 bg-emerald-50 border border-emerald-100 text-[10px] text-emerald-800 flex items-start gap-1 rounded-lg">
+                            <span class="material-symbols-outlined text-xs mt-0.5">info</span>
+                            <div>
+                                <strong>Đề xuất chiến lược:</strong> <span id="markov-recommendation"></span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
             </div>
         </main>
     </div>
@@ -262,6 +308,10 @@
     </script>
     <script src="../js/business_taxpayer_common.js"></script>
     <script src="../js/business_growth.js"></script>
+    <script src="../js/taxpayer_ai_registry.js"></script>
+    <script src="../js/taxpayer_ai_client.js"></script>
+    <script src="../js/taxpayer_ai_panels_core.js"></script>
+    <script src="../js/taxpayer_ai_panels_advanced.js"></script>
     <script src="../js/business_intelligence.js"></script>
 </body>
 </html>

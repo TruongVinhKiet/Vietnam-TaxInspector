@@ -118,7 +118,81 @@
         URL.revokeObjectURL(url);
     }
 
+    const navLabels = {
+        "business_dashboard.html": ["dashboard", "Tổng quan", "Tổng quan hộ kinh doanh"],
+        "business_registration.html": ["app_registration", "Nhận diện & đăng ký", "Nhận diện và đăng ký thuế"],
+        "business_calculator.html": ["calculate", "Tính thuế tự động", "Tính toán thuế tự động"],
+        "business_calendar.html": ["calendar_month", "Lịch & deadline", "Lịch trình và hạn nộp thuế"],
+        "business_invoices.html": ["receipt_long", "Hóa đơn điện tử", "Quản lý hóa đơn điện tử"],
+        "business_filing.html": ["edit_document", "Kê khai & nộp thuế", "Kê khai và nộp thuế"],
+        "business_debts.html": ["account_balance_wallet", "Nghĩa vụ & nợ thuế", "Tra cứu nghĩa vụ và nợ thuế"],
+        "business_legal.html": ["chat", "Tra cứu & AI hỏi đáp", "Tra cứu pháp luật và hỏi đáp AI"],
+        "business_growth.html": ["published_with_changes", "Thay đổi mô hình", "Phát triển và thay đổi mô hình"],
+        "business_accounting.html": ["menu_book", "Kế toán & sổ sách", "Kế toán và sổ sách"],
+        "business_expenses.html": ["payments", "Chi phí được trừ", "Quản lý chi phí được trừ"],
+        "business_claims.html": ["balance", "Quyền lợi & khiếu nại", "Bảo vệ quyền lợi và khiếu nại"],
+        "business_profile.html": ["person", "Hồ sơ", "Hồ sơ người nộp thuế"],
+    };
+
+    function currentPage() {
+        return window.location.pathname.split("/").pop() || "business_dashboard.html";
+    }
+
+    function enhanceTaxpayerShell() {
+        if (!currentPage().startsWith("business_")) return;
+        const sidebar = document.querySelector("aside");
+        const nav = document.getElementById("sidebar-nav");
+        if (!sidebar || !nav) return;
+
+        document.body.classList.add("taxpayer-shell-v2");
+        const subtitle = document.getElementById("sidebar-subtitle");
+        if (subtitle) subtitle.textContent = "Người nộp thuế";
+
+        nav.querySelectorAll("a[data-page]").forEach((link) => {
+            const page = link.getAttribute("data-page");
+            const item = navLabels[page];
+            if (!item) return;
+            const [icon, label, title] = item;
+            link.setAttribute("data-title", title);
+            const iconEl = link.querySelector(".material-symbols-outlined");
+            const labelEl = link.querySelector("span:last-child");
+            if (iconEl) iconEl.textContent = icon;
+            if (labelEl) labelEl.textContent = label;
+        });
+
+        const sectionLabel = nav.querySelector("div");
+        if (sectionLabel) sectionLabel.textContent = "Nhóm nghiệp vụ";
+
+        const currentMeta = navLabels[currentPage()];
+        if (currentMeta) document.title = `TaxInspector - ${currentMeta[2]}`;
+
+        if (!document.getElementById("taxpayer-shell-toggle")) {
+            const toggle = document.createElement("button");
+            toggle.id = "taxpayer-shell-toggle";
+            toggle.type = "button";
+            toggle.className = "taxpayer-shell-toggle";
+            toggle.setAttribute("aria-label", "Mở menu taxpayer");
+            toggle.innerHTML = '<span class="material-symbols-outlined">menu</span>';
+            document.body.appendChild(toggle);
+
+            const backdrop = document.createElement("button");
+            backdrop.id = "taxpayer-shell-backdrop";
+            backdrop.type = "button";
+            backdrop.className = "taxpayer-shell-backdrop";
+            backdrop.setAttribute("aria-label", "Đóng menu taxpayer");
+            document.body.appendChild(backdrop);
+
+            const close = () => document.body.classList.remove("taxpayer-sidebar-open");
+            toggle.addEventListener("click", () => document.body.classList.toggle("taxpayer-sidebar-open"));
+            backdrop.addEventListener("click", close);
+            nav.addEventListener("click", (event) => {
+                if (event.target.closest("a")) close();
+            });
+        }
+    }
+
     async function boot(callback) {
+        enhanceTaxpayerShell();
         try {
             await api("/init");
         } catch (e) {
@@ -128,7 +202,7 @@
             await callback();
         } catch (e) {
             console.error(e);
-            toast(e.message || "Khong the tai du lieu.", "error");
+            toast(e.message || "Không thể tải dữ liệu.", "error");
         }
     }
 
@@ -145,6 +219,13 @@
         readValue,
         downloadText,
         escapeHtml,
+        enhanceTaxpayerShell,
         boot,
     };
+
+    if (document.readyState === "loading") {
+        document.addEventListener("DOMContentLoaded", enhanceTaxpayerShell, { once: true });
+    } else {
+        enhanceTaxpayerShell();
+    }
 })();

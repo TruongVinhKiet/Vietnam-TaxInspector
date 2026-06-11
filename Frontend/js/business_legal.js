@@ -23,7 +23,7 @@
         try {
             const data = await UI.post("/legal/chat", { message });
             const citations = (data.citations || []).map((item) => `<a class="text-emerald-700 font-bold underline" target="_blank" href="${UI.escapeHtml(item.source_url)}">${UI.escapeHtml(item.key)}</a>`).join(" · ");
-            addMessage("ai", `${UI.escapeHtml(data.answer)}${citations ? `<div class="mt-2 text-[10px] text-slate-500">Nguon: ${citations}</div>` : ""}`);
+            addMessage("ai", `${UI.escapeHtml(data.answer)}${citations ? `<div class="mt-2 text-[10px] text-slate-500">Nguồn: ${citations}</div>` : ""}`);
         } catch (e) {
             addMessage("ai", `<span class="text-rose-600">${UI.escapeHtml(e.message)}</span>`);
         }
@@ -42,10 +42,10 @@
             UI.get("/legal/documents"),
             UI.get("/legal/hkd-vs-llc"),
         ]);
-        UI.panel("legal-rate-lookup-panel", "Tra cuu ty le thue theo nganh nghe", "percent", `
+        UI.panel("legal-rate-lookup-panel", "Tra cứu tỷ lệ thuế theo ngành nghề", "percent", `
             <div class="flex gap-2">
-                <input id="legal-rate-query" class="flex-1 rounded-lg border-slate-200 text-xs" placeholder="Nhap nganh nghe, ISIC hoac mat hang...">
-                <button id="legal-rate-btn" class="px-3 py-2 rounded-lg bg-[#002147] text-white text-[10px] font-bold">Tra cuu</button>
+                <input id="legal-rate-query" class="flex-1 rounded-lg border-slate-200 text-xs" placeholder="Nhập ngành nghề, ISIC hoặc mặt hàng...">
+                <button id="legal-rate-btn" class="px-3 py-2 rounded-lg bg-[#002147] text-white text-[10px] font-bold">Tra cứu</button>
             </div>
             <div id="legal-rate-results" class="mt-3 grid grid-cols-1 md:grid-cols-2 gap-2">
                 ${rates.rates.slice(0, 4).map(rateCard).join("")}
@@ -54,9 +54,9 @@
         document.getElementById("legal-rate-btn").onclick = async () => {
             const q = UI.readValue("legal-rate-query");
             const data = await UI.get(`/legal/rates?query=${encodeURIComponent(q)}`);
-            document.getElementById("legal-rate-results").innerHTML = data.rates.map(rateCard).join("") || `<p class="text-slate-400">Khong tim thay.</p>`;
+            document.getElementById("legal-rate-results").innerHTML = data.rates.map(rateCard).join("") || `<p class="text-slate-400">Không tìm thấy.</p>`;
         };
-        UI.panel("legal-updates-panel", "Van ban moi dang theo doi", "newspaper", `
+        UI.panel("legal-updates-panel", "Văn bản mới đang theo dõi", "newspaper", `
             <div class="space-y-2">
                 ${(docs.documents || []).slice(0, 6).map((doc) => `
                     <a target="_blank" href="${UI.escapeHtml(doc.source_url)}" class="block p-3 rounded-lg bg-slate-50 border border-slate-200 hover:bg-slate-100">
@@ -66,18 +66,18 @@
                 `).join("")}
             </div>
         `);
-        UI.panel("legal-hkd-llc-panel", "So sanh HKD va Cong ty TNHH", "compare_arrows", `
+        UI.panel("legal-hkd-llc-panel", "So sánh HKD và Công ty TNHH", "compare_arrows", `
             <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
                 <div class="p-3 rounded-lg bg-slate-50 border border-slate-200">
-                    <p class="text-[9px] uppercase font-bold text-slate-400">Thue HKD uoc tinh</p>
+                    <p class="text-[9px] uppercase font-bold text-slate-400">Thuế HKD ước tính</p>
                     <p class="font-black text-slate-800">${UI.fmtVnd(comparison.comparison.hkd_estimated_tax)}</p>
                 </div>
                 <div class="p-3 rounded-lg bg-slate-50 border border-slate-200">
-                    <p class="text-[9px] uppercase font-bold text-slate-400">Thue TNHH uoc tinh</p>
+                    <p class="text-[9px] uppercase font-bold text-slate-400">Thuế TNHH ước tính</p>
                     <p class="font-black text-slate-800">${UI.fmtVnd(comparison.comparison.llc_total_tax)}</p>
                 </div>
                 <div class="p-3 rounded-lg bg-slate-50 border border-slate-200">
-                    <p class="text-[9px] uppercase font-bold text-slate-400">Loi nhuan</p>
+                    <p class="text-[9px] uppercase font-bold text-slate-400">Lợi nhuận</p>
                     <p class="font-black text-slate-800">${UI.fmtVnd(comparison.comparison.profit)}</p>
                 </div>
             </div>
@@ -92,6 +92,46 @@
             </div>
         `;
     }
+
+    window.startForensicDebate = async function startForensicDebate() {
+        const topic = document.getElementById("debate-topic").value;
+        const revenue = Number(document.getElementById("debate-revenue").value) || 0;
+        const expenses = Number(document.getElementById("debate-expenses").value) || 0;
+
+        try {
+            const data = await UI.post("/intelligence/debate", { topic, revenue, expenses });
+            
+            document.getElementById("debate-hkd-points").innerHTML = (data.hkd_points || []).map(p => `<li>${UI.escapeHtml(p)}</li>`).join("");
+            document.getElementById("debate-llc-points").innerHTML = (data.llc_points || []).map(p => `<li>${UI.escapeHtml(p)}</li>`).join("");
+
+            const dialogueEl = document.getElementById("debate-dialogue");
+            dialogueEl.innerHTML = (data.rounds || []).map((r, i) => {
+                const isLeft = i % 2 === 0;
+                return `
+                    <div class="flex gap-2.5 items-start ${isLeft ? '' : 'flex-row-reverse text-right'}">
+                        <div class="w-8 h-8 rounded-full ${isLeft ? 'bg-rose-100 text-rose-700' : 'bg-emerald-100 text-emerald-700'} flex items-center justify-center font-bold flex-shrink-0">
+                            <span class="material-symbols-outlined text-sm">${UI.escapeHtml(r.avatar || 'smart_toy')}</span>
+                        </div>
+                        <div class="max-w-[75%] space-y-1">
+                            <div class="text-[9px] font-black text-slate-400">${UI.escapeHtml(r.speaker)} (${UI.escapeHtml(r.role)})</div>
+                            <div class="p-2.5 rounded-lg ${isLeft ? 'bg-rose-50/50 text-rose-950 rounded-tl-none border border-rose-100' : 'bg-emerald-50/50 text-emerald-950 rounded-tr-none border border-emerald-100'} text-[11px] leading-relaxed">
+                                ${UI.escapeHtml(r.statement)}
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }).join("");
+
+            document.getElementById("debate-winner").textContent = data.winner;
+            document.getElementById("debate-verdict").textContent = data.verdict;
+            document.getElementById("debate-gauge-bar").style.width = `${data.gauge_pct}%`;
+
+            document.getElementById("debate-board").classList.remove("hidden");
+            dialogueEl.scrollTop = dialogueEl.scrollHeight;
+        } catch (e) {
+            UI.toast(e.message, "error");
+        }
+    };
 
     document.addEventListener("DOMContentLoaded", () => UI.boot(loadLegalPanels));
 })();

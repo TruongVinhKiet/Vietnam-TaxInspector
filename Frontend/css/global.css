@@ -110,6 +110,83 @@ body.page-transition,
     animation: fadeSlideUp var(--motion-duration-medium) var(--motion-ease-emphasis) both;
 }
 
+/* Card premium hover transitions and shadows */
+section[id*="-panel"],
+section[id^="taxpayer-ai-"] {
+    transition: transform var(--motion-duration-fast) var(--motion-ease-emphasis),
+                box-shadow var(--motion-duration-fast) var(--motion-ease-emphasis),
+                border-color var(--motion-duration-fast) var(--motion-ease-emphasis);
+    will-change: transform, box-shadow;
+}
+
+section[id*="-panel"]:hover,
+section[id^="taxpayer-ai-"]:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 20px 25px -5px rgb(0 0 0 / 0.1), 0 8px 10px -6px rgb(0 0 0 / 0.1);
+    border-color: rgb(16 185 129 / 0.3); /* Subtle emerald border highlight on hover */
+}
+
+body.taxpayer-shell-v2 section[id^="taxpayer-ai-"]:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 10px 20px -12px rgb(15 23 42 / 0.24);
+}
+
+.taxpayer-shell-toggle,
+.taxpayer-shell-backdrop {
+    display: none;
+}
+
+.taxpayer-shell-toggle {
+    position: fixed;
+    left: 14px;
+    top: 14px;
+    z-index: 80;
+    width: 42px;
+    height: 42px;
+    border-radius: 10px;
+    border: 1px solid rgb(226 232 240);
+    background: white;
+    color: rgb(15 23 42);
+    box-shadow: 0 10px 24px -16px rgb(15 23 42 / 0.5);
+}
+
+.taxpayer-shell-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 45;
+    background: rgb(15 23 42 / 0.48);
+}
+
+@media (max-width: 1023px) {
+    body.taxpayer-shell-v2 .taxpayer-shell-toggle {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+    }
+
+    body.taxpayer-shell-v2 aside {
+        transform: translateX(-105%);
+        transition: transform 180ms var(--motion-ease-emphasis);
+    }
+
+    body.taxpayer-shell-v2.taxpayer-sidebar-open aside {
+        transform: translateX(0);
+    }
+
+    body.taxpayer-shell-v2.taxpayer-sidebar-open .taxpayer-shell-backdrop {
+        display: block;
+    }
+
+    body.taxpayer-shell-v2 main,
+    body.taxpayer-shell-v2 header {
+        margin-left: 0 !important;
+    }
+
+    body.taxpayer-shell-v2 main {
+        padding-top: 68px;
+    }
+}
+
 @media (prefers-reduced-motion: reduce) {
     html {
         scroll-behavior: auto !important;
